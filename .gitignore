@@ -1,0 +1,21 @@
+# Rust
+target/
+
+# Node / Bun
+node_modules/
+
+# Data
+data/
+investor/
+
+# Generated web assets (too large for git; run `bun run convert` to regenerate)
+web/*.arrow
+web/*.parquet
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# macOS
+.DS_Store

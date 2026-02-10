@@ -1,0 +1,12 @@
+[package]
+name = "titlefetch"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+csv = "1"
+futures-util = "0.3"
+reqwest = { version = "0.12", default-features = false, features = ["brotli", "deflate", "gzip", "hickory-dns", "http2", "rustls-tls", "stream"] }
+tokio = { version = "1", features = ["full"] }

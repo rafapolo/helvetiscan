@@ -1,0 +1,20 @@
+{
+  "name": "helvetiscan",
+  "version": "0.1.0",
+  "description": "Bun rewrite of export_cosmograph.py",
+  "type": "module",
+  "bin": {
+    "export_cosmograph": "./export_cosmograph.js"
+  },
+  "scripts": {
+    "convert": "bun src/process/csv-to-arrow.js",
+    "serve": "bun web/serve.js"
+  },
+  "devDependencies": {
+    "apache-arrow": "^21.1.0",
+    "playwright": "^1.58.2"
+  },
+  "dependencies": {
+    "csv-parse": "^6.1.0"
+  }
+}
