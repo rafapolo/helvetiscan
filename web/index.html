@@ -1,0 +1,689 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>helvetiscan</title>
+        <link rel="icon" href="data:," />
+        <link rel="preconnect" href="https://esm.sh" crossorigin />
+        <style>
+            :root {
+                --bg0: #0a0e27;
+                --bg1: #141a3a;
+                --text: rgba(255, 255, 255, 0.92);
+                --muted: rgba(255, 255, 255, 0.68);
+                --hairline: rgba(255, 255, 255, 0.1);
+                --glass: rgba(10, 14, 39, 0.55);
+                --shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+                --blue: #4a90e2;
+                --green: #2ecc71;
+                --red: #e74c3c;
+            }
+
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+
+            html,
+            body {
+                font-family:
+                    ui-sans-serif,
+                    system-ui,
+                    -apple-system,
+                    BlinkMacSystemFont,
+                    "Segoe UI",
+                    Roboto,
+                    sans-serif;
+                background: var(--bg0);
+                color: var(--text);
+                height: 100vh;
+                overflow: hidden;
+            }
+
+            h1 {
+                position: fixed;
+                top: calc(14px + env(safe-area-inset-top, 0px));
+                left: calc(16px + env(safe-area-inset-left, 0px));
+                z-index: 10;
+                font-size: 13px;
+                font-weight: 650;
+                letter-spacing: 0.3px;
+                color: var(--text);
+                padding: 8px 10px;
+                border-radius: 999px;
+                border: 1px solid var(--hairline);
+                background: var(--glass);
+                box-shadow: var(--shadow);
+                backdrop-filter: blur(10px);
+                -webkit-backdrop-filter: blur(10px);
+                pointer-events: none;
+            }
+
+            #status {
+                position: fixed;
+                top: calc(60px + env(safe-area-inset-top, 0px));
+                left: calc(16px + env(safe-area-inset-left, 0px));
+                z-index: 10;
+                display: inline-flex;
+                align-items: center;
+                gap: 8px;
+                padding: 7px 10px;
+                border-radius: 999px;
+                border: 1px solid var(--hairline);
+                background: var(--glass);
+                box-shadow: var(--shadow);
+                backdrop-filter: blur(10px);
+                -webkit-backdrop-filter: blur(10px);
+                font-size: 12px;
+                color: var(--muted);
+                pointer-events: none;
+            }
+
+            #selectionStatus {
+                position: fixed;
+                top: calc(94px + env(safe-area-inset-top, 0px));
+                left: calc(16px + env(safe-area-inset-left, 0px));
+                z-index: 10;
+                display: none;
+                max-width: min(820px, calc(100vw - 32px));
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                font-size: 12px;
+                font-weight: 600;
+                color: rgba(235, 248, 255, 0.96);
+                background: rgba(74, 144, 226, 0.18);
+                border: 1px solid rgba(74, 144, 226, 0.32);
+                border-radius: 999px;
+                padding: 6px 10px;
+                box-shadow: var(--shadow);
+                backdrop-filter: blur(10px);
+                -webkit-backdrop-filter: blur(10px);
+                pointer-events: none;
+            }
+
+            #controls {
+                position: fixed;
+                top: calc(14px + env(safe-area-inset-top, 0px));
+                right: calc(16px + env(safe-area-inset-right, 0px));
+                z-index: 10;
+                align-items: center;
+                display: inline-flex;
+                padding: 8px 10px;
+                border-radius: 999px;
+                border: 1px solid var(--hairline);
+                background: var(--glass);
+                box-shadow: var(--shadow);
+                backdrop-filter: blur(10px);
+                -webkit-backdrop-filter: blur(10px);
+                font-size: 12px;
+                color: var(--muted);
+                user-select: none;
+                pointer-events: auto;
+            }
+
+            #controls label {
+                display: inline-flex;
+                gap: 10px;
+                align-items: center;
+                cursor: pointer;
+            }
+
+            #controls input[type="checkbox"] {
+                appearance: none;
+                -webkit-appearance: none;
+                width: 34px;
+                height: 20px;
+                border-radius: 999px;
+                background: rgba(255, 255, 255, 0.1);
+                border: 1px solid rgba(255, 255, 255, 0.14);
+                position: relative;
+                outline: none;
+                cursor: pointer;
+                transition:
+                    background 160ms ease,
+                    border-color 160ms ease;
+            }
+
+            #controls input[type="checkbox"]::before {
+                content: "";
+                position: absolute;
+                top: 50%;
+                left: 2px;
+                transform: translateY(-50%);
+                width: 16px;
+                height: 16px;
+                border-radius: 999px;
+                background: rgba(255, 255, 255, 0.86);
+                box-shadow: 0 8px 18px rgba(0, 0, 0, 0.35);
+                transition:
+                    left 160ms ease,
+                    background 160ms ease;
+            }
+
+            #controls input[type="checkbox"]:checked {
+                background: rgba(74, 144, 226, 0.45);
+                border-color: rgba(74, 144, 226, 0.55);
+            }
+
+            #controls input[type="checkbox"]:checked::before {
+                left: 16px;
+                background: rgba(235, 248, 255, 0.95);
+            }
+
+            #status.loading {
+                color: rgba(200, 225, 255, 0.92);
+                border-color: rgba(74, 144, 226, 0.22);
+            }
+
+            #status.error {
+                color: rgba(255, 220, 220, 0.92);
+                border-color: rgba(231, 76, 60, 0.22);
+            }
+
+            #status.success {
+                color: rgba(220, 255, 235, 0.92);
+                border-color: rgba(46, 204, 113, 0.22);
+            }
+
+            #cosmograph {
+                position: absolute;
+                inset: 0;
+                background:
+                    radial-gradient(
+                        1200px 800px at 18% 12%,
+                        rgba(74, 144, 226, 0.12),
+                        rgba(0, 0, 0, 0) 55%
+                    ),
+                    radial-gradient(
+                        1000px 700px at 88% 22%,
+                        rgba(46, 204, 113, 0.08),
+                        rgba(0, 0, 0, 0) 60%
+                    ),
+                    linear-gradient(135deg, var(--bg0) 0%, var(--bg1) 100%);
+                touch-action: none;
+                overscroll-behavior: none;
+                contain: layout paint size;
+            }
+
+            /* Cosmograph mounts a canvas inside the container; keep it pixel-aligned and fill the viewport. */
+            #cosmograph canvas {
+                display: block;
+                width: 100%;
+                height: 100%;
+            }
+        </style>
+    </head>
+    <body>
+        <h1>Analyses of all Swiss domains and nameservers</h1>
+        <div id="controls">
+            <label>
+                <input type="checkbox" id="labelsToggle" checked />
+                Show labels
+            </label>
+        </div>
+        <div id="status"></div>
+        <div id="selectionStatus"></div>
+        <div id="cosmograph"></div>
+
+        <script type="module">
+            import { Cosmograph } from "https://esm.sh/@cosmograph/cosmograph@2.1.0";
+            import {
+                tableFromIPC,
+                tableToIPC,
+                tableFromArrays,
+            } from "https://esm.sh/apache-arrow@21.1.0";
+
+            const container = document.getElementById("cosmograph");
+            const status = document.getElementById("status");
+            const selectionStatus = document.getElementById("selectionStatus");
+            const labelsToggle = document.getElementById("labelsToggle");
+
+            let cosmograph = null;
+            let currentConfig = null;
+            let isLoading = false;
+
+            const urlParams = new URLSearchParams(location.search);
+            // Force-layout controls (on by default; disable with ?sim=0)
+            // Tip: keep maxPoints modest when sim=1 to avoid WebGL context loss.
+            const simEnabled = (urlParams.get("sim") || "1").trim() !== "0";
+            const simSteps = Number(urlParams.get("steps") || "0"); // 0 = run continuously
+            // More dispersion by default when simulation is enabled.
+            const simulationRepulsion = Number(
+                urlParams.get("repulsion") || "1.9",
+            );
+            const simulationLinkDistance = Number(
+                urlParams.get("linkDistance") || "85",
+            );
+            const simulationLinkSpring = Number(
+                urlParams.get("linkSpring") || "0.12",
+            );
+            const simulationFriction = Number(
+                urlParams.get("friction") || "0.62",
+            );
+            const spaceSize = Number(urlParams.get("spaceSize") || "16384");
+
+            // Default behavior: render the full dataset unless the user sets ?maxPoints=...
+            const maxPointsParamRaw = urlParams.get("maxPoints");
+            const maxPointsParam = (maxPointsParamRaw || "")
+                .trim()
+                .toLowerCase();
+            const defaultMaxPoints = 25000;
+            const maxPoints = (() => {
+                if (maxPointsParamRaw == null || maxPointsParam === "")
+                    return defaultMaxPoints;
+                if (maxPointsParam === "all" || maxPointsParam === "0")
+                    return 0;
+                const n = Number(maxPointsParam);
+                return Number.isFinite(n) && n >= 0 ? n : defaultMaxPoints;
+            })();
+
+
+            let baseStatusText = "";
+            let labelByIdx = null; // Array<string>, index = idx
+            let labelsEnabled = (urlParams.get("labels") || "").trim() !== "0";
+
+            labelsToggle.checked = labelsEnabled;
+            labelsToggle.addEventListener("change", async () => {
+                labelsEnabled = !!labelsToggle.checked;
+                // Cosmograph's setConfig behaves like a replace, not a merge. Always keep points/links.
+                if (!cosmograph || !currentConfig || isLoading) return;
+                try {
+                    currentConfig = {
+                        ...currentConfig,
+                        ...getLabelsConfig(labelsEnabled),
+                    };
+                    await cosmograph.setConfig(currentConfig);
+                } catch (e) {
+                    console.warn("Failed to toggle labels:", e);
+                }
+            });
+
+            async function fetchBytes(url) {
+                const res = await fetch(url);
+                if (!res.ok)
+                    throw new Error(`Failed to fetch ${url} (${res.status})`);
+                const buf = await res.arrayBuffer();
+                return new Uint8Array(buf);
+            }
+
+            function getLabelsConfig(enabled) {
+                if (!enabled) {
+                    return {
+                        showLabels: false,
+                        showHoveredPointLabel: false,
+                        showFocusedPointLabel: false,
+                        showTopLabels: false,
+                        showDynamicLabels: false,
+                        showUnselectedPointLabels: false,
+                        showSelectedLabels: false,
+                    };
+                }
+
+                // "Show labels" in a scalable way: show a limited amount of top + dynamic labels,
+                // and always allow hover + focused label.
+                return {
+                    pointLabelBy: "label",
+                    pointLabelWeightBy: "degree",
+                    showLabels: true,
+                    showHoveredPointLabel: true,
+                    showFocusedPointLabel: true,
+                    showTopLabels: true,
+                    showTopLabelsLimit: 40,
+                    showDynamicLabels: true,
+                    showDynamicLabelsLimit: 40,
+                    showUnselectedPointLabels: true,
+                    showSelectedLabels: true,
+                    selectedPointLabelsLimit: 200,
+                };
+            }
+
+            function setStatus(text, klass) {
+                status.textContent = text;
+                status.className = klass || "";
+            }
+
+            function setSelectionStatus(text) {
+                if (!text) {
+                    selectionStatus.textContent = "";
+                    selectionStatus.style.display = "none";
+                    return;
+                }
+                selectionStatus.textContent = text;
+                selectionStatus.style.display = "inline-flex";
+            }
+
+            function maybeFitView() {
+                // Cosmograph API surface differs a bit across versions/builds; feature-detect.
+                const cg = cosmograph;
+                if (!cg) return;
+                const candidates = [
+                    "fitView",
+                    "zoomToFit",
+                    "fitToScreen",
+                    "fitToViewport",
+                ];
+                for (const m of candidates) {
+                    try {
+                        if (typeof cg[m] === "function") {
+                            cg[m]();
+                            return;
+                        }
+                    } catch {
+                        // ignore
+                    }
+                }
+            }
+
+            async function waitForStatsReady(deadlineMs = 120_000) {
+                const start = Date.now();
+                while (Date.now() - start < deadlineMs) {
+                    const st = cosmograph?.stats;
+                    if (st && (st.pointsCount > 0 || st.linksCount > 0))
+                        return st;
+                    await new Promise((r) => setTimeout(r, 200));
+                }
+                return cosmograph?.stats;
+            }
+
+            function hasCols(cols, required) {
+                const s = new Set(cols);
+                return required.every((c) => s.has(c));
+            }
+
+            function getArrowColumns(bytes) {
+                try {
+                    const t = tableFromIPC(bytes);
+                    return t?.schema?.fields?.map((f) => f.name) ?? [];
+                } catch (e) {
+                    return [`<failed to parse arrow: ${e?.message || e}>`];
+                }
+            }
+
+            async function makeCompactIpc(nodesBytes, edgesBytes) {
+                const nodesTable = tableFromIPC(nodesBytes);
+                const edgesTable = tableFromIPC(edgesBytes);
+
+                const nodeCols = nodesTable.schema.fields.map((f) => f.name);
+                const edgeCols = edgesTable.schema.fields.map((f) => f.name);
+
+                if (!hasCols(nodeCols, ["idx"])) {
+                    throw new Error(
+                        `nodes.arrow missing required column "idx" (found: ${nodeCols.join(", ")})`,
+                    );
+                }
+                if (!hasCols(edgeCols, ["sourceidx", "targetidx"])) {
+                    throw new Error(
+                        `edges.arrow missing required columns "sourceidx"/"targetidx" (found: ${edgeCols.join(", ")})`,
+                    );
+                }
+
+                const n = nodesTable.numRows;
+                const cap = maxPoints > 0 ? Math.min(maxPoints, n) : n;
+
+                const idxVec = nodesTable.getChild("idx");
+                const idxArr = idxVec.toArray();
+                const idxSub = idxArr.subarray(0, cap);
+
+                const degrees = new Int32Array(cap);
+                // Cosmograph labels assume point ids are strings (they use .startsWith("cluster-") etc).
+                // Keep a compact, stable string id to avoid the labels renderer crashing.
+                const ids = new Array(cap);
+                for (let i = 0; i < cap; i++) ids[i] = String(idxSub[i]);
+                const labelVec =
+                    nodesTable.getChild("label") || nodesTable.getChild("id");
+                const labels = new Array(cap);
+                if (labelVec) {
+                    for (let i = 0; i < cap; i++)
+                        labels[i] = String(labelVec.get(i) ?? "");
+                } else {
+                    for (let i = 0; i < cap; i++) labels[i] = String(idxSub[i]);
+                }
+                // Filter edges by idx bounds.
+                // Avoid per-edge JS array pushes: count first, allocate typed arrays, then fill.
+                const sidx = edgesTable.getChild("sourceidx");
+                const tidx = edgesTable.getChild("targetidx");
+                const srcAll = sidx.toArray();
+                const tgtAll = tidx.toArray();
+
+                let keptEdges = edgesTable.numRows;
+                if (maxPoints > 0) {
+                    keptEdges = 0;
+                    for (let i = 0; i < edgesTable.numRows; i++) {
+                        const s = srcAll[i];
+                        const t = tgtAll[i];
+                        if (s < cap && t < cap) keptEdges++;
+                    }
+                }
+
+                const srcOut = new Int32Array(keptEdges);
+                const tgtOut = new Int32Array(keptEdges);
+                for (let i = 0, j = 0; i < edgesTable.numRows; i++) {
+                    const s = srcAll[i];
+                    const t = tgtAll[i];
+                    if (maxPoints > 0 && (s >= cap || t >= cap)) continue;
+                    srcOut[j] = s;
+                    tgtOut[j] = t;
+                    degrees[s] += 1;
+                    degrees[t] += 1;
+                    j++;
+                }
+
+                // Color rule:
+                // - orange for degree > 100
+                // - pink for degree > 2
+                // - blue otherwise
+                const hub = new Int8Array(cap);
+                for (let i = 0; i < cap; i++) {
+                    if (degrees[i] > 100) hub[i] = 2;
+                    else if (degrees[i] > 2) hub[i] = 1;
+                    else hub[i] = 0;
+                }
+
+                // Keep only compact columns needed by the renderer.
+                const nodesCompact = tableFromArrays({
+                    id: ids,
+                    idx: idxSub,
+                    degree: degrees,
+                    hub,
+                    label: labels,
+                });
+
+                const edgesCompact = tableFromArrays({
+                    sourceidx: srcOut,
+                    targetidx: tgtOut,
+                });
+
+                return {
+                    nodesIpc: await tableToIPC(nodesCompact, "file"),
+                    edgesIpc: await tableToIPC(edgesCompact, "file"),
+                    labels,
+                    cap,
+                    originalNodes: n,
+                    originalEdges: edgesTable.numRows,
+                    filteredEdges: edgesCompact.numRows,
+                };
+            }
+
+            async function loadDefaultGraph() {
+                try {
+                    isLoading = true;
+                    setStatus(
+                        maxPoints > 0
+                            ? `Loading (maxPoints=${maxPoints.toLocaleString()})...`
+                            : "Loading (maxPoints=all)...",
+                        "loading",
+                    );
+
+                    const [nodesBytes, edgesBytes] = await Promise.all([
+                        fetchBytes("./nodes.arrow"),
+                        fetchBytes("./edges.arrow"),
+                    ]);
+
+                    // Reduce memory pressure by dropping string columns and (optionally) capping points.
+                    const {
+                        nodesIpc,
+                        edgesIpc,
+                        labels,
+                        cap,
+                        originalNodes,
+                        originalEdges,
+                        filteredEdges,
+                    } = await makeCompactIpc(nodesBytes, edgesBytes);
+
+                    labelByIdx = labels;
+                    setSelectionStatus("");
+
+                    const enableSimulation = simEnabled;
+                    // Passing a fixed spaceSize makes the layout feel like it's inside a box.
+                    // Only set it when we actually run a simulation (or if user explicitly requests it).
+                    const shouldSetSpaceSize =
+                        enableSimulation || urlParams.has("spaceSize");
+
+                    const config = {
+                        disableLogging: true,
+                        statusIndicatorMode: false,
+                        // If sim=1: run simulation as requested.
+                        // Else: optionally run a short auto-settle burst after load for small-ish graphs.
+                        enableSimulation,
+                        simulationRepulsion,
+                        simulationLinkDistance,
+                        simulationLinkSpring,
+                        simulationFriction,
+                        ...(shouldSetSpaceSize ? { spaceSize } : {}),
+                        ...getLabelsConfig(labelsEnabled),
+                        // Click a point to select it + its neighbors; click empty canvas to clear.
+                        selectPointOnClick: true,
+                        resetSelectionOnEmptyCanvasClick: true,
+                        focusPointOnClick: true,
+                        onPointsFiltered: (
+                            _filteredPoints,
+                            selectedPointIndices,
+                        ) => {
+                            // When selecting a point with connected points, selectedPointIndices contains:
+                            // [clickedPoint, ...neighbors]. Relations ~= neighbors count.
+                            if (
+                                !Array.isArray(selectedPointIndices) ||
+                                selectedPointIndices.length === 0
+                            ) {
+                                setSelectionStatus("");
+                                return;
+                            }
+
+                            const clicked = selectedPointIndices[0];
+                            const relations = Math.max(
+                                0,
+                                selectedPointIndices.length - 1,
+                            );
+                            const name =
+                                labelByIdx &&
+                                Number.isInteger(clicked) &&
+                                clicked >= 0 &&
+                                clicked < labelByIdx.length
+                                    ? labelByIdx[clicked]
+                                    : String(clicked);
+
+                            setSelectionStatus(
+                                `${name}  •  ${relations.toLocaleString()} relations`,
+                            );
+                        },
+                        points: nodesIpc,
+                        links: edgesIpc,
+                        pointIdBy: "id",
+                        pointIndexBy: "idx",
+                        // Keep both id + index mappings for links; Cosmograph expects source/target columns,
+                        // and uses *IndexBy for fast joins/filters.
+                        linkSourceBy: "sourceidx",
+                        linkSourceIndexBy: "sourceidx",
+                        linkTargetBy: "targetidx",
+                        linkTargetIndexBy: "targetidx",
+                        pointSizeBy: "degree",
+                        // Size by number of connections, constrained to a tight visual range.
+                        pointSizeRange: [1, 6],
+                        pointLabelBy: "label",
+                        // Blue by default; pink for degree > 2, orange for degree > 100.
+                        pointColorBy: "hub",
+                        pointColorStrategy: "map",
+                        pointColorByMap: {
+                            0: "#2d6cdf",
+                            1: "#ff4fa3",
+                            2: "#ff8c00",
+                        },
+                    };
+                    currentConfig = config;
+
+                    if (!cosmograph) {
+                        cosmograph = new Cosmograph(container, config);
+                    } else {
+                        await cosmograph.reset(false);
+                    }
+
+                    // Ensure config application is awaited (constructor kicks off async work).
+                    await cosmograph.setConfig(config);
+
+                    // Wait for upload + graph rebuild.
+                    await cosmograph.dataUploaded();
+                    const stats = await waitForStatsReady();
+
+                    if (!stats.pointsCount || !stats.linksCount) {
+                        const nodeCols = getArrowColumns(nodesBytes);
+                        const edgeCols = getArrowColumns(edgesBytes);
+                        throw new Error(
+                            [
+                                `Cosmograph loaded 0 rows (points=${stats.pointsCount}, links=${stats.linksCount}).`,
+                                `nodes.arrow columns: ${nodeCols.join(", ")}`,
+                                `edges.arrow columns: ${edgeCols.join(", ")}`,
+                                `Expected: nodes has idx (optionally label/id/type) and edges has sourceidx,targetidx.`,
+                                `Fix: regenerate nodes.arrow/edges.arrow from your CSVs.`,
+                            ].join(" "),
+                        );
+                    }
+                    console.log(
+                        `Loaded ${stats.pointsCount} nodes, ${stats.linksCount} edges (from ${originalNodes} nodes, ${originalEdges} edges; using ${cap} nodes, ${filteredEdges} edges).`,
+                    );
+
+                    // Fit the camera to the graph, then let the user pan/zoom freely.
+                    maybeFitView();
+
+                    // Run force layout if enabled.
+                    if (simEnabled) {
+                        // If steps>0, run a fixed number of steps then stop.
+                        cosmograph.start(simSteps || undefined);
+                        if (simSteps > 0) cosmograph.pause();
+                    }
+
+                    setStatus(
+                        maxPoints > 0
+                            ? `${stats.pointsCount.toLocaleString()} nodes (showing ${cap.toLocaleString()} of ${originalNodes.toLocaleString()})`
+                            : `${stats.pointsCount.toLocaleString()} nodes`,
+                        "success",
+                    );
+                    baseStatusText = status.textContent || "";
+                } catch (error) {
+                    console.error("Error loading from server:", error);
+                    setStatus(`Error: ${error.message}`, "error");
+                } finally {
+                    isLoading = false;
+                }
+            }
+
+            loadDefaultGraph();
+            console.log("Cosmograph ready");
+
+            // Best-effort detection of GPU resets / OOM: WebGL context loss.
+            document.addEventListener(
+                "webglcontextlost",
+                (e) => {
+                    e.preventDefault?.();
+                    setStatus(
+                        "Error: WebGL context lost. This usually means GPU memory pressure (too many points/links). Try ?maxPoints=200000 or ?maxPoints=all on a stronger GPU.",
+                        "error",
+                    );
+                },
+                { capture: true },
+            );
+        </script>
+    </body>
+</html>
