@@ -59,6 +59,11 @@
                 backdrop-filter: blur(10px);
                 -webkit-backdrop-filter: blur(10px);
                 pointer-events: none;
+                /* prevent overlap with controls on any screen width */
+                max-width: calc(100vw - 200px);
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
             }
 
             #status {
@@ -213,6 +218,53 @@
                 display: block;
                 width: 100%;
                 height: 100%;
+            }
+
+            @media (max-width: 640px) {
+                h1 {
+                    font-size: 11px;
+                    /* full width minus padding — controls have moved to the bottom */
+                    max-width: calc(100vw - 32px);
+                }
+
+                /* Move controls to bottom-right for thumb reach */
+                #controls {
+                    top: auto;
+                    bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+                    right: calc(16px + env(safe-area-inset-right, 0px));
+                    /* larger touch target */
+                    padding: 10px 14px;
+                    font-size: 13px;
+                }
+
+                /* Grow the toggle thumb area */
+                #controls input[type="checkbox"] {
+                    width: 40px;
+                    height: 24px;
+                }
+
+                #controls input[type="checkbox"]::before {
+                    width: 20px;
+                    height: 20px;
+                }
+
+                #controls input[type="checkbox"]:checked::before {
+                    left: 18px;
+                }
+
+                /* Status pills: tighter stacking under the title */
+                #status {
+                    top: calc(52px + env(safe-area-inset-top, 0px));
+                    font-size: 11px;
+                }
+
+                #selectionStatus {
+                    top: calc(82px + env(safe-area-inset-top, 0px));
+                    font-size: 11px;
+                    /* allow wrapping on very small screens */
+                    white-space: normal;
+                    max-width: calc(100vw - 32px);
+                }
             }
         </style>
     </head>
