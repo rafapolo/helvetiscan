@@ -20,7 +20,7 @@ The graph exposes the DNS dependency structure of the Swiss internet: who contro
 
 1. **Process** — Python and JS scripts convert raw CSV output to Apache Arrow / Parquet for fast columnar loading.
 2. **Visualize** — A Bun-served web app renders the full graph in-browser via [Cosmograph](https://cosmograph.app/), a WebGL force-graph renderer capable of handling millions of nodes.
-3. **Scrape HTTP titles** — Rust CLI (`titlefetch`) scans all `.ch` domains at high concurrency, resolving HTTP status, final URL, and page title for each domain.
+3. **Scan Swiss internet infrastructure** — Rust CLI (`helvetiscan`) scans the `.ch` namespace for HTTP, DNS, TLS, port-level metadata, and subdomain discovery.
 
 Node colors encode connectivity:
 - **Blue** — leaf domain (1–2 connections)
@@ -40,7 +40,9 @@ Node colors encode connectivity:
 │   ├── serve.js         # Bun static file server
 │   ├── nodes.arrow      # Pre-built graph data (served to browser)
 │   └── edges.arrow
-├── data/                # Raw and intermediate data (gitignored)
+├── data/
+│   ├── domains.duckdb   # Queryable database (DuckDB)
+│   └── ...              # Raw and intermediate data (gitignored)
 ```
 
 ---
@@ -54,6 +56,13 @@ bun run serve
 # → http://localhost:3000
 ```
 
+**Explore the database:**
+
+```bash
+duckdb data/domains.duckdb -ui
+# → http://localhost:4213
+```
+
 ### URL parameters
 
 | Parameter | Default | Description |
@@ -64,18 +73,25 @@ bun run serve
 
 ---
 
-**Scrape page titles over HTTP** (from `data/sorted_domains.txt`):
+**Targeted single-domain scan** (all four passes, prints a summary table):
 
 ```bash
-cargo run --release -- \
-  --input data/sorted_domains.txt \
-  --output data/out.csv \
-  --concurrency 2000 \
-  --connect-timeout 5s \
-  --request-timeout 20s
+helvetiscan --domain migros.ch --all
 ```
 
-Output schema: `domain, final_url, status_code, title, error_kind, elapsed_ms`
+**Key scan options** (all have defaults; override only what you need):
+
+| Flag | Default | Description |
+|---|---|---|
+| `--db` | `data/domains.duckdb` | DuckDB path |
+| `--concurrency` | 500 / 250 / 150 / 300 / 200 | Parallel workers (scan/dns/tls/ports/subdomains) |
+| `--connect-timeout` | `5s` | TCP connect timeout |
+| `--request-timeout` | `20s` | Full HTTP request timeout |
+| `--max-kbytes` | `128` | Body download cap (scan only) |
+| `--limit-success N` | — | Stop scan after N HTTP-200 writes |
+| `--rescan` | off | Re-scan already-completed rows (dns/tls/ports) |
+
+See [SCHEMA.md](SCHEMA.md) for the full database schema.
 
 ---
 
@@ -84,22 +100,22 @@ Output schema: `domain, final_url, status_code, title, error_kind, elapsed_ms`
 The dataset makes visible structural patterns that are otherwise opaque. Current and planned analyses:
 
 **DNS concentration**
-Which providers control Swiss DNS? How many domains fail if a single nameserver operator goes offline? What fraction of the Swiss namespace depends on infrastructure physically or legally outside Switzerland?
+→ Which providers control Swiss DNS? How many domains fail if a single nameserver operator goes offline? What fraction of the Swiss namespace depends on infrastructure physically or legally outside Switzerland?
 
 **Foreign dependency mapping**
-Classify nameserver operators by jurisdiction (CH / EU / US / other). Measure the share of `.ch` domains that ultimately resolve through non-Swiss infrastructure — a proxy for digital sovereignty exposure.
+→ Classify nameserver operators by jurisdiction (CH / EU / US / other). Measure the share of `.ch` domains that ultimately resolve through non-Swiss infrastructure — a proxy for digital sovereignty exposure.
 
 **Hub resilience**
 Model cascading failure scenarios: remove the top-N DNS hubs, measure reachability loss across the graph. Identify the minimum set of providers whose failure would partition Swiss internet access.
 
 **Longitudinal tracking**
-Re-run the scrape periodically. Detect new domains, expired domains, nameserver migrations, and shifts in provider market share over time.
+→ Re-run the scrape periodically. Detect new domains, expired domains, nameserver migrations, and shifts in provider market share over time.
 
 **Phishing and lookalike detection**
-The full namespace enables detection of typosquat and look-alike domains targeting Swiss brands, banks, and government entities.
+→ The full namespace enables detection of typosquat and look-alike domains targeting Swiss brands, banks, and government entities.
 
 **SME digital exposure scoring**
-Cross-reference DNS data with open-port scans, certificate expiry, and HTTP security headers to produce a per-domain risk score — useful for the attack surface intelligence.
+→ Cross-reference DNS data with open-port scans, certificate expiry, and HTTP security headers to produce a per-domain risk score — useful for the attack surface intelligence.
 
 ---
 
@@ -107,8 +123,9 @@ Cross-reference DNS data with open-port scans, certificate expiry, and HTTP secu
 
 | Layer | Technology |
 |---|---|
+| Database | DuckDB |
 | Web server | Bun |
-| HTML Scraper | Rust, tokio, reqwest |
+| Scanner | Rust, tokio, reqwest, hickory-resolver, rustls |
 | Data processing | Python (pandas, pyarrow), JavaScript (apache-arrow) |
 | Visualization | Cosmograph (WebGL), Apache Arrow IPC |
 
