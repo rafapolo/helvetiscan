@@ -24,12 +24,34 @@ use tokio::sync::{mpsc, Semaphore};
 use tokio::task::JoinSet;
 use tokio_rustls::TlsConnector;
 use webpki_roots::TLS_SERVER_ROOTS;
-use x509_parser::prelude::{FromDer, X509Certificate};
+use sha2::{Digest, Sha256};
+use x509_parser::prelude::{FromDer, GeneralName, X509Certificate};
 
 const DISPATCH_BATCH_SIZE: usize = 255;
 const DISPATCH_BATCH_SLEEP: Duration = Duration::from_millis(500);
-const STANDARD_PORTS: [u16; 10] = [80, 443, 22, 21, 25, 587, 3306, 5432, 6379, 8080];
-const EXTRA_PORTS: [u16; 1] = [8443];
+const PORTS: &[(u16, &str)] = &[
+    (80,    "http"),
+    (443,   "https"),
+    (22,    "ssh"),
+    (21,    "ftp"),
+    (25,    "smtp"),
+    (587,   "submission"),
+    (3306,  "mysql"),
+    (5432,  "postgresql"),
+    (6379,  "redis"),
+    (8080,  "http-alt"),
+    (8443,  "https-alt"),
+    (23,    "telnet"),
+    (445,   "smb"),
+    (3389,  "rdp"),
+    (5900,  "vnc"),
+    (9200,  "elasticsearch"),
+    (27017, "mongodb"),
+    (11211, "memcached"),
+    (2375,  "docker-api"),
+    (6443,  "kubernetes-api"),
+];
+const BANNER_PORTS: &[u16] = &[22, 23, 25, 587, 9200, 27017, 11211];
 
 #[derive(Clone)]
 struct ReqwestHickoryResolver {
@@ -107,6 +129,7 @@ enum FullTarget {
     Tls,
     Ports,
     Subdomains,
+    Whois,
     All,
 }
 
@@ -478,6 +501,20 @@ struct Row {
     powered_by: Option<String>,
     error_kind: Option<ErrorKind>,
     elapsed_ms: u64,
+    redirect_chain: Vec<String>,
+    cms: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct HttpHeadersRow {
+    domain: String,
+    hsts: Option<String>,
+    csp: Option<String>,
+    x_frame_options: Option<String>,
+    x_content_type_options: Option<String>,
+    cors_origin: Option<String>,
+    referrer_policy: Option<String>,
+    permissions_policy: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -494,7 +531,11 @@ struct DnsRow {
     txt_dmarc: Option<String>,
     ttl: Option<i32>,
     ptr: Option<String>,
-    dnssec: Option<bool>,
+    dnssec_signed: Option<bool>,
+    dnssec_valid: Option<bool>,
+    caa: Vec<String>,
+    wildcard: bool,
+    txt_all: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -511,33 +552,38 @@ struct TlsRow {
     self_signed: Option<bool>,
     tls_version: Option<String>,
     cipher: Option<String>,
+    san: Vec<String>,
+    key_algorithm: Option<String>,
+    key_size: Option<i32>,
+    signature_algorithm: Option<String>,
+    cert_fingerprint: Option<String>,
+    ct_logged: Option<bool>,
+    ocsp_must_staple: Option<bool>,
+}
+
+#[derive(Debug, Clone)]
+struct PortResult {
+    port: u16,
+    service: &'static str,
+    open: bool,
+    banner: Option<String>,
 }
 
 #[derive(Debug, Clone)]
 struct PortsRow {
     domain: String,
-    status: ScanStatus,
-    error_kind: Option<ErrorKind>,
     ip: Option<String>,
-    p80: bool,
-    p443: bool,
-    p22: bool,
-    p21: bool,
-    p25: bool,
-    p587: bool,
-    p3306: bool,
-    p5432: bool,
-    p6379: bool,
-    p8080: bool,
-    p8443: bool,
-    open_ports: Vec<i32>,
+    results: Vec<PortResult>,
 }
 
 #[derive(Debug, Clone)]
 struct WhoisRow {
-    domain: String,
-    registrar: Option<String>,
-    whois_created: Option<NaiveDate>,
+    domain:           String,
+    registrar:        Option<String>,
+    whois_created:    Option<NaiveDate>,
+    expires_at:       Option<NaiveDate>,
+    status:           Option<String>,
+    dnssec_delegated: Option<bool>,
 }
 
 #[derive(Debug)]
@@ -621,6 +667,10 @@ async fn main() -> Result<()> {
             let args = SubdomainsArgs { db, rescan: true, ..SubdomainsArgs::default() };
             cmd_subdomains(args).await
         }
+        (None, false, db, Some(FullTarget::Whois), None) => {
+            let args = WhoisArgs { db, rescan: true, ..WhoisArgs::default() };
+            cmd_whois(args).await
+        }
         (None, false, db, Some(FullTarget::All), None) => {
             cmd_scan(ScanArgs { db: db.clone(), ..ScanArgs::default() }).await?;
             cmd_dns(DnsArgs { db: db.clone(), ..DnsArgs::default() }).await?;
@@ -698,6 +748,8 @@ fn ensure_schema(conn: &duckdb::Connection) -> Result<()> {
         ALTER TABLE domains ADD COLUMN IF NOT EXISTS powered_by       VARCHAR;
         ALTER TABLE domains ADD COLUMN IF NOT EXISTS whois_registrar  VARCHAR;
         ALTER TABLE domains ADD COLUMN IF NOT EXISTS whois_created    DATE;
+        ALTER TABLE domains ADD COLUMN IF NOT EXISTS redirect_chain   VARCHAR[];
+        ALTER TABLE domains ADD COLUMN IF NOT EXISTS cms              VARCHAR;
 
         CREATE TABLE IF NOT EXISTS dns_info (
             domain      VARCHAR PRIMARY KEY,
@@ -716,6 +768,12 @@ fn ensure_schema(conn: &duckdb::Connection) -> Result<()> {
             resolved_at TIMESTAMP
         );
 
+        ALTER TABLE dns_info ADD COLUMN IF NOT EXISTS dnssec_signed BOOLEAN;
+        ALTER TABLE dns_info ADD COLUMN IF NOT EXISTS dnssec_valid  BOOLEAN;
+        ALTER TABLE dns_info ADD COLUMN IF NOT EXISTS caa           VARCHAR[];
+        ALTER TABLE dns_info ADD COLUMN IF NOT EXISTS wildcard      BOOLEAN;
+        ALTER TABLE dns_info ADD COLUMN IF NOT EXISTS txt_all       VARCHAR[];
+
         CREATE TABLE IF NOT EXISTS tls_info (
             domain         VARCHAR PRIMARY KEY,
             status         VARCHAR,
@@ -732,19 +790,13 @@ fn ensure_schema(conn: &duckdb::Connection) -> Result<()> {
             scanned_at     TIMESTAMP
         );
 
-        CREATE TABLE IF NOT EXISTS ports_info (
-            domain     VARCHAR PRIMARY KEY,
-            status     VARCHAR,
-            error_kind VARCHAR,
-            ip         VARCHAR,
-            p80        BOOLEAN, p443  BOOLEAN,
-            p22        BOOLEAN, p21   BOOLEAN,
-            p25        BOOLEAN, p587  BOOLEAN,
-            p3306      BOOLEAN, p5432 BOOLEAN,
-            p6379      BOOLEAN, p8080 BOOLEAN, p8443 BOOLEAN,
-            open_ports INTEGER[],
-            scanned_at TIMESTAMP
-        );
+        ALTER TABLE tls_info ADD COLUMN IF NOT EXISTS san                  VARCHAR[];
+        ALTER TABLE tls_info ADD COLUMN IF NOT EXISTS key_algorithm        VARCHAR;
+        ALTER TABLE tls_info ADD COLUMN IF NOT EXISTS key_size             INTEGER;
+        ALTER TABLE tls_info ADD COLUMN IF NOT EXISTS signature_algorithm  VARCHAR;
+        ALTER TABLE tls_info ADD COLUMN IF NOT EXISTS cert_fingerprint     VARCHAR;
+        ALTER TABLE tls_info ADD COLUMN IF NOT EXISTS ct_logged            BOOLEAN;
+        ALTER TABLE tls_info ADD COLUMN IF NOT EXISTS ocsp_must_staple     BOOLEAN;
 
         CREATE TABLE IF NOT EXISTS subdomains (
             domain        VARCHAR,
@@ -753,8 +805,139 @@ fn ensure_schema(conn: &duckdb::Connection) -> Result<()> {
             discovered_at TIMESTAMP,
             PRIMARY KEY (domain, subdomain)
         );
+
+        CREATE TABLE IF NOT EXISTS whois_info (
+            domain           VARCHAR PRIMARY KEY,
+            registrar        VARCHAR,
+            whois_created    DATE,
+            expires_at       DATE,
+            status           VARCHAR,
+            dnssec_delegated BOOLEAN,
+            queried_at       TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS http_headers (
+            domain                 VARCHAR PRIMARY KEY,
+            hsts                   VARCHAR,
+            csp                    VARCHAR,
+            x_frame_options        VARCHAR,
+            x_content_type_options VARCHAR,
+            cors_origin            VARCHAR,
+            referrer_policy        VARCHAR,
+            permissions_policy     VARCHAR,
+            scanned_at             TIMESTAMP
+        );
     ",
     )?;
+    migrate_ports_info(conn)?;
+    conn.execute_batch("
+        CREATE OR REPLACE VIEW risk_score AS
+        SELECT
+            d.domain,
+            (h.hsts IS NULL AND d.status_code = 200)                                    AS missing_hsts,
+            (h.csp  IS NULL AND d.status_code = 200)                                    AS missing_csp,
+            (dns.caa IS NULL OR len(dns.caa) = 0)                                       AS missing_caa,
+            (t.tls_version IN ('TLSv1.0','TLSv1.1') OR t.expired = true)               AS weak_tls,
+            (t.expired = true)                                                           AS cert_expired,
+            (t.days_remaining BETWEEN 0 AND 29)                                         AS cert_expiring,
+            (NOT coalesce(dns.dnssec_signed, false))                                    AS no_dnssec,
+            (dns.txt_dmarc IS NULL)                                                     AS no_dmarc,
+            (w.expires_at < CURRENT_DATE + INTERVAL 30 DAYS)                           AS domain_expiring,
+            EXISTS(
+                SELECT 1 FROM ports_info p
+                WHERE p.domain = d.domain AND p.open = true
+                  AND p.port IN (3306,5432,6379,9200,27017,11211,2375)
+            )                                                                            AS exposed_db_port,
+            EXISTS(
+                SELECT 1 FROM ports_info p
+                WHERE p.domain = d.domain AND p.open = true
+                  AND p.port IN (445,23,3389,5900)
+            )                                                                            AS exposed_risky_port,
+            GREATEST(0,
+                100
+                - CASE WHEN h.hsts IS NULL AND d.status_code = 200                        THEN 10 ELSE 0 END
+                - CASE WHEN h.csp  IS NULL AND d.status_code = 200                        THEN 10 ELSE 0 END
+                - CASE WHEN dns.caa IS NULL OR len(dns.caa) = 0                           THEN  8 ELSE 0 END
+                - CASE WHEN t.tls_version IN ('TLSv1.0','TLSv1.1') OR t.expired = true   THEN 10 ELSE 0 END
+                - CASE WHEN t.expired = true                                               THEN 20 ELSE 0 END
+                - CASE WHEN t.days_remaining BETWEEN 0 AND 29                             THEN 15 ELSE 0 END
+                - CASE WHEN NOT coalesce(dns.dnssec_signed, false)                        THEN  5 ELSE 0 END
+                - CASE WHEN dns.txt_dmarc IS NULL                                         THEN  7 ELSE 0 END
+                - CASE WHEN w.expires_at < CURRENT_DATE + INTERVAL 30 DAYS               THEN  5 ELSE 0 END
+                - CASE WHEN EXISTS(
+                      SELECT 1 FROM ports_info p
+                      WHERE p.domain = d.domain AND p.open = true
+                        AND p.port IN (3306,5432,6379,9200,27017,11211,2375)
+                  )                                                                        THEN 10 ELSE 0 END
+                - CASE WHEN EXISTS(
+                      SELECT 1 FROM ports_info p
+                      WHERE p.domain = d.domain AND p.open = true
+                        AND p.port IN (445,23,3389,5900)
+                  )                                                                        THEN 10 ELSE 0 END
+            )                                                                            AS score
+        FROM domains d
+        LEFT JOIN http_headers h   ON h.domain  = d.domain
+        LEFT JOIN dns_info     dns ON dns.domain = d.domain
+        LEFT JOIN tls_info     t   ON t.domain   = d.domain
+        LEFT JOIN whois_info   w   ON w.domain   = d.domain;
+    ")?;
+    Ok(())
+}
+
+fn migrate_ports_info(conn: &duckdb::Connection) -> Result<()> {
+    // Check if the old wide-boolean table still exists (presence of 'p80' column)
+    let has_legacy: bool = conn.query_row(
+        "SELECT COUNT(*) > 0 FROM information_schema.columns
+         WHERE table_name = 'ports_info' AND column_name = 'p80'",
+        [],
+        |r| r.get(0),
+    ).unwrap_or(false);
+
+    if has_legacy {
+        conn.execute_batch("ALTER TABLE ports_info RENAME TO ports_info_legacy;")?;
+    }
+
+    conn.execute_batch("
+        CREATE TABLE IF NOT EXISTS ports_info (
+            domain     VARCHAR   NOT NULL,
+            port       INTEGER   NOT NULL,
+            service    VARCHAR,
+            open       BOOLEAN   NOT NULL DEFAULT false,
+            banner     VARCHAR,
+            ip         VARCHAR,
+            scanned_at TIMESTAMP,
+            PRIMARY KEY (domain, port)
+        );
+    ")?;
+
+    if has_legacy {
+        // Backfill one row per true boolean per domain
+        let pairs: &[(i32, &str, &str)] = &[
+            (80,    "http",         "p80"),
+            (443,   "https",        "p443"),
+            (22,    "ssh",          "p22"),
+            (21,    "ftp",          "p21"),
+            (25,    "smtp",         "p25"),
+            (587,   "submission",   "p587"),
+            (3306,  "mysql",        "p3306"),
+            (5432,  "postgresql",   "p5432"),
+            (6379,  "redis",        "p6379"),
+            (8080,  "http-alt",     "p8080"),
+            (8443,  "https-alt",    "p8443"),
+        ];
+        let mut backfill = String::from("BEGIN;\n");
+        for (port, service, col) in pairs {
+            backfill.push_str(&format!(
+                "INSERT INTO ports_info (domain, port, service, open, ip, scanned_at)
+                 SELECT domain, {port}, '{service}', true, ip, scanned_at
+                 FROM ports_info_legacy WHERE {col} = true
+                 ON CONFLICT (domain, port) DO NOTHING;\n"
+            ));
+        }
+        backfill.push_str("COMMIT;");
+        conn.execute_batch(&backfill)?;
+        conn.execute_batch("DROP TABLE IF EXISTS ports_info_legacy;")?;
+    }
     Ok(())
 }
 
@@ -1049,6 +1232,28 @@ fn load_scan_targets(
     Ok(domains)
 }
 
+fn load_ports_targets(
+    conn: &duckdb::Connection,
+    domain: Option<&str>,
+    rescan: bool,
+) -> Result<Vec<String>> {
+    if let Some(domain) = domain {
+        return Ok(vec![sanitize_domain(domain).ok_or_else(|| anyhow!("invalid domain: {domain}"))?]);
+    }
+    let sql = if rescan {
+        "SELECT domain FROM domains ORDER BY domain".to_string()
+    } else {
+        "SELECT d.domain FROM domains d
+         WHERE NOT EXISTS (SELECT 1 FROM ports_info p WHERE p.domain = d.domain)
+         ORDER BY d.domain".to_string()
+    };
+    let mut stmt = conn.prepare(&sql)?;
+    let domains: Vec<String> = stmt
+        .query_map([], |row| row.get(0))?
+        .collect::<std::result::Result<_, _>>()?;
+    Ok(domains)
+}
+
 async fn cmd_scan(args: ScanArgs) -> Result<()> {
     if args.concurrency == 0 {
         return Err(anyhow!("--concurrency must be > 0"));
@@ -1083,6 +1288,7 @@ async fn cmd_scan(args: ScanArgs) -> Result<()> {
 
     let (work_tx, work_rx) = mpsc::channel::<String>(work_buf);
     let (result_tx, result_rx) = mpsc::channel::<Row>(result_buf);
+    let (headers_tx, headers_rx) = mpsc::channel::<HttpHeadersRow>(result_buf);
     let (done_tx, done_rx) = tokio::sync::oneshot::channel::<()>();
 
     let writer_handle = tokio::task::spawn_blocking({
@@ -1091,6 +1297,12 @@ async fn cmd_scan(args: ScanArgs) -> Result<()> {
         let limit = args.limit_success;
         let progress = progress.clone();
         move || writer_loop_db(db_path, result_rx, progress, done_tx, batch_size, limit)
+    });
+
+    let headers_writer_handle = tokio::task::spawn_blocking({
+        let db_path = args.db.clone();
+        let batch_size = args.write_batch_size;
+        move || writer_loop_http_headers(db_path, headers_rx, batch_size)
     });
 
     let reader_handle = tokio::spawn({
@@ -1120,6 +1332,7 @@ async fn cmd_scan(args: ScanArgs) -> Result<()> {
     let dispatcher_handle = tokio::spawn(dispatcher_loop(
         work_rx,
         result_tx,
+        headers_tx,
         sem,
         client,
         resolver,
@@ -1138,6 +1351,10 @@ async fn cmd_scan(args: ScanArgs) -> Result<()> {
         .await
         .context("writer task panicked")?
         .context("writer failed")?;
+    headers_writer_handle
+        .await
+        .context("http_headers writer task panicked")?
+        .context("http_headers writer failed")?;
 
     if let Some(h) = progress_handle {
         h.abort();
@@ -1339,7 +1556,7 @@ async fn cmd_ports(args: PortsArgs) -> Result<()> {
 
     let conn =
         duckdb::Connection::open(&args.db).with_context(|| format!("open duckdb {:?}", args.db))?;
-    let pending = load_scan_targets(&conn, args.domain.as_deref(), "ports_info", "scanned_at", args.rescan, args.retry_errors.as_deref())?;
+    let pending = load_ports_targets(&conn, args.domain.as_deref(), args.rescan)?;
     drop(conn);
 
     eprintln!("ports: {} domains pending", pending.len());
@@ -1532,41 +1749,41 @@ fn writer_loop_ports(
 }
 
 fn flush_batch(conn: &duckdb::Connection, batch: &mut Vec<Row>) -> Result<()> {
-    conn.execute_batch("BEGIN")?;
-    {
-        let mut stmt = conn.prepare(
+    let mut sql = String::from("BEGIN;\n");
+    for row in batch.iter() {
+        sql.push_str(&format!(
             "UPDATE domains SET
-                status      = ?1,
-                final_url   = ?2,
-                status_code = ?3,
-                title       = ?4,
-                body_hash   = ?5,
-                error_kind  = ?6,
-                elapsed_ms  = ?7,
-                ip          = ?8,
-                server      = ?9,
-                powered_by  = ?10,
-                updated_at  = NOW()
-             WHERE domain = ?11",
-        )?;
-
-        for row in batch.iter() {
-            stmt.execute(duckdb::params![
-                row.status.as_str(),
-                row.final_url.as_deref(),
-                row.status_code.map(|v| v as i32),
-                row.title.as_deref(),
-                row.body_hash.as_deref(),
-                row.error_kind.map(|k| k.as_str()),
-                row.elapsed_ms as i64,
-                row.ip.as_deref(),
-                row.server.as_deref(),
-                row.powered_by.as_deref(),
-                row.domain.as_str(),
-            ])?;
-        }
+                status         = {},
+                final_url      = {},
+                status_code    = {},
+                title          = {},
+                body_hash      = {},
+                error_kind     = {},
+                elapsed_ms     = {},
+                ip             = {},
+                server         = {},
+                powered_by     = {},
+                redirect_chain = {},
+                cms            = {},
+                updated_at     = NOW()
+             WHERE domain = {};\n",
+            sql_string(row.status.as_str()),
+            sql_string_opt(row.final_url.as_deref()),
+            sql_int_opt(row.status_code.map(|v| v as i32)),
+            sql_string_opt(row.title.as_deref()),
+            sql_string_opt(row.body_hash.as_deref()),
+            sql_string_opt(row.error_kind.map(|k| k.as_str())),
+            row.elapsed_ms as i64,
+            sql_string_opt(row.ip.as_deref()),
+            sql_string_opt(row.server.as_deref()),
+            sql_string_opt(row.powered_by.as_deref()),
+            sql_string_list(&row.redirect_chain),
+            sql_string_opt(row.cms.as_deref()),
+            sql_string(row.domain.as_str()),
+        ));
     }
-    conn.execute_batch("COMMIT")?;
+    sql.push_str("COMMIT;");
+    conn.execute_batch(&sql)?;
     batch.clear();
     Ok(())
 }
@@ -1576,22 +1793,32 @@ fn flush_dns_batch(conn: &duckdb::Connection, batch: &mut Vec<DnsRow>) -> Result
     for row in batch.iter() {
         sql.push_str(&format!(
             "INSERT INTO dns_info (
-                domain, status, error_kind, ns, mx, cname, a, aaaa, txt_spf, txt_dmarc, ttl, ptr, dnssec, resolved_at
-             ) VALUES ({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, NOW())
+                domain, status, error_kind, ns, mx, cname, a, aaaa,
+                txt_spf, txt_dmarc, ttl, ptr,
+                dnssec, dnssec_signed, dnssec_valid, caa, wildcard, txt_all,
+                resolved_at
+             ) VALUES ({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {},
+                       {}, {}, {}, {}, {}, {},
+                       NOW())
              ON CONFLICT(domain) DO UPDATE SET
-                status = excluded.status,
-                error_kind = excluded.error_kind,
-                ns = excluded.ns,
-                mx = excluded.mx,
-                cname = excluded.cname,
-                a = excluded.a,
-                aaaa = excluded.aaaa,
-                txt_spf = excluded.txt_spf,
-                txt_dmarc = excluded.txt_dmarc,
-                ttl = excluded.ttl,
-                ptr = excluded.ptr,
-                dnssec = excluded.dnssec,
-                resolved_at = NOW();\n",
+                status        = excluded.status,
+                error_kind    = excluded.error_kind,
+                ns            = excluded.ns,
+                mx            = excluded.mx,
+                cname         = excluded.cname,
+                a             = excluded.a,
+                aaaa          = excluded.aaaa,
+                txt_spf       = excluded.txt_spf,
+                txt_dmarc     = excluded.txt_dmarc,
+                ttl           = excluded.ttl,
+                ptr           = excluded.ptr,
+                dnssec        = excluded.dnssec,
+                dnssec_signed = excluded.dnssec_signed,
+                dnssec_valid  = excluded.dnssec_valid,
+                caa           = excluded.caa,
+                wildcard      = excluded.wildcard,
+                txt_all       = excluded.txt_all,
+                resolved_at   = NOW();\n",
             sql_string(row.domain.as_str()),
             sql_string(row.status.as_str()),
             sql_string_opt(row.error_kind.map(|v| v.as_str())),
@@ -1604,7 +1831,12 @@ fn flush_dns_batch(conn: &duckdb::Connection, batch: &mut Vec<DnsRow>) -> Result
             sql_string_opt(row.txt_dmarc.as_deref()),
             sql_int_opt(row.ttl),
             sql_string_opt(row.ptr.as_deref()),
-            sql_bool_opt(row.dnssec),
+            sql_bool_opt(row.dnssec_signed), // write to legacy 'dnssec' col too
+            sql_bool_opt(row.dnssec_signed),
+            sql_bool_opt(row.dnssec_valid),
+            sql_string_list(&row.caa),
+            sql_bool(row.wildcard),
+            sql_string_list(&row.txt_all),
         ));
     }
     sql.push_str("COMMIT;");
@@ -1614,42 +1846,127 @@ fn flush_dns_batch(conn: &duckdb::Connection, batch: &mut Vec<DnsRow>) -> Result
 }
 
 fn flush_tls_batch(conn: &duckdb::Connection, batch: &mut Vec<TlsRow>) -> Result<()> {
+    let mut sql = String::from("BEGIN;\n");
+    for row in batch.iter() {
+        sql.push_str(&format!(
+            "INSERT INTO tls_info (
+                domain, status, error_kind,
+                cert_issuer, cert_subject, valid_from, valid_to,
+                days_remaining, expired, self_signed, tls_version, cipher,
+                san, key_algorithm, key_size, signature_algorithm,
+                cert_fingerprint, ct_logged, ocsp_must_staple,
+                scanned_at
+             ) VALUES ({}, {}, {},
+                       {}, {}, {}, {},
+                       {}, {}, {}, {}, {},
+                       {}, {}, {}, {},
+                       {}, {}, {},
+                       NOW())
+             ON CONFLICT(domain) DO UPDATE SET
+                status              = excluded.status,
+                error_kind          = excluded.error_kind,
+                cert_issuer         = excluded.cert_issuer,
+                cert_subject        = excluded.cert_subject,
+                valid_from          = excluded.valid_from,
+                valid_to            = excluded.valid_to,
+                days_remaining      = excluded.days_remaining,
+                expired             = excluded.expired,
+                self_signed         = excluded.self_signed,
+                tls_version         = excluded.tls_version,
+                cipher              = excluded.cipher,
+                san                 = excluded.san,
+                key_algorithm       = excluded.key_algorithm,
+                key_size            = excluded.key_size,
+                signature_algorithm = excluded.signature_algorithm,
+                cert_fingerprint    = excluded.cert_fingerprint,
+                ct_logged           = excluded.ct_logged,
+                ocsp_must_staple    = excluded.ocsp_must_staple,
+                scanned_at          = NOW();\n",
+            sql_string(row.domain.as_str()),
+            sql_string(row.status.as_str()),
+            sql_string_opt(row.error_kind.map(|v| v.as_str())),
+            sql_string_opt(row.cert_issuer.as_deref()),
+            sql_string_opt(row.cert_subject.as_deref()),
+            sql_string_opt(row.valid_from.map(|d| d.to_string()).as_deref()),
+            sql_string_opt(row.valid_to.map(|d| d.to_string()).as_deref()),
+            sql_int_opt(row.days_remaining),
+            sql_bool_opt(row.expired),
+            sql_bool_opt(row.self_signed),
+            sql_string_opt(row.tls_version.as_deref()),
+            sql_string_opt(row.cipher.as_deref()),
+            sql_string_list(&row.san),
+            sql_string_opt(row.key_algorithm.as_deref()),
+            sql_int_opt(row.key_size),
+            sql_string_opt(row.signature_algorithm.as_deref()),
+            sql_string_opt(row.cert_fingerprint.as_deref()),
+            sql_bool_opt(row.ct_logged),
+            sql_bool_opt(row.ocsp_must_staple),
+        ));
+    }
+    sql.push_str("COMMIT;");
+    conn.execute_batch(&sql)?;
+    batch.clear();
+    Ok(())
+}
+
+fn flush_ports_batch(conn: &duckdb::Connection, batch: &mut Vec<PortsRow>) -> Result<()> {
     conn.execute_batch("BEGIN")?;
     {
         let mut stmt = conn.prepare(
-            "INSERT INTO tls_info (
-                domain, status, error_kind, cert_issuer, cert_subject, valid_from, valid_to,
-                days_remaining, expired, self_signed, tls_version, cipher, scanned_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, NOW())
-             ON CONFLICT(domain) DO UPDATE SET
-                status = excluded.status,
-                error_kind = excluded.error_kind,
-                cert_issuer = excluded.cert_issuer,
-                cert_subject = excluded.cert_subject,
-                valid_from = excluded.valid_from,
-                valid_to = excluded.valid_to,
-                days_remaining = excluded.days_remaining,
-                expired = excluded.expired,
-                self_signed = excluded.self_signed,
-                tls_version = excluded.tls_version,
-                cipher = excluded.cipher,
-                scanned_at = NOW()",
+            "INSERT INTO ports_info (domain, port, service, open, banner, ip, scanned_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, NOW())
+             ON CONFLICT (domain, port) DO UPDATE SET
+                open       = excluded.open,
+                banner     = excluded.banner,
+                ip         = excluded.ip,
+                scanned_at = excluded.scanned_at",
         )?;
+        for row in batch.iter() {
+            for result in row.results.iter() {
+                stmt.execute(duckdb::params![
+                    row.domain.as_str(),
+                    result.port as i32,
+                    result.service,
+                    result.open,
+                    result.banner.as_deref(),
+                    row.ip.as_deref(),
+                ])?;
+            }
+        }
+    }
+    conn.execute_batch("COMMIT")?;
+    batch.clear();
+    Ok(())
+}
 
+fn flush_http_headers_batch(conn: &duckdb::Connection, batch: &mut Vec<HttpHeadersRow>) -> Result<()> {
+    conn.execute_batch("BEGIN")?;
+    {
+        let mut stmt = conn.prepare(
+            "INSERT INTO http_headers (
+                domain, hsts, csp, x_frame_options, x_content_type_options,
+                cors_origin, referrer_policy, permissions_policy, scanned_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NOW())
+             ON CONFLICT(domain) DO UPDATE SET
+                hsts                   = excluded.hsts,
+                csp                    = excluded.csp,
+                x_frame_options        = excluded.x_frame_options,
+                x_content_type_options = excluded.x_content_type_options,
+                cors_origin            = excluded.cors_origin,
+                referrer_policy        = excluded.referrer_policy,
+                permissions_policy     = excluded.permissions_policy,
+                scanned_at             = excluded.scanned_at",
+        )?;
         for row in batch.iter() {
             stmt.execute(duckdb::params![
                 row.domain.as_str(),
-                row.status.as_str(),
-                row.error_kind.map(|v| v.as_str()),
-                row.cert_issuer.as_deref(),
-                row.cert_subject.as_deref(),
-                row.valid_from.map(|d| d.to_string()),
-                row.valid_to.map(|d| d.to_string()),
-                row.days_remaining,
-                row.expired,
-                row.self_signed,
-                row.tls_version.as_deref(),
-                row.cipher.as_deref(),
+                row.hsts.as_deref(),
+                row.csp.as_deref(),
+                row.x_frame_options.as_deref(),
+                row.x_content_type_options.as_deref(),
+                row.cors_origin.as_deref(),
+                row.referrer_policy.as_deref(),
+                row.permissions_policy.as_deref(),
             ])?;
         }
     }
@@ -1658,51 +1975,23 @@ fn flush_tls_batch(conn: &duckdb::Connection, batch: &mut Vec<TlsRow>) -> Result
     Ok(())
 }
 
-fn flush_ports_batch(conn: &duckdb::Connection, batch: &mut Vec<PortsRow>) -> Result<()> {
-    let mut sql = String::from("BEGIN;\n");
-    for row in batch.iter() {
-        sql.push_str(&format!(
-            "INSERT INTO ports_info (
-                domain, status, error_kind, ip, p80, p443, p22, p21, p25, p587, p3306, p5432, p6379, p8080, p8443, open_ports, scanned_at
-             ) VALUES ({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, NOW())
-             ON CONFLICT(domain) DO UPDATE SET
-                status = excluded.status,
-                error_kind = excluded.error_kind,
-                ip = excluded.ip,
-                p80 = excluded.p80,
-                p443 = excluded.p443,
-                p22 = excluded.p22,
-                p21 = excluded.p21,
-                p25 = excluded.p25,
-                p587 = excluded.p587,
-                p3306 = excluded.p3306,
-                p5432 = excluded.p5432,
-                p6379 = excluded.p6379,
-                p8080 = excluded.p8080,
-                p8443 = excluded.p8443,
-                open_ports = excluded.open_ports,
-                scanned_at = NOW();\n",
-            sql_string(row.domain.as_str()),
-            sql_string(row.status.as_str()),
-            sql_string_opt(row.error_kind.map(|v| v.as_str())),
-            sql_string_opt(row.ip.as_deref()),
-            sql_bool(row.p80),
-            sql_bool(row.p443),
-            sql_bool(row.p22),
-            sql_bool(row.p21),
-            sql_bool(row.p25),
-            sql_bool(row.p587),
-            sql_bool(row.p3306),
-            sql_bool(row.p5432),
-            sql_bool(row.p6379),
-            sql_bool(row.p8080),
-            sql_bool(row.p8443),
-            sql_int_list(&row.open_ports),
-        ));
+fn writer_loop_http_headers(
+    db_path: PathBuf,
+    mut result_rx: mpsc::Receiver<HttpHeadersRow>,
+    batch_size: usize,
+) -> Result<()> {
+    let conn = duckdb::Connection::open(&db_path)
+        .with_context(|| format!("http_headers writer: open duckdb {:?}", db_path))?;
+    let mut batch = Vec::with_capacity(batch_size);
+    while let Some(row) = result_rx.blocking_recv() {
+        batch.push(row);
+        if batch.len() >= batch_size {
+            flush_http_headers_batch(&conn, &mut batch)?;
+        }
     }
-    sql.push_str("COMMIT;");
-    conn.execute_batch(&sql)?;
-    batch.clear();
+    if !batch.is_empty() {
+        flush_http_headers_batch(&conn, &mut batch)?;
+    }
     Ok(())
 }
 
@@ -1737,6 +2026,7 @@ fn build_client(args: &ScanArgs, resolver: TokioResolver) -> Result<Client> {
 async fn dispatcher_loop(
     mut work_rx: mpsc::Receiver<String>,
     result_tx: mpsc::Sender<Row>,
+    headers_tx: mpsc::Sender<HttpHeadersRow>,
     sem: Semaphore,
     client: Client,
     resolver: TokioResolver,
@@ -1768,6 +2058,7 @@ async fn dispatcher_loop(
             let client = client.clone();
             let resolver = resolver.clone();
             let tx = result_tx.clone();
+            let htx = headers_tx.clone();
             let args_task = args.clone();
 
             joinset.spawn(async move {
@@ -1775,7 +2066,10 @@ async fn dispatcher_loop(
                 if tx.is_closed() {
                     return;
                 }
-                let row = fetch_domain(&client, &resolver, domain, &args_task).await;
+                let (row, headers) = fetch_domain(&client, &resolver, domain, &args_task).await;
+                if let Some(h) = headers {
+                    let _ = htx.send(h).await;
+                }
                 let _ = tx.send(row).await;
             });
 
@@ -1799,6 +2093,7 @@ async fn dispatcher_loop(
         let client = client.clone();
         let resolver = resolver.clone();
         let tx = result_tx.clone();
+        let htx = headers_tx.clone();
         let args_task = args.clone();
 
         joinset.spawn(async move {
@@ -1806,7 +2101,10 @@ async fn dispatcher_loop(
             if tx.is_closed() {
                 return;
             }
-            let row = fetch_domain(&client, &resolver, domain, &args_task).await;
+            let (row, headers) = fetch_domain(&client, &resolver, domain, &args_task).await;
+            if let Some(h) = headers {
+                let _ = htx.send(h).await;
+            }
             let _ = tx.send(row).await;
         });
 
@@ -1891,7 +2189,11 @@ async fn dispatcher_loop_dns(
 
 async fn fetch_dns_info(resolver: &TokioResolver, domain: String) -> DnsRow {
     let dmarc_host = format!("_dmarc.{domain}");
-    let (a_result, aaaa_result, ns_result, mx_result, cname_result, txt_result, dmarc_result) = tokio::join!(
+    let wildcard_host = format!("*.{domain}");
+    let (
+        a_result, aaaa_result, ns_result, mx_result, cname_result,
+        txt_result, dmarc_result, caa_result, wildcard_result,
+    ) = tokio::join!(
         collect_ip_strings(resolver, &domain, RecordType::A),
         collect_ip_strings(resolver, &domain, RecordType::AAAA),
         collect_lookup_strings(resolver, &domain, RecordType::NS),
@@ -1899,6 +2201,8 @@ async fn fetch_dns_info(resolver: &TokioResolver, domain: String) -> DnsRow {
         collect_lookup_strings(resolver, &domain, RecordType::CNAME),
         collect_txt_records(resolver, &domain),
         collect_txt_records(resolver, &dmarc_host),
+        collect_caa_records(resolver, &domain),
+        resolver.lookup_ip(wildcard_host.as_str()),
     );
 
     let mut status = ScanStatus::Ok;
@@ -1924,13 +2228,16 @@ async fn fetch_dns_info(resolver: &TokioResolver, domain: String) -> DnsRow {
     let ns = ns_result.unwrap_or_default();
     let mx = mx_result.unwrap_or_default();
     let cname = cname_result.unwrap_or_default().into_iter().next();
-    let txt_spf = txt_result
-        .unwrap_or_default()
-        .into_iter()
-        .find(|txt| txt.to_ascii_lowercase().starts_with("v=spf1"));
+    let txt_all = txt_result.unwrap_or_default();
+    let txt_spf = txt_all
+        .iter()
+        .find(|txt| txt.to_ascii_lowercase().starts_with("v=spf1"))
+        .cloned();
     let txt_dmarc = dmarc_result.unwrap_or_default().into_iter().next();
-    let dnssec = Some(has_dnssec_material(resolver, &domain).await);
+    let dnssec_signed = Some(has_dnssec_material(resolver, &domain).await);
     let ptr = first_ptr_record(resolver, &a, &aaaa).await;
+    let caa = caa_result.unwrap_or_default();
+    let wildcard = wildcard_result.is_ok();
 
     DnsRow {
         domain,
@@ -1945,7 +2252,11 @@ async fn fetch_dns_info(resolver: &TokioResolver, domain: String) -> DnsRow {
         txt_dmarc,
         ttl: None,
         ptr,
-        dnssec,
+        dnssec_signed,
+        dnssec_valid: None,
+        caa,
+        wildcard,
+        txt_all,
     }
 }
 
@@ -2006,6 +2317,25 @@ async fn collect_txt_records(
         }
     }
     Ok(dedupe_sorted(values))
+}
+
+async fn collect_caa_records(
+    resolver: &TokioResolver,
+    domain: &str,
+) -> std::result::Result<Vec<String>, ResolveError> {
+    let lookup = resolver.lookup(domain, RecordType::CAA).await?;
+    let values = lookup
+        .iter()
+        .filter_map(|record| {
+            if let RData::CAA(caa) = record {
+                let value = String::from_utf8_lossy(caa.raw_value()).to_string();
+                Some(format!("{} {} {}", caa.issuer_critical() as u8, caa.tag(), value))
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    Ok(values)
 }
 
 async fn has_dnssec_material(resolver: &TokioResolver, domain: &str) -> bool {
@@ -2137,6 +2467,13 @@ async fn fetch_tls_info(connector: &TlsConnector, resolver: &TokioResolver, doma
         self_signed: None,
         tls_version: None,
         cipher: None,
+        san: vec![],
+        key_algorithm: None,
+        key_size: None,
+        signature_algorithm: None,
+        cert_fingerprint: None,
+        ct_logged: None,
+        ocsp_must_staple: None,
     };
 
     let Ok(server_name) = ServerName::try_from(domain.clone()) else {
@@ -2192,8 +2529,9 @@ async fn fetch_tls_info(connector: &TlsConnector, resolver: &TokioResolver, doma
         return row;
     };
 
+    let fingerprint = format!("{:x}", Sha256::digest(peer_cert.as_ref()));
     if let Ok((_, cert)) = X509Certificate::from_der(peer_cert.as_ref()) {
-        populate_tls_cert_fields(&mut row, &cert);
+        populate_tls_cert_fields(&mut row, &cert, fingerprint);
         row.status = ScanStatus::Ok;
         row.error_kind = None;
     } else {
@@ -2203,7 +2541,7 @@ async fn fetch_tls_info(connector: &TlsConnector, resolver: &TokioResolver, doma
     row
 }
 
-fn populate_tls_cert_fields(row: &mut TlsRow, cert: &X509Certificate<'_>) {
+fn populate_tls_cert_fields(row: &mut TlsRow, cert: &X509Certificate<'_>, cert_fingerprint: String) {
     let issuer = cert.issuer().to_string();
     let subject = cert.subject().to_string();
     let valid_from = asn1_date(cert.validity().not_before.timestamp());
@@ -2214,6 +2552,7 @@ fn populate_tls_cert_fields(row: &mut TlsRow, cert: &X509Certificate<'_>) {
     row.valid_from = valid_from;
     row.valid_to = valid_to;
     row.self_signed = Some(cert.issuer() == cert.subject());
+    row.cert_fingerprint = Some(cert_fingerprint);
 
     if let Some(valid_to) = valid_to {
         let today = Utc::now().date_naive();
@@ -2223,6 +2562,79 @@ fn populate_tls_cert_fields(row: &mut TlsRow, cert: &X509Certificate<'_>) {
     } else {
         row.expired = None;
     }
+
+    // SAN
+    if let Ok(Some(ext)) = cert.subject_alternative_name() {
+        row.san = ext.value.general_names.iter().filter_map(|name| match name {
+            GeneralName::DNSName(s) => Some(s.to_string()),
+            GeneralName::IPAddress(b) => {
+                if b.len() == 4 {
+                    let ip = std::net::Ipv4Addr::new(b[0], b[1], b[2], b[3]);
+                    Some(ip.to_string())
+                } else if b.len() == 16 {
+                    let mut bytes = [0u8; 16];
+                    bytes.copy_from_slice(b);
+                    Some(std::net::Ipv6Addr::from(bytes).to_string())
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }).collect();
+    }
+
+    // key algorithm + size
+    let pkey = cert.public_key();
+    let key_alg_oid = pkey.algorithm.algorithm.to_id_string();
+    match key_alg_oid.as_str() {
+        "1.2.840.113549.1.1.1" => {
+            row.key_algorithm = Some("RSA".into());
+            if let Ok(x509_parser::public_key::PublicKey::RSA(rsa)) = pkey.parsed() {
+                row.key_size = Some(rsa.key_size() as i32);
+            }
+        }
+        "1.2.840.10045.2.1" => {
+            let (name, bits) = pkey.algorithm.parameters.as_ref()
+                .and_then(|p| p.as_oid().ok())
+                .map(|oid| match oid.to_id_string().as_str() {
+                    "1.2.840.10045.3.1.7" => ("P-256", 256i32),
+                    "1.3.132.0.34"        => ("P-384", 384i32),
+                    "1.3.132.0.35"        => ("P-521", 521i32),
+                    _                     => ("EC", 0i32),
+                })
+                .unwrap_or(("EC", 0));
+            row.key_algorithm = Some(name.into());
+            if bits > 0 { row.key_size = Some(bits); }
+        }
+        "1.3.101.112" => { row.key_algorithm = Some("Ed25519".into()); row.key_size = Some(256); }
+        "1.3.101.113" => { row.key_algorithm = Some("Ed448".into());   row.key_size = Some(448); }
+        _ => {}
+    }
+
+    // signature algorithm
+    let sig_oid = cert.signature_algorithm.algorithm.to_id_string();
+    row.signature_algorithm = Some(match sig_oid.as_str() {
+        "1.2.840.113549.1.1.11" => "SHA256withRSA".into(),
+        "1.2.840.113549.1.1.12" => "SHA384withRSA".into(),
+        "1.2.840.113549.1.1.13" => "SHA512withRSA".into(),
+        "1.2.840.10045.4.3.2"   => "SHA256withECDSA".into(),
+        "1.2.840.10045.4.3.3"   => "SHA384withECDSA".into(),
+        "1.2.840.10045.4.3.4"   => "SHA512withECDSA".into(),
+        "1.3.101.112"           => "Ed25519".into(),
+        "1.3.101.113"           => "Ed448".into(),
+        other                   => other.into(),
+    });
+
+    // CT logged: SCT list extension OID 1.3.6.1.4.1.11129.2.4.2
+    row.ct_logged = Some(cert.extensions().iter().any(|ext| {
+        ext.oid.to_id_string() == "1.3.6.1.4.1.11129.2.4.2"
+    }));
+
+    // OCSP must-staple: TLS Feature extension OID 1.3.6.1.5.5.7.1.24
+    // contains a SEQUENCE of INTEGER; feature 5 (status_request) = DER 02 01 05
+    row.ocsp_must_staple = cert.extensions().iter()
+        .find(|ext| ext.oid.to_id_string() == "1.3.6.1.5.5.7.1.24")
+        .map(|ext| ext.value.windows(3).any(|w| w == [0x02, 0x01, 0x05]));
 }
 
 fn asn1_date(ts: i64) -> Option<NaiveDate> {
@@ -2299,48 +2711,42 @@ async fn dispatcher_loop_ports(
 }
 
 async fn fetch_ports_info(resolver: &TokioResolver, domain: String, args: &PortsArgs) -> PortsRow {
-    let (ip, error_kind) = match resolve_first_ip(resolver, &domain).await {
-        Ok(ip) => (Some(ip), None),
-        Err(kind) => (None, Some(kind)),
+    let ip = match resolve_first_ip(resolver, &domain).await {
+        Ok(ip) => ip,
+        Err(_) => return PortsRow { domain, ip: None, results: vec![] },
     };
 
-    let mut open_ports = Vec::new();
-    let mut last_probe_error = error_kind;
+    let timeout = args.connect_timeout;
+    let probe_results = futures_util::future::join_all(
+        PORTS.iter().map(|&(port, _)| port_open(ip, port, timeout)),
+    ).await;
 
-    if let Some(ip) = ip {
-        let timeout = args.connect_timeout;
-        let all_ports: Vec<u16> = STANDARD_PORTS.into_iter().chain(EXTRA_PORTS).collect();
-        let results = futures_util::future::join_all(
-            all_ports.iter().map(|&port| port_open(ip, port, timeout)),
-        )
-        .await;
-        for (port, result) in all_ports.into_iter().zip(results) {
-            match result {
-                Ok(true) => open_ports.push(port as i32),
-                Ok(false) => {}
-                Err(kind) => last_probe_error = Some(kind),
-            }
+    let mut results: Vec<PortResult> = PORTS.iter().zip(probe_results)
+        .map(|(&(port, service), result)| PortResult {
+            port,
+            service,
+            open: result.unwrap_or(false),
+            banner: None,
+        })
+        .collect();
+
+    // Grab banners concurrently for banner-eligible open ports
+    let banner_ports: Vec<u16> = results.iter()
+        .filter(|r| r.open && BANNER_PORTS.contains(&r.port))
+        .map(|r| r.port)
+        .collect();
+
+    let banners = futures_util::future::join_all(
+        banner_ports.iter().map(|&port| grab_banner(ip, port)),
+    ).await;
+
+    for (port, banner) in banner_ports.iter().zip(banners) {
+        if let Some(r) = results.iter_mut().find(|r| r.port == *port) {
+            r.banner = banner;
         }
     }
 
-    PortsRow {
-        domain,
-        status: if ip.is_some() { ScanStatus::Ok } else { ScanStatus::Error },
-        error_kind: if ip.is_some() { last_probe_error.filter(|_| open_ports.is_empty()) } else { last_probe_error },
-        ip: ip.map(|ip| ip.to_string()),
-        p80: open_ports.contains(&80),
-        p443: open_ports.contains(&443),
-        p22: open_ports.contains(&22),
-        p21: open_ports.contains(&21),
-        p25: open_ports.contains(&25),
-        p587: open_ports.contains(&587),
-        p3306: open_ports.contains(&3306),
-        p5432: open_ports.contains(&5432),
-        p6379: open_ports.contains(&6379),
-        p8080: open_ports.contains(&8080),
-        p8443: open_ports.contains(&8443),
-        open_ports,
-    }
+    PortsRow { domain, ip: Some(ip.to_string()), results }
 }
 
 async fn port_open(ip: IpAddr, port: u16, timeout: Duration) -> std::result::Result<bool, ErrorKind> {
@@ -2352,9 +2758,22 @@ async fn port_open(ip: IpAddr, port: u16, timeout: Duration) -> std::result::Res
     }
 }
 
+async fn grab_banner(ip: IpAddr, port: u16) -> Option<String> {
+    use tokio::io::{AsyncBufReadExt, BufReader};
+    let timeout = Duration::from_millis(500);
+    let addr = SocketAddr::new(ip, port);
+    let stream = tokio::time::timeout(timeout, TcpStream::connect(addr))
+        .await.ok()?.ok()?;
+    let mut lines = BufReader::new(stream).lines();
+    let line = tokio::time::timeout(timeout, lines.next_line())
+        .await.ok()?.ok()??;
+    let trimmed = line.trim().to_string();
+    if trimmed.is_empty() { None } else { Some(trimmed) }
+}
+
 // ---- HTTP row fetchers ----
 
-async fn fetch_domain(client: &Client, resolver: &TokioResolver, domain: String, args: &ScanArgs) -> Row {
+async fn fetch_domain(client: &Client, resolver: &TokioResolver, domain: String, args: &ScanArgs) -> (Row, Option<HttpHeadersRow>) {
     let start = Instant::now();
 
     let ip = resolve_first_ip(resolver, &domain).await.ok().map(|ip| ip.to_string());
@@ -2365,18 +2784,27 @@ async fn fetch_domain(client: &Client, resolver: &TokioResolver, domain: String,
             continue;
         }
         match fetch_url(client, &url, args).await {
-            Ok(mut row) => {
-                row.domain = domain;
+            Ok((mut row, mut headers)) => {
+                let redirect_chain = if row.final_url.as_deref() != Some(url.as_str()) {
+                    vec![url.clone()]
+                } else {
+                    vec![]
+                };
+                row.domain = domain.clone();
                 row.ip = ip;
                 row.elapsed_ms = start.elapsed().as_millis() as u64;
-                return row;
+                row.redirect_chain = redirect_chain;
+                if let Some(h) = headers.as_mut() {
+                    h.domain = domain;
+                }
+                return (row, headers);
             }
             Err(e) => last_err = Some(e),
         }
     }
 
     let kind = last_err.and_then(|e| e.kind).unwrap_or(ErrorKind::Other);
-    Row {
+    (Row {
         domain,
         status: ScanStatus::Error,
         ip,
@@ -2388,7 +2816,9 @@ async fn fetch_domain(client: &Client, resolver: &TokioResolver, domain: String,
         powered_by: None,
         error_kind: Some(kind),
         elapsed_ms: start.elapsed().as_millis() as u64,
-    }
+        redirect_chain: vec![],
+        cms: None,
+    }, None)
 }
 
 fn candidate_urls(domain: &str) -> [String; 4] {
@@ -2472,8 +2902,8 @@ async fn raw_http_redirect_location(
     None
 }
 
-async fn fetch_url(client: &Client, url: &str, args: &ScanArgs) -> std::result::Result<Row, FetchErr> {
-    let row = fetch_url_inner(client, url, args).await?;
+async fn fetch_url(client: &Client, url: &str, args: &ScanArgs) -> std::result::Result<(Row, Option<HttpHeadersRow>), FetchErr> {
+    let (row, headers) = fetch_url_inner(client, url, args).await?;
 
     if row.status_code == Some(400)
         && url.starts_with("http://")
@@ -2486,14 +2916,14 @@ async fn fetch_url(client: &Client, url: &str, args: &ScanArgs) -> std::result::
         }
     }
 
-    Ok(row)
+    Ok((row, headers))
 }
 
 async fn fetch_url_inner(
     client: &Client,
     url: &str,
     args: &ScanArgs,
-) -> std::result::Result<Row, FetchErr> {
+) -> std::result::Result<(Row, Option<HttpHeadersRow>), FetchErr> {
     let resp = client.get(url).send().await.map_err(|e| FetchErr {
         kind: Some(classify_reqwest_error(&e)),
     })?;
@@ -2501,16 +2931,23 @@ async fn fetch_url_inner(
     let final_url = resp.url().to_string();
     let status = resp.status();
     let status_u16 = status.as_u16();
-    let server = resp
-        .headers()
-        .get("server")
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_string());
-    let powered_by = resp
-        .headers()
-        .get("x-powered-by")
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_string());
+
+    let hdr = |h: &str| -> Option<String> {
+        resp.headers()
+            .get(h)
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string())
+    };
+
+    let server     = hdr("server");
+    let powered_by = hdr("x-powered-by");
+    let hsts                   = hdr("strict-transport-security");
+    let csp                    = hdr("content-security-policy");
+    let x_frame_options        = hdr("x-frame-options");
+    let x_content_type_options = hdr("x-content-type-options");
+    let cors_origin            = hdr("access-control-allow-origin");
+    let referrer_policy        = hdr("referrer-policy");
+    let permissions_policy     = hdr("permissions-policy");
 
     let max_bytes = args.max_bytes();
     let mut body: Vec<u8> = Vec::with_capacity(max_bytes.min(65_536));
@@ -2549,12 +2986,13 @@ async fn fetch_url_inner(
     } else {
         Some(format!("{:x}", md5::compute(&body)))
     };
+    let cms = detect_cms(powered_by.as_deref(), &body);
 
-    Ok(Row {
+    let row = Row {
         domain: String::new(),
         status: ScanStatus::Ok,
         ip: None,
-        final_url: Some(final_url),
+        final_url: Some(final_url.clone()),
         status_code: Some(status_u16),
         title,
         body_hash,
@@ -2562,7 +3000,22 @@ async fn fetch_url_inner(
         powered_by,
         error_kind,
         elapsed_ms: 0,
-    })
+        redirect_chain: vec![],
+        cms,
+    };
+
+    let headers = HttpHeadersRow {
+        domain: String::new(),
+        hsts,
+        csp,
+        x_frame_options,
+        x_content_type_options,
+        cors_origin,
+        referrer_policy,
+        permissions_policy,
+    };
+
+    Ok((row, Some(headers)))
 }
 
 fn extract_title(body: &[u8]) -> Option<String> {
@@ -2589,6 +3042,42 @@ fn extract_title(body: &[u8]) -> Option<String> {
     } else {
         Some(trimmed)
     }
+}
+
+fn detect_cms(powered_by: Option<&str>, body: &[u8]) -> Option<String> {
+    if let Some(pb) = powered_by {
+        let pb_lc = pb.to_ascii_lowercase();
+        if pb_lc.contains("wordpress") { return Some("WordPress".into()); }
+        if pb_lc.contains("drupal")    { return Some("Drupal".into()); }
+        if pb_lc.contains("joomla")    { return Some("Joomla".into()); }
+        if pb_lc.contains("typo3")     { return Some("TYPO3".into()); }
+        if pb_lc.contains("wix")       { return Some("Wix".into()); }
+    }
+    let text = String::from_utf8_lossy(body);
+    let lower = text.to_ascii_lowercase();
+    // meta generator tag
+    if let Some(start) = lower.find(r#"name="generator""#).or_else(|| lower.find(r#"name='generator'"#)) {
+        let snippet = &lower[start.saturating_sub(200)..];
+        if snippet.contains("wordpress") { return Some("WordPress".into()); }
+        if snippet.contains("drupal")    { return Some("Drupal".into()); }
+        if snippet.contains("joomla")    { return Some("Joomla".into()); }
+        if snippet.contains("typo3")     { return Some("TYPO3".into()); }
+        if snippet.contains("wix")       { return Some("Wix".into()); }
+    }
+    // body fingerprints
+    if lower.contains("wp-content/") || lower.contains("wp-includes/") {
+        return Some("WordPress".into());
+    }
+    if lower.contains("drupal.settings") || lower.contains("/sites/default/files/") {
+        return Some("Drupal".into());
+    }
+    if lower.contains("/components/com_") {
+        return Some("Joomla".into());
+    }
+    if lower.contains("typo3conf/") || lower.contains("typo3temp/") {
+        return Some("TYPO3".into());
+    }
+    None
 }
 
 fn classify_reqwest_error(e: &reqwest::Error) -> ErrorKind {
@@ -2958,7 +3447,14 @@ async fn cmd_subdomains(args: SubdomainsArgs) -> Result<()> {
 // ---- whois subcommand ----
 
 async fn fetch_whois(domain: String, connect_timeout: Duration) -> WhoisRow {
-    let mut row = WhoisRow { domain: domain.clone(), registrar: None, whois_created: None };
+    let mut row = WhoisRow {
+        domain: domain.clone(),
+        registrar: None,
+        whois_created: None,
+        expires_at: None,
+        status: None,
+        dnssec_delegated: None,
+    };
 
     // Resolve whois.nic.ch and prefer IPv4 — IPv6 is often unreachable.
     let addrs: Vec<std::net::SocketAddr> =
@@ -2995,25 +3491,53 @@ async fn fetch_whois(domain: String, connect_timeout: Duration) -> WhoisRow {
         }
     }
 
-    // Parse: label line ends with ':', value is the next non-empty line.
-    let mut i = 0;
-    while i < lines.len() {
-        let line = lines[i].trim();
-        if line.eq_ignore_ascii_case("Registrar:") {
-            if let Some(val) = lines[i + 1..].iter().find(|l| !l.trim().is_empty()) {
-                row.registrar = Some(val.trim().to_string());
+    parse_whois_response(&mut row, &lines);
+    row
+}
+
+fn parse_whois_response(row: &mut WhoisRow, lines: &[String]) {
+    // Helper: extract value — either inline after "Key: value" or from the next non-empty line
+    let next_value = |i: usize, label_len: usize| -> Option<String> {
+        let inline = lines[i][label_len..].trim().to_string();
+        if !inline.is_empty() {
+            Some(inline)
+        } else {
+            lines[i + 1..].iter().find(|l| !l.trim().is_empty()).map(|l| l.trim().to_string())
+        }
+    };
+
+    for (i, raw_line) in lines.iter().enumerate() {
+        let line = raw_line.trim();
+        let lc = line.to_ascii_lowercase();
+
+        if lc.starts_with("registrar:") && row.registrar.is_none() {
+            row.registrar = next_value(i, "registrar:".len());
+        } else if lc.starts_with("first registration date:") {
+            if let Some(val) = next_value(i, "first registration date:".len()) {
+                let s = val.trim_start_matches("before").trim().to_string();
+                row.whois_created = chrono::NaiveDate::parse_from_str(&s, "%Y-%m-%d").ok()
+                    .or_else(|| chrono::NaiveDate::parse_from_str(s.get(..10).unwrap_or(""), "%Y-%m-%d").ok());
+            }
+        } else if lc.starts_with("expiration date:") || lc.starts_with("expires:") || lc.starts_with("expiry date:") {
+            let key_len = if lc.starts_with("expiration date:") { "expiration date:".len() }
+                          else if lc.starts_with("expiry date:")    { "expiry date:".len() }
+                          else                                       { "expires:".len() };
+            if let Some(val) = next_value(i, key_len) {
+                row.expires_at = chrono::NaiveDate::parse_from_str(val.trim(), "%Y-%m-%d").ok()
+                    .or_else(|| chrono::NaiveDate::parse_from_str(val.get(..10).unwrap_or(""), "%Y-%m-%d").ok());
+            }
+        } else if lc.starts_with("state:") || lc.starts_with("status:") {
+            let key_len = if lc.starts_with("state:") { "state:".len() } else { "status:".len() };
+            if row.status.is_none() {
+                row.status = next_value(i, key_len);
+            }
+        } else if lc.starts_with("dnssec:") {
+            if let Some(val) = next_value(i, "dnssec:".len()) {
+                row.dnssec_delegated = Some(val.to_ascii_lowercase().contains("signed delegation"));
             }
         }
-        if line.eq_ignore_ascii_case("First registration date:") {
-            if let Some(val) = lines[i + 1..].iter().find(|l| !l.trim().is_empty()) {
-                let date_str = val.trim().trim_start_matches("before").trim();
-                row.whois_created = chrono::NaiveDate::parse_from_str(date_str, "%Y-%m-%d").ok();
-            }
-        }
-        i += 1;
     }
 
-    row
 }
 
 async fn dispatcher_loop_whois(
@@ -3068,17 +3592,25 @@ fn flush_whois_batch(conn: &duckdb::Connection, batch: &mut Vec<WhoisRow>) -> Re
     conn.execute_batch("BEGIN")?;
     {
         let mut stmt = conn.prepare(
-            "INSERT INTO domains (domain, whois_registrar, whois_created)
-             VALUES (?1, ?2, ?3)
+            "INSERT INTO whois_info
+                (domain, registrar, whois_created, expires_at, status, dnssec_delegated, queried_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, NOW())
              ON CONFLICT(domain) DO UPDATE SET
-                whois_registrar = excluded.whois_registrar,
-                whois_created   = excluded.whois_created",
+                registrar        = excluded.registrar,
+                whois_created    = excluded.whois_created,
+                expires_at       = excluded.expires_at,
+                status           = excluded.status,
+                dnssec_delegated = excluded.dnssec_delegated,
+                queried_at       = excluded.queried_at",
         )?;
         for row in batch.iter() {
             stmt.execute(duckdb::params![
                 row.domain.as_str(),
                 row.registrar.as_deref(),
                 row.whois_created.map(|d| d.to_string()),
+                row.expires_at.map(|d| d.to_string()),
+                row.status.as_deref(),
+                row.dnssec_delegated,
             ])?;
         }
     }
@@ -3127,7 +3659,10 @@ async fn cmd_whois(args: WhoisArgs) -> Result<()> {
         let sql = if args.rescan {
             "SELECT domain FROM domains ORDER BY domain".to_string()
         } else {
-            "SELECT domain FROM domains WHERE whois_registrar IS NULL ORDER BY domain".to_string()
+            "SELECT d.domain FROM domains d
+             LEFT JOIN whois_info w ON w.domain = d.domain
+             WHERE w.domain IS NULL
+             ORDER BY d.domain".to_string()
         };
         let mut stmt = conn.prepare(&sql)?;
         stmt.query_map([], |row| row.get(0))?
@@ -3290,20 +3825,6 @@ fn sql_string_list(values: &[String]) -> String {
     }
 }
 
-fn sql_int_list(values: &[i32]) -> String {
-    if values.is_empty() {
-        "[]".to_string()
-    } else {
-        format!(
-            "[{}]",
-            values
-                .iter()
-                .map(|value| value.to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
-        )
-    }
-}
 
 fn sql_bool(value: bool) -> &'static str {
     if value { "TRUE" } else { "FALSE" }
@@ -3556,9 +4077,10 @@ mod tests {
                 final_url VARCHAR, status_code INTEGER,
                 title VARCHAR, body_hash VARCHAR, error_kind VARCHAR,
                 elapsed_ms BIGINT, ip VARCHAR, updated_at TIMESTAMP,
-                server VARCHAR, powered_by VARCHAR
+                server VARCHAR, powered_by VARCHAR,
+                redirect_chain VARCHAR[], cms VARCHAR
             );
-            INSERT INTO domains VALUES ('test.ch', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+            INSERT INTO domains VALUES ('test.ch', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
         ").unwrap();
 
         let mut batch = vec![Row {
@@ -3573,6 +4095,8 @@ mod tests {
             powered_by: None,
             error_kind: None,
             elapsed_ms: 123,
+            redirect_chain: vec![],
+            cms: None,
         }];
 
         flush_batch(&conn, &mut batch).unwrap();
@@ -3624,6 +4148,7 @@ mod tests {
             no_progress: true,
             limit_success: None,
             backfill: None,
+            retry_errors: None,
         })
         .await
         .unwrap();
@@ -3636,6 +4161,7 @@ mod tests {
             progress_interval: Duration::from_secs(5),
             no_progress: true,
             rescan: false,
+            retry_errors: None,
         })
         .await
         .unwrap();
@@ -3650,6 +4176,7 @@ mod tests {
             progress_interval: Duration::from_secs(5),
             no_progress: true,
             rescan: false,
+            retry_errors: None,
         })
         .await
         .unwrap();
@@ -3663,6 +4190,7 @@ mod tests {
             progress_interval: Duration::from_secs(5),
             no_progress: true,
             rescan: false,
+            retry_errors: None,
         })
         .await
         .unwrap();

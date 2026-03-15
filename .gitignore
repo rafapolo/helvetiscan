@@ -7,6 +7,7 @@ node_modules/
 # Data
 data/
 investor/
+tasks/
 
 # Generated web assets (too large for git; run `bun run convert` to regenerate)
 web/*.arrow
