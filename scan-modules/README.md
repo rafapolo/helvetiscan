@@ -1,4 +1,4 @@
-# SwissAttackSurface.ch — Scan Modules Documentation
+# Helvetiscan — Scan Modules Documentation
 
 **Complete Technical Reference for Each Scanning Component**
 
@@ -6,7 +6,7 @@
 
 ## Overview
 
-This directory contains detailed technical documentation for each of the 7 core scanning modules in SwissAttackSurface.ch. Each module is independently documented with:
+This directory contains detailed technical documentation for each of the 7 core scanning modules in Helvetiscan. Each module is independently documented with:
 
 - **What we scan** (technical details)
 - **Why it matters** (regulatory & business impact)
@@ -166,7 +166,7 @@ Domain lifecycle, typosquatting, and subdomain takeover risks.
 
 ```
 ┌─────────────────────────────────────────┐
-│       SWISSATTACKSURFACE.CH SCANNER     │
+│           HELVETISCAN SCANNER           │
 ├─────────────────────────────────────────┤
 │                                         │
 │  Input: Domain name (e.g., company.ch) │
@@ -264,7 +264,7 @@ Domain lifecycle, typosquatting, and subdomain takeover risks.
 ### For a Healthcare Provider (GDPR-sensitive)
 
 ```
-SwissAttackSurface.ch scan: hospital.ch
+helvetiscan scan: hospital.ch
 
 Results:
   1. Email Security: DMARC p=none (HIGH RISK)
@@ -285,7 +285,7 @@ Timeline to ISG Compliance: 30 days (if recommendations followed)
 ### For a Fintech Company (DORA-regulated)
 
 ```
-SwissAttackSurface.ch scan: paymentbank.ch
+helvetiscan scan: paymentbank.ch
 
 Results:
   1. Technology: WordPress 5.0.0 (35 months behind, 25+ CVEs)
@@ -307,7 +307,7 @@ Actions Required: 3 (all with clear timelines)
 ### For an SME (General Security)
 
 ```
-SwissAttackSurface.ch scan: startup.ch
+helvetiscan scan: startup.ch
 
 Results:
   1. Email Security: SPF present, DKIM weak (1024-bit), DMARC missing
@@ -369,4 +369,4 @@ All modules support **continuous scanning**:
 
 **Last Updated:** March 15, 2026
 **Version:** 1.0 (Production Ready)
-**Maintained by:** SwissAttackSurface.ch Engineering Team
+**Maintained by:** Helvetiscan Engineering Team
