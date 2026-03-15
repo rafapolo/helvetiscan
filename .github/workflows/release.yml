@@ -1,0 +1,83 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact: helvetiscan-aarch64-apple-darwin
+
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            artifact: helvetiscan-x86_64-unknown-linux-gnu
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ matrix.target }}-cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ matrix.target }}-cargo-
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y libduckdb-dev
+
+      - name: Build (macOS, bundled DuckDB)
+        if: runner.os == 'macOS'
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Build (Linux, system DuckDB)
+        if: runner.os == 'Linux'
+        env:
+          DUCKDB_LIB_DIR: /usr/lib/x86_64-linux-gnu
+        run: cargo build --release --target ${{ matrix.target }} --no-default-features
+
+      - name: Rename binary
+        run: |
+          cp target/${{ matrix.target }}/release/helvetiscan ${{ matrix.artifact }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            helvetiscan-aarch64-apple-darwin
+            helvetiscan-x86_64-unknown-linux-gnu
+          generate_release_notes: true
