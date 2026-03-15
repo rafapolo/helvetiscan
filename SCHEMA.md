@@ -19,6 +19,8 @@ erDiagram
         VARCHAR   server
         VARCHAR   powered_by
         TIMESTAMP updated_at
+        VARCHAR   whois_registrar
+        DATE      whois_created
     }
     dns_info {
         VARCHAR   domain PK
@@ -103,6 +105,8 @@ Populated by `helvetiscan scan`. One row per input domain.
 | `server` | VARCHAR | `Server:` response header |
 | `powered_by` | VARCHAR | `X-Powered-By:` response header |
 | `updated_at` | TIMESTAMP | Last scan time |
+| `whois_registrar` | VARCHAR | Registrar name from whois.nic.ch |
+| `whois_created` | DATE | First registration date (`before YYYY-MM-DD` stored as date) |
 
 ### `dns_info`
 
@@ -195,6 +199,7 @@ Populated by `helvetiscan subdomains`. Composite primary key on `(domain, subdom
 | `tls` | `--full tls` | TLS cert + version info |
 | `ports` | `--full ports` | TCP port probes |
 | `subdomains` | `--full subdomains` | AXFR + NS/MX subdomain harvest |
+| `whois` | — | WHOIS registrar + registration date (whois.nic.ch, port 43) |
 | — | `--full all` | Run scan → dns → tls → ports in sequence |
 
 Single-domain shortcut: `helvetiscan --domain example.ch --all`
@@ -260,4 +265,11 @@ SELECT domain, subdomain, discovered_at
 FROM subdomains
 WHERE source = 'axfr'
 ORDER BY domain, subdomain;
+
+-- Domains grouped by registrar.
+SELECT whois_registrar, COUNT(*) AS domains
+FROM domains
+WHERE whois_registrar IS NOT NULL
+GROUP BY whois_registrar
+ORDER BY domains DESC;
 ```
