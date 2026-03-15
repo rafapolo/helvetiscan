@@ -452,8 +452,6 @@ pub(crate) async fn progress_reporter(
     let mut last_t = Instant::now();
     let mut first = true;
 
-    eprintln!("\n· helveticscan ·");
-
     loop {
         tokio::select! {
             _ = &mut done_rx => {
