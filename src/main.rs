@@ -26,6 +26,7 @@ use tokio_rustls::TlsConnector;
 use webpki_roots::TLS_SERVER_ROOTS;
 use sha2::{Digest, Sha256};
 use x509_parser::prelude::{FromDer, GeneralName, X509Certificate};
+use serde_json;
 
 const DISPATCH_BATCH_SIZE: usize = 255;
 const DISPATCH_BATCH_SLEEP: Duration = Duration::from_millis(500);
@@ -589,8 +590,8 @@ struct WhoisRow {
 #[derive(Debug)]
 struct SubdomainRow {
     domain: String,
-    found: Vec<String>,   // FQDNs of discovered subdomains
-    source: &'static str, // "axfr" | "mx_ns"
+    /// Each entry is (fqdn, source) where source is "ct" | "axfr" | "mx_ns"
+    found: Vec<(String, &'static str)>,
 }
 
 #[derive(Debug)]
@@ -842,7 +843,7 @@ fn ensure_schema(conn: &duckdb::Connection) -> Result<()> {
             (t.days_remaining BETWEEN 0 AND 29)                                         AS cert_expiring,
             (NOT coalesce(dns.dnssec_signed, false))                                    AS no_dnssec,
             (dns.txt_dmarc IS NULL)                                                     AS no_dmarc,
-            (w.expires_at < CURRENT_DATE + INTERVAL 30 DAYS)                           AS domain_expiring,
+            (w.expires_at::TIMESTAMP < (current_timestamp::TIMESTAMP + INTERVAL '30 days'))                           AS domain_expiring,
             EXISTS(
                 SELECT 1 FROM ports_info p
                 WHERE p.domain = d.domain AND p.open = true
@@ -863,7 +864,7 @@ fn ensure_schema(conn: &duckdb::Connection) -> Result<()> {
                 - CASE WHEN t.days_remaining BETWEEN 0 AND 29                             THEN 15 ELSE 0 END
                 - CASE WHEN NOT coalesce(dns.dnssec_signed, false)                        THEN  5 ELSE 0 END
                 - CASE WHEN dns.txt_dmarc IS NULL                                         THEN  7 ELSE 0 END
-                - CASE WHEN w.expires_at < CURRENT_DATE + INTERVAL 30 DAYS               THEN  5 ELSE 0 END
+                - CASE WHEN w.expires_at::TIMESTAMP < (current_timestamp::TIMESTAMP + INTERVAL '30 days')               THEN  5 ELSE 0 END
                 - CASE WHEN EXISTS(
                       SELECT 1 FROM ports_info p
                       WHERE p.domain = d.domain AND p.open = true
@@ -3199,15 +3200,80 @@ async fn axfr_from_ns_ip(ns_ip: IpAddr, domain: &str) -> Vec<String> {
     found
 }
 
-/// Discover subdomains via AXFR from authoritative NSes, falling back to NS/MX record harvest.
+/// Query crt.sh Certificate Transparency logs for known subdomains of `domain`.
+async fn fetch_ct_subdomains(domain: &str) -> Vec<String> {
+    let url = format!("https://crt.sh/?q=%.{}&output=json", domain);
+    let apex = domain.trim_end_matches('.').to_ascii_lowercase();
+    let suffix = format!(".{apex}");
+
+    let client = match reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => return vec![],
+    };
+
+    // Try once; on failure retry once
+    let text = match client.get(&url).send().await {
+        Ok(r) => match r.text().await {
+            Ok(t) => t,
+            Err(_) => return vec![],
+        },
+        Err(_) => match client.get(&url).send().await {
+            Ok(r) => match r.text().await {
+                Ok(t) => t,
+                Err(_) => return vec![],
+            },
+            Err(_) => return vec![],
+        },
+    };
+
+    let json: Vec<serde_json::Value> = match serde_json::from_str(&text) {
+        Ok(v) => v,
+        Err(_) => return vec![],
+    };
+
+    let mut found = Vec::new();
+    for entry in &json {
+        if let Some(name_value) = entry.get("name_value").and_then(|v| v.as_str()) {
+            for name in name_value.split('\n') {
+                let clean = name.trim().to_ascii_lowercase();
+                if clean.ends_with(&suffix) && clean != apex {
+                    found.push(clean);
+                }
+            }
+        }
+    }
+    found.sort();
+    found.dedup();
+    found
+}
+
+/// Discover subdomains via CT logs (primary), AXFR (opportunistic), and NS/MX harvest.
 async fn probe_subdomains(resolver: Arc<TokioResolver>, domain: String) -> SubdomainRow {
-    // Resolve NS records for the domain
+    let apex_bare = domain.trim_end_matches('.').to_ascii_lowercase();
+    let apex_suffix = format!(".{apex_bare}");
+
+    // Accumulate (subdomain, source); first source for a given subdomain wins
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut found: Vec<(String, &'static str)> = Vec::new();
+
+    // 1. CT logs (primary)
+    for sub in fetch_ct_subdomains(&apex_bare).await {
+        if seen.insert(sub.clone()) {
+            found.push((sub, "ct"));
+        }
+    }
+
+    // 2. AXFR (opportunistic) — 2-second pause after CT fetch to rate-limit crt.sh
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
     let ns_list = collect_lookup_strings(&resolver, &domain, RecordType::NS)
         .await
         .unwrap_or_default();
 
-    // Try AXFR from each authoritative NS
-    for ns in &ns_list {
+    'axfr: for ns in &ns_list {
         let ns_host = ns.trim_end_matches('.');
         let mut ns_ips = collect_ip_strings(&resolver, ns_host, RecordType::A)
             .await
@@ -3219,33 +3285,34 @@ async fn probe_subdomains(resolver: Arc<TokioResolver>, domain: String) -> Subdo
         );
         for ip_str in ns_ips {
             if let Ok(ip) = ip_str.parse::<IpAddr>() {
-                let found = axfr_from_ns_ip(ip, &domain).await;
-                if !found.is_empty() {
-                    return SubdomainRow { domain, found, source: "axfr" };
+                let axfr = axfr_from_ns_ip(ip, &domain).await;
+                if !axfr.is_empty() {
+                    for sub in axfr {
+                        if seen.insert(sub.clone()) {
+                            found.push((sub, "axfr"));
+                        }
+                    }
+                    break 'axfr;
                 }
             }
         }
     }
 
-    // Fallback: harvest subdomains embedded in NS and MX record values
+    // 3. NS/MX harvest (fallback)
     let (mx_result, ns_result) = tokio::join!(
         collect_lookup_strings(&resolver, &domain, RecordType::MX),
         collect_lookup_strings(&resolver, &domain, RecordType::NS),
     );
-
-    let apex_bare = domain.trim_end_matches('.').to_ascii_lowercase();
-    let apex_suffix = format!(".{apex_bare}");
-    let mut found = Vec::new();
     for name in ns_result.unwrap_or_default().into_iter().chain(mx_result.unwrap_or_default()) {
         let clean = name.trim_end_matches('.').to_ascii_lowercase();
-        if clean.ends_with(&apex_suffix) {
-            found.push(clean);
+        if clean.ends_with(&apex_suffix) && seen.insert(clean.clone()) {
+            found.push((clean, "mx_ns"));
         }
     }
-    found.sort();
-    found.dedup();
 
-    SubdomainRow { domain, found, source: "mx_ns" }
+    found.sort_by(|a, b| a.0.cmp(&b.0));
+
+    SubdomainRow { domain, found }
 }
 
 async fn dispatcher_loop_subdomains(
@@ -3343,11 +3410,11 @@ fn flush_subdomains_batch(conn: &duckdb::Connection, batch: &mut Vec<SubdomainRo
              ON CONFLICT DO NOTHING",
         )?;
         for row in batch.iter() {
-            for sub in &row.found {
+            for (sub, source) in &row.found {
                 stmt.execute(duckdb::params![
                     row.domain.as_str(),
                     sub.as_str(),
-                    row.source,
+                    source,
                 ])?;
             }
         }
@@ -3533,7 +3600,8 @@ fn parse_whois_response(row: &mut WhoisRow, lines: &[String]) {
             }
         } else if lc.starts_with("dnssec:") {
             if let Some(val) = next_value(i, "dnssec:".len()) {
-                row.dnssec_delegated = Some(val.to_ascii_lowercase().contains("signed delegation"));
+                let lc = val.to_ascii_lowercase();
+                row.dnssec_delegated = Some(lc.starts_with("signed delegation"));
             }
         }
     }
@@ -4224,5 +4292,229 @@ mod tests {
 
         drop(conn);
         let _ = fs::remove_file(&db_path);
+    }
+
+    // ---- detect_cms ----
+
+    #[test]
+    fn wp_content_in_body() {
+        assert_eq!(detect_cms(None, b"<link rel='stylesheet' href='/wp-content/themes/x/style.css'>"), Some("WordPress".into()));
+    }
+
+    #[test]
+    fn wp_includes_in_body() {
+        assert_eq!(detect_cms(None, b"<script src='/wp-includes/js/jquery.js'></script>"), Some("WordPress".into()));
+    }
+
+    #[test]
+    fn powered_by_wordpress() {
+        assert_eq!(detect_cms(Some("WordPress 6.4"), b""), Some("WordPress".into()));
+    }
+
+    #[test]
+    fn drupal_settings_in_body() {
+        assert_eq!(detect_cms(None, b"jQuery.extend(Drupal.settings, {});"), Some("Drupal".into()));
+    }
+
+    #[test]
+    fn joomla_com_in_body() {
+        assert_eq!(detect_cms(None, b"<a href='/components/com_content/'>read more</a>"), Some("Joomla".into()));
+    }
+
+    #[test]
+    fn typo3conf_in_body() {
+        assert_eq!(detect_cms(None, b"<link href='/typo3conf/ext/theme/Resources/Public/main.css'>"), Some("TYPO3".into()));
+    }
+
+    #[test]
+    fn blank_html_returns_none() {
+        assert_eq!(detect_cms(None, b"<!DOCTYPE html><html><head></head><body></body></html>"), None);
+    }
+
+    #[test]
+    fn empty_body_returns_none() {
+        assert_eq!(detect_cms(None, b""), None);
+    }
+
+    // ---- flush_http_headers_batch ----
+
+    #[test]
+    fn flush_http_headers_roundtrip() {
+        let conn = duckdb::Connection::open_in_memory().unwrap();
+        conn.execute_batch("
+            CREATE TABLE http_headers (
+                domain                 VARCHAR PRIMARY KEY,
+                hsts                   VARCHAR,
+                csp                    VARCHAR,
+                x_frame_options        VARCHAR,
+                x_content_type_options VARCHAR,
+                cors_origin            VARCHAR,
+                referrer_policy        VARCHAR,
+                permissions_policy     VARCHAR,
+                scanned_at             TIMESTAMP
+            );
+        ").unwrap();
+
+        // Insert row with all headers populated
+        let mut batch = vec![HttpHeadersRow {
+            domain: "test.ch".into(),
+            hsts: Some("max-age=31536000; includeSubDomains".into()),
+            csp: Some("default-src 'self'".into()),
+            x_frame_options: Some("DENY".into()),
+            x_content_type_options: Some("nosniff".into()),
+            cors_origin: Some("https://example.ch".into()),
+            referrer_policy: Some("no-referrer".into()),
+            permissions_policy: Some("geolocation=()".into()),
+        }];
+        flush_http_headers_batch(&conn, &mut batch).unwrap();
+        assert!(batch.is_empty());
+
+        let hsts: Option<String> = conn
+            .query_row("SELECT hsts FROM http_headers WHERE domain='test.ch'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(hsts.as_deref(), Some("max-age=31536000; includeSubDomains"));
+
+        // Insert row with all headers NULL — verify ON CONFLICT UPDATE overwrites
+        let mut batch2 = vec![HttpHeadersRow {
+            domain: "test.ch".into(),
+            hsts: None,
+            csp: None,
+            x_frame_options: None,
+            x_content_type_options: None,
+            cors_origin: None,
+            referrer_policy: None,
+            permissions_policy: None,
+        }];
+        flush_http_headers_batch(&conn, &mut batch2).unwrap();
+
+        let hsts_after: Option<String> = conn
+            .query_row("SELECT hsts FROM http_headers WHERE domain='test.ch'", [], |r| r.get(0))
+            .unwrap();
+        assert!(hsts_after.is_none(), "ON CONFLICT UPDATE should have overwritten hsts with NULL");
+    }
+
+    // ---- parse_whois_response ----
+
+    fn make_whois_lines(text: &str) -> Vec<String> {
+        text.lines().map(|l| l.to_string()).collect()
+    }
+
+    #[test]
+    fn parses_registrar() {
+        let lines = make_whois_lines("Registrar: Switch\nFirst Registration Date: 2001-01-01\n");
+        let mut row = WhoisRow { domain: "x.ch".into(), registrar: None, whois_created: None, expires_at: None, status: None, dnssec_delegated: None };
+        parse_whois_response(&mut row, &lines);
+        assert_eq!(row.registrar, Some("Switch".into()));
+    }
+
+    #[test]
+    fn parses_registered_date() {
+        let lines = make_whois_lines("First Registration Date: 2001-01-01\n");
+        let mut row = WhoisRow { domain: "x.ch".into(), registrar: None, whois_created: None, expires_at: None, status: None, dnssec_delegated: None };
+        parse_whois_response(&mut row, &lines);
+        assert_eq!(row.whois_created, Some(chrono::NaiveDate::from_ymd_opt(2001, 1, 1).unwrap()));
+    }
+
+    #[test]
+    fn parses_expiration_date() {
+        let lines = make_whois_lines("Expiration Date: 2030-06-15\n");
+        let mut row = WhoisRow { domain: "x.ch".into(), registrar: None, whois_created: None, expires_at: None, status: None, dnssec_delegated: None };
+        parse_whois_response(&mut row, &lines);
+        assert_eq!(row.expires_at, Some(chrono::NaiveDate::from_ymd_opt(2030, 6, 15).unwrap()));
+    }
+
+    #[test]
+    fn parses_state() {
+        let lines = make_whois_lines("State: active\n");
+        let mut row = WhoisRow { domain: "x.ch".into(), registrar: None, whois_created: None, expires_at: None, status: None, dnssec_delegated: None };
+        parse_whois_response(&mut row, &lines);
+        assert_eq!(row.status, Some("active".into()));
+    }
+
+    #[test]
+    fn dnssec_signed_delegation() {
+        let lines = make_whois_lines("DNSSEC: Signed Delegation\n");
+        let mut row = WhoisRow { domain: "x.ch".into(), registrar: None, whois_created: None, expires_at: None, status: None, dnssec_delegated: None };
+        parse_whois_response(&mut row, &lines);
+        assert_eq!(row.dnssec_delegated, Some(true));
+    }
+
+    #[test]
+    fn dnssec_unsigned() {
+        let lines = make_whois_lines("DNSSEC: unsigned delegation\n");
+        let mut row = WhoisRow { domain: "x.ch".into(), registrar: None, whois_created: None, expires_at: None, status: None, dnssec_delegated: None };
+        parse_whois_response(&mut row, &lines);
+        assert_eq!(row.dnssec_delegated, Some(false));
+    }
+
+    // ---- grab_banner ----
+
+    #[tokio::test]
+    async fn grab_banner_returns_line() {
+        use tokio::io::AsyncWriteExt;
+        use tokio::net::TcpListener;
+        use std::net::{IpAddr, Ipv4Addr};
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        tokio::spawn(async move {
+            if let Ok((mut stream, _)) = listener.accept().await {
+                let _ = stream.write_all(b"SSH-2.0-OpenSSH_8.9\r\n").await;
+            }
+        });
+
+        let ip = IpAddr::V4(Ipv4Addr::LOCALHOST);
+        let banner = grab_banner(ip, port).await;
+        assert_eq!(banner, Some("SSH-2.0-OpenSSH_8.9".into()));
+    }
+
+    #[tokio::test]
+    async fn grab_banner_no_listener_returns_none() {
+        use std::net::{IpAddr, Ipv4Addr, TcpListener as StdTcpListener};
+
+        // Bind and immediately drop to get a free port
+        let l = StdTcpListener::bind("127.0.0.1:0").unwrap();
+        let port = l.local_addr().unwrap().port();
+        drop(l);
+
+        let ip = IpAddr::V4(Ipv4Addr::LOCALHOST);
+        assert!(grab_banner(ip, port).await.is_none());
+    }
+
+    // ---- risk_score VIEW ----
+
+    #[test]
+    fn risk_score_view_flags_and_score() {
+        let conn = duckdb::Connection::open_in_memory().unwrap();
+        ensure_schema(&conn).unwrap();
+
+        // Insert a domain with status_code=200 — no http_headers row → missing_hsts should be true
+        conn.execute_batch("
+            INSERT INTO domains (domain, status, status_code)
+            VALUES ('probe.ch', 'ok', 200);
+        ").unwrap();
+
+        let missing_hsts: bool = conn
+            .query_row("SELECT missing_hsts FROM risk_score WHERE domain='probe.ch'", [], |r| r.get(0))
+            .unwrap();
+        assert!(missing_hsts, "missing_hsts should be true when no http_headers row");
+
+        // Open port 3306 → exposed_db_port should be true
+        conn.execute_batch("
+            INSERT INTO ports_info (domain, port, service, open)
+            VALUES ('probe.ch', 3306, 'mysql', true);
+        ").unwrap();
+
+        let exposed_db_port: bool = conn
+            .query_row("SELECT exposed_db_port FROM risk_score WHERE domain='probe.ch'", [], |r| r.get(0))
+            .unwrap();
+        assert!(exposed_db_port, "exposed_db_port should be true when port 3306 is open");
+
+        // Score must be in [0, 100]
+        let score: i64 = conn
+            .query_row("SELECT score FROM risk_score WHERE domain='probe.ch'", [], |r| r.get(0))
+            .unwrap();
+        assert!((0..=100).contains(&score), "score {} should be in [0, 100]", score);
     }
 }

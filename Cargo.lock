@@ -1098,6 +1098,7 @@ dependencies = [
  "md5",
  "reqwest",
  "rustls",
+ "serde_json",
  "sha2",
  "tokio",
  "tokio-rustls",
