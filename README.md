@@ -1,9 +1,8 @@
+## HelvetiScan - Mapping the Swiss Digital Landscape
 
-# helvetiscan
+Scan, map and visualize the entire Swiss `.ch` namespace — over 2.5 million domains. A complete map of Switzerland's digital exposure - unpatched software, spoofable email, expired certificates, orphaned subdomains and beyond.
 
-Process and visualize the entire Swiss `.ch` namespace — ~2.5 million domains mapped to their authoritative nameservers — as an interactive force graph.
-
-The graph exposes the DNS dependency structure of the Swiss internet: who controls the infrastructure, where concentration sits, and what a disruption to a single provider would cascade into.
+This public visualization exposes the DNS dependency structure as an interactive force graph. See it online [here](https://xn--2dk.xyz/dataviz/swiss/?maxPoints=50000&sim=1).
 
 <div align="center">
 
@@ -11,120 +10,113 @@ The graph exposes the DNS dependency structure of the Swiss internet: who contro
 
 </div>
 
-50k domain nodes rendered. See it online [here](https://xn--2dk.xyz/dataviz/swiss/?maxPoints=50000&sim=1).
+ 50k domains on the image. Change `maxPoints` URL parameter for ammount of nodes to visualize.
 
 ---
 
-## What it does
-(work in progress [^1])
+## What it scans
 
-1. **Process** — Python and JS scripts convert raw CSV output to Apache Arrow / Parquet for fast columnar loading.
-2. **Visualize** — A Bun-served web app renders the full graph in-browser via [Cosmograph](https://cosmograph.app/), a WebGL force-graph renderer capable of handling millions of nodes.
-3. **Scan Swiss internet infrastructure** — Rust CLI (`helvetiscan`) scans the `.ch` namespace for HTTP, DNS, TLS, port-level metadata, subdomain discovery, CVE correlation, and email security validation.
+Seven modules, each covering a different layer of exposure:
 
-Node colors encode connectivity:
-- **Blue** — leaf domain (1–2 connections)
-- **Pink** — mid-tier node (3–100 connections)
-- **Orange** — major DNS hub (100+ connections)
+| Module | What it checks |
+|---|---|
+| **TLS & Certificates** | Expiration, chain validity, key strength, TLS version, CT logs |
+| **DNS & DNSSEC** | DNSSEC adoption, CAA records, zone transfers, open resolvers |
+| **HTTP Security Headers** | HSTS, CSP, X-Frame-Options, Referrer-Policy, Permissions-Policy |
+| **Open Ports** | Exposed databases, RDP, SMB, FTP, management interfaces |
+| **Email Security** | SPF, DKIM, DMARC — spoofing readiness across the namespace |
+| **Technology Fingerprinting** | CMS/framework detection, version extraction, CVE correlation |
+| **Domain Protection** | WHOIS expiry, typosquats, homoglyphs, orphaned subdomains |
+
 
 ---
+
+## How to use it?
+
+```
+Swiss internet scanner - HTTP, DNS, TLS and port intelligence for the .ch namespace
+
+Usage: helvetiscan [OPTIONS] [COMMAND]
+
+Commands:
+  init         Populate domains.duckdb from a plain-text domain list (one domain/line)
+  scan         HTTP scan: fetch status, title, server headers for all pending domains
+  dns          Resolve DNS metadata for all domains missing a dns_info row
+  tls          Scan TLS metadata for all domains missing a tls_info row
+  ports        Scan a small fixed set of TCP ports for all domains missing a ports_info row
+  subdomains   Discover subdomains via DNS zone transfer (AXFR) and NS/MX record harvest
+  whois        Fetch WHOIS registrar and registration date for all domains
+  update-cves  Fetch/refresh the CVE catalog from CISA KEV and seed built-in entries
+  classify     Classify domains by industry sector using keyword heuristics
+  benchmark    Compute sector-level risk benchmarks across classified domains
+  help         Print this message or the help of the given subcommand(s)
+
+Options:
+      --domain <DOMAIN>  Scan only this single domain
+      --all              Run HTTP, DNS, TLS, and ports scans together
+      --db <DB>          [default: data/domains.duckdb]
+      --full <FULL>      Full rescan shortcut using default arguments 
+                         [possible values: domain, dns, tls, ports, subdomains, whois, all]
+  -h, --help             Print this help
+```
 
 ## Project structure
 
 ```
 ├── src/
-│   ├── main.rs          # Rust async scraper (tokio + reqwest)
-│   └── process/         # Data conversion scripts (Python + JS)
+│   ├── main.rs              # CLI entry point (clap subcommands, orchestration)
+│   ├── shared.rs            # Shared types, constants, DNS resolver, SQL helpers
+│   ├── schema.rs            # DuckDB schema initialisation
+│   ├── http_scan.rs         # HTTP header analysis, CMS/server fingerprinting
+│   ├── dns_scan.rs          # DNS resolution, DNSSEC, email security integration
+│   ├── tls_scan.rs          # TLS certificate inspection
+│   ├── ports_scan.rs        # Open port detection and banner grabbing
+│   ├── subdomains.rs        # Subdomain discovery (DNS + CT logs)
+│   ├── whois.rs             # WHOIS extraction and domain lifecycle tracking
+│   ├── email_security.rs    # SPF / DKIM / DMARC policy analysis
+│   ├── cve.rs               # CVE catalog and version-range matching
+│   ├── classify.rs          # Domain sector/subsector classification
+│   ├── benchmark.rs         # Performance benchmarks
+│   └── tests.rs             # Unit tests
+├── scan-modules/            # Per-module technical documentation (7 modules)
 ├── web/
-│   ├── index.html       # Cosmograph visualization
-│   ├── serve.js         # Bun static file server
-│   ├── nodes.arrow      # Pre-built graph data (served to browser)
+│   ├── index.html           # Cosmograph visualisation
+│   ├── serve.js             # Bun static file server
+│   ├── nodes.arrow          # Pre-built graph data (served to browser)
 │   └── edges.arrow
-├── data/
-│   ├── domains.duckdb   # Queryable database (DuckDB)
-│   └── ...              # Raw and intermediate data (gitignored)
+├── data/[^1]
+│   ├── domains.duckdb       # Queryable database (DuckDB)
+│   └── ...                  # Raw and intermediate data (gitignored)
 ```
 
 ---
 
-### URL parameters
+## Research directions
 
-| Parameter | Default | Description |
-|---|---|---|
-| `?maxPoints=N` | all | Cap nodes rendered (use for weaker GPUs) |
-| `?sim=1` | off | Enable continuous force simulation |
-| `?labels=0` | on | Disable node labels |
+What the project currently does: Maps the digital landscape → Scans for exposure → Analyzes vulnerabilities → Scores risk → Reports findings
 
----
+The final database can answer questions such as:
 
-**Targeted single-domain scan** (all four passes, prints a summary table):
+- How many .ch domains depend on foreign infrastructure?
+- Which .ch domains expose databases to the open internet?
+- How many Swiss companies can have their email spoofed?
+- How many .ch sites run software with known vulnerabilities?
+- Which Swiss industries have the weakest security posture?
+- How many Swiss domains expire in the next 30 days without auto-renewal?
+- Which open ports appear most frequently across .ch?
+- What's the most common CMS running on .ch domains?
+- How many .ch mail servers use weak DKIM keys?
+- Which Swiss cantons have the most exposed infrastructure?
+- How many .ch domains have orphaned subdomains vulnerable to takeover?
 
-```bash
-helvetiscan --domain migros.ch --all
-```
+## Planned Analyses
 
-**Key scan options** (all have defaults; override only what you need):
+- **Concentration risk** — How many DNS providers does the .ch namespace actually depend on?
+- **Sector patterns** — Which Swiss industries have the weakest security posture?
+- **Attack surface clustering** — Do domains sharing infrastructure share vulnerabilities?
+- **Supply chain exposure** — How many .ch sites are affected by a single vulnerable plugin?
+- **Cascade modeling** — If the top 3 providers go down, how many domains go dark?
+- **Trend detection** — Is DMARC adoption growing? Is DNSSEC adoption stalling?
+- **Threat prediction** — Can new typosquat registrations signal incoming phishing campaigns?
 
-| Flag | Default | Description |
-|---|---|---|
-| `--db` | `data/domains.duckdb` | DuckDB path |
-| `--concurrency` | 500 / 250 / 150 / 300 / 200 | Parallel workers (scan/dns/tls/ports/subdomains) |
-| `--connect-timeout` | `5s` | TCP connect timeout |
-| `--request-timeout` | `20s` | Full HTTP request timeout |
-| `--max-kbytes` | `128` | Body download cap (scan only) |
-| `--limit-success N` | — | Stop scan after N HTTP-200 writes |
-| `--rescan` | off | Re-scan already-completed rows (dns/tls/ports) |
-
-**CVE catalog update** (downloads CISA KEV feed, populates `cve_catalog` and matches against scanned domains):
-
-```bash
-helvetiscan update-cves
-```
-
-See [SCHEMA.md](SCHEMA.md) for the full database schema.
-
----
-
-## Research directions — digital sovereignty
-
-The dataset makes visible structural patterns that are otherwise opaque. Current and planned analyses:
-
-**DNS concentration**
-→ Which providers control Swiss DNS? How many domains fail if a single nameserver operator goes offline? What fraction of the Swiss namespace depends on infrastructure physically or legally outside Switzerland?
-
-**Foreign dependency mapping**
-→ Classify nameserver operators by jurisdiction (CH / EU / US / other). Measure the share of `.ch` domains that ultimately resolve through non-Swiss infrastructure — a proxy for digital sovereignty exposure.
-
-**Hub resilience**
-Model cascading failure scenarios: remove the top-N DNS hubs, measure reachability loss across the graph. Identify the minimum set of providers whose failure would partition Swiss internet access.
-
-**Longitudinal tracking**
-→ Re-run the scrape periodically. Detect new domains, expired domains, nameserver migrations, and shifts in provider market share over time.
-
-**Phishing and lookalike detection**
-→ The full namespace enables detection of typosquat and look-alike domains targeting Swiss brands, banks, and government entities.
-
-**SME digital exposure scoring**
-→ Cross-reference DNS data with open-port scans, certificate expiry, and HTTP security headers to produce a per-domain risk score — useful for the attack surface intelligence.
-
-**CVE correlation**
-→ Extract CMS and server version strings from HTTP responses, then match against a curated CVE catalog (seeded from the CISA Known Exploited Vulnerabilities feed). Transforms "runs WordPress" into "runs WordPress 6.1 with 14 known CVEs, 3 critical" — the difference between an inventory tool and an actionable security product.
-
-**Email security validation**
-→ Go beyond presence detection of SPF/DMARC records to policy analysis: catch `+all` (anyone can spoof), DMARC `p=none` (no enforcement), missing DKIM selectors, and SPF records exceeding the 10-lookup limit. Results feed directly into the risk score.
-
----
-
-## Stack
-
-| Layer | Technology |
-|---|---|
-| Database | DuckDB |
-| Web server | Bun |
-| Scanner | Rust, tokio, reqwest, hickory-resolver, rustls |
-| Data processing | Python (pandas, pyarrow), JavaScript (apache-arrow) |
-| Visualization | Cosmograph (WebGL), Apache Arrow IPC |
-
----
-
-[^1]: Raw data not published. Consider processed edges.arrow and nodes.arrow tables.
+[^1]: Data not published. Consider processed edges.arrow and nodes.arrow tables for dataviz.
