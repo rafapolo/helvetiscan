@@ -1,6 +1,6 @@
 # Database Schema
 
-`helvetiscan` writes into seven DuckDB tables and exposes one computed view.
+`helvetiscan` writes into ten DuckDB tables and exposes one computed view.
 
 ## ER Diagram
 
@@ -20,6 +20,7 @@ erDiagram
         VARCHAR   powered_by
         VARCHAR[] redirect_chain
         VARCHAR   cms
+        VARCHAR   tech_version
         TIMESTAMP updated_at
     }
     dns_info {
@@ -100,12 +101,54 @@ erDiagram
         TIMESTAMP queried_at
     }
 
+    cve_catalog {
+        VARCHAR   cve_id PK
+        VARCHAR   technology
+        VARCHAR   affected_from
+        VARCHAR   affected_to
+        VARCHAR   severity
+        DOUBLE    cvss_score
+        BOOLEAN   in_kev
+        VARCHAR   summary
+        DATE      published_at
+    }
+    cve_matches {
+        VARCHAR   domain PK
+        VARCHAR   cve_id PK
+        VARCHAR   technology
+        VARCHAR   version
+        VARCHAR   severity
+        DOUBLE    cvss_score
+        BOOLEAN   in_kev
+        DATE      published_at
+        TIMESTAMP matched_at
+    }
+    email_security {
+        VARCHAR   domain PK
+        BOOLEAN   spf_present
+        VARCHAR   spf_policy
+        BOOLEAN   spf_too_permissive
+        INTEGER   spf_dns_lookups
+        BOOLEAN   spf_over_limit
+        BOOLEAN   dmarc_present
+        VARCHAR   dmarc_policy
+        VARCHAR   dmarc_subdomain_policy
+        BOOLEAN   dmarc_has_reporting
+        INTEGER   dmarc_pct
+        BOOLEAN   dkim_default
+        BOOLEAN   dkim_google
+        BOOLEAN   dkim_found
+        TIMESTAMP scanned_at
+    }
+
     domains ||--o| dns_info      : "domain"
     domains ||--o| tls_info      : "domain"
     domains ||--o{ ports_info    : "domain"
     domains ||--o{ subdomains    : "domain"
     domains ||--o| http_headers  : "domain"
     domains ||--o| whois_info    : "domain"
+    domains ||--o{ cve_matches   : "domain"
+    domains ||--o| email_security : "domain"
 ```
 
 ## Table Reference
@@ -129,6 +172,7 @@ Populated by `helvetiscan scan`. One row per input domain.
 | `powered_by` | VARCHAR | `X-Powered-By:` response header |
 | `redirect_chain` | VARCHAR[] | Starting URL(s) when a redirect occurred |
 | `cms` | VARCHAR | Detected CMS (WordPress, Drupal, Joomla, TYPO3, Wix) |
+| `tech_version` | VARCHAR | Extracted version string (e.g. `6.4.2`, `2.4.57`) — from `<meta generator>`, `Server:`, or `X-Powered-By:` |
 | `updated_at` | TIMESTAMP | Last scan time |
 
 ### `dns_info`
@@ -240,6 +284,79 @@ Populated by `helvetiscan whois`. TCP query to `whois.nic.ch:43`.
 | `dnssec_delegated` | BOOLEAN | True if `DNSSEC: signed delegation` |
 | `queried_at` | TIMESTAMP | |
 
+### `cve_catalog`
+
+Populated by `helvetiscan update-cves`. Local CVE database seeded from the CISA Known Exploited Vulnerabilities (KEV) feed. One row per CVE entry per technology.
+
+| Column | Type | Notes |
+|---|---|---|
+| `cve_id` | VARCHAR PK | e.g. `CVE-2023-1234` |
+| `technology` | VARCHAR | Normalised name: `wordpress`, `drupal`, `joomla`, `typo3`, `apache`, `nginx`, `php`, `openssl` |
+| `affected_from` | VARCHAR | Version range start (inclusive) |
+| `affected_to` | VARCHAR | Version range end (inclusive) |
+| `severity` | VARCHAR | `CRITICAL`, `HIGH`, `MEDIUM`, `LOW` |
+| `cvss_score` | DOUBLE | CVSS v3 base score |
+| `in_kev` | BOOLEAN | True if listed in CISA KEV catalog |
+| `summary` | VARCHAR | Short description |
+| `published_at` | DATE | NVD publication date |
+
+### `cve_matches`
+
+Populated after each `scan` run via a SQL JOIN between `domains` and `cve_catalog`. Composite primary key on `(domain, cve_id)`.
+
+| Column | Type | Notes |
+|---|---|---|
+| `domain` | VARCHAR PK | |
+| `cve_id` | VARCHAR PK | |
+| `technology` | VARCHAR | Matched technology name |
+| `version` | VARCHAR | Version string detected on the domain |
+| `severity` | VARCHAR | From `cve_catalog` |
+| `cvss_score` | DOUBLE | From `cve_catalog` |
+| `in_kev` | BOOLEAN | True if in CISA KEV catalog |
+| `published_at` | DATE | From `cve_catalog` |
+| `matched_at` | TIMESTAMP | Time of match |
+
+```sql
+-- Domains running software with critical KEV-listed CVEs
+SELECT domain, technology, version, cve_id, cvss_score
+FROM cve_matches
+WHERE in_kev = true AND severity = 'CRITICAL'
+ORDER BY cvss_score DESC;
+```
+
+### `email_security`
+
+Populated by `helvetiscan dns` — parsed from the SPF/DMARC records already collected, plus DKIM selector probes. Zero extra network passes beyond the DNS scan.
+
+| Column | Type | Notes |
+|---|---|---|
+| `domain` | VARCHAR PK | |
+| `spf_present` | BOOLEAN | True if a `v=spf1` TXT record exists |
+| `spf_policy` | VARCHAR | The `all` mechanism qualifier: `+all`, `~all`, `-all`, `?all` |
+| `spf_too_permissive` | BOOLEAN | True if qualifier is `+` or `?` |
+| `spf_dns_lookups` | INTEGER | Count of DNS-consuming mechanisms (`include:`, `a`, `mx`, `redirect=`, `exists:`) |
+| `spf_over_limit` | BOOLEAN | True if `spf_dns_lookups > 10` (RFC 7208 §4.6.4) |
+| `dmarc_present` | BOOLEAN | True if a `_dmarc.` TXT record exists |
+| `dmarc_policy` | VARCHAR | `p=` tag value: `none`, `quarantine`, `reject` |
+| `dmarc_subdomain_policy` | VARCHAR | `sp=` tag value, if set |
+| `dmarc_has_reporting` | BOOLEAN | True if `rua=` tag present |
+| `dmarc_pct` | INTEGER | `pct=` value (default 100 if absent) |
+| `dkim_default` | BOOLEAN | True if `default._domainkey.<domain>` resolves with a `v=DKIM1` record |
+| `dkim_google` | BOOLEAN | True if `google._domainkey.<domain>` resolves |
+| `dkim_found` | BOOLEAN | True if any DKIM selector was found |
+| `scanned_at` | TIMESTAMP | |
+
+```sql
+-- Domains that allow anyone to send email on their behalf
+SELECT domain, spf_policy FROM email_security WHERE spf_too_permissive = true;
+
+-- DMARC with no enforcement
+SELECT domain, dmarc_policy FROM email_security WHERE dmarc_policy = 'none' OR NOT dmarc_present;
+
+-- SPF over DNS lookup limit
+SELECT domain, spf_dns_lookups FROM email_security WHERE spf_over_limit = true;
+```
+
 ## `risk_score` View
 
 Computed on demand — no storage, always reflects the latest data. JOINs all tables.
@@ -258,13 +375,17 @@ SELECT * FROM risk_score LIMIT 10;
 | `cert_expired` | BOOLEAN | Certificate past `valid_to` |
 | `cert_expiring` | BOOLEAN | `days_remaining` between 0 and 29 |
 | `no_dnssec` | BOOLEAN | No DNSKEY/DS records |
-| `no_dmarc` | BOOLEAN | No `_dmarc.` TXT record |
+| `no_dmarc` | BOOLEAN | No `_dmarc.` TXT record (replaced by `dmarc_weak` once email_security is populated) |
 | `domain_expiring` | BOOLEAN | Domain expires within 30 days |
 | `exposed_db_port` | BOOLEAN | Open port in (3306, 5432, 6379, 9200, 27017, 11211, 2375) |
 | `exposed_risky_port` | BOOLEAN | Open port in (445, 23, 3389, 5900) |
+| `has_critical_cve` | BOOLEAN | At least one `CRITICAL` CVE match in `cve_matches` |
+| `spf_permissive` | BOOLEAN | SPF `+all` or `?all` — anyone can send email as this domain |
+| `dmarc_weak` | BOOLEAN | DMARC `p=none` or absent |
+| `no_dkim` | BOOLEAN | No DKIM selector found |
 | `score` | INTEGER | 0–100; starts at 100, deducted per flag |
 
-Score deductions: missing_hsts −10, missing_csp −10, missing_caa −8, weak_tls −10, cert_expired −20, cert_expiring −15, no_dnssec −5, no_dmarc −7, domain_expiring −5, exposed_db_port −10, exposed_risky_port −10.
+Score deductions: missing_hsts −10, missing_csp −10, missing_caa −8, weak_tls −10, cert_expired −20, cert_expiring −15, no_dnssec −5, no_dmarc −7, domain_expiring −5, exposed_db_port −10, exposed_risky_port −10, has_critical_cve −15, spf_permissive −7, dmarc_weak −7 (replaces no_dmarc when email_security exists), no_dkim −5.
 
 ### Example queries
 
@@ -316,14 +437,15 @@ ORDER BY domains DESC;
 | Subcommand | `--full` target | Description |
 |---|---|---|
 | `init` | — | Load domain list into DuckDB |
-| `scan` | `--full domain` | HTTP fetch + security headers + CMS detection |
-| `dns` | `--full dns` | DNS metadata (A/AAAA/NS/MX/TXT/CAA/DNSSEC/wildcard) |
+| `scan` | `--full domain` | HTTP fetch + security headers + CMS/version detection + CVE matching |
+| `dns` | `--full dns` | DNS metadata (A/AAAA/NS/MX/TXT/CAA/DNSSEC/wildcard) + SPF/DMARC/DKIM analysis → `email_security` |
 | `tls` | `--full tls` | TLS cert + version + key info + fingerprint |
 | `ports` | `--full ports` | TCP port probes + banner grabbing (20 ports) |
-| `subdomains` | `--full subdomains` | AXFR + NS/MX subdomain harvest |
+| `subdomains` | `--full subdomains` | CT logs + AXFR + NS/MX subdomain harvest |
 | `whois` | `--full whois` | WHOIS query to whois.nic.ch (rate-limited, run separately) |
+| `update-cves` | — | Download CISA KEV feed, populate `cve_catalog`, match against `domains` |
 | — | `--full all` | Run scan → dns → tls → ports → subdomains in sequence |
 
-`--full all` intentionally excludes `whois` — it is slow and rate-limited. Run `--full whois` separately.
+`--full all` intentionally excludes `whois` and `update-cves` — both are slow or rate-limited. Run them separately.
 
 Single-domain shortcut: `helvetiscan --domain example.ch --all`

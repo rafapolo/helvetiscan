@@ -20,7 +20,7 @@ The graph exposes the DNS dependency structure of the Swiss internet: who contro
 
 1. **Process** — Python and JS scripts convert raw CSV output to Apache Arrow / Parquet for fast columnar loading.
 2. **Visualize** — A Bun-served web app renders the full graph in-browser via [Cosmograph](https://cosmograph.app/), a WebGL force-graph renderer capable of handling millions of nodes.
-3. **Scan Swiss internet infrastructure** — Rust CLI (`helvetiscan`) scans the `.ch` namespace for HTTP, DNS, TLS, port-level metadata, and subdomain discovery.
+3. **Scan Swiss internet infrastructure** — Rust CLI (`helvetiscan`) scans the `.ch` namespace for HTTP, DNS, TLS, port-level metadata, subdomain discovery, CVE correlation, and email security validation.
 
 Node colors encode connectivity:
 - **Blue** — leaf domain (1–2 connections)
@@ -47,22 +47,6 @@ Node colors encode connectivity:
 
 ---
 
-## Quickstart
-
-**Serve and open:**
-
-```bash
-bun run serve
-# → http://localhost:3000
-```
-
-**Explore the database:**
-
-```bash
-duckdb data/domains.duckdb -ui
-# → http://localhost:4213
-```
-
 ### URL parameters
 
 | Parameter | Default | Description |
@@ -79,16 +63,6 @@ duckdb data/domains.duckdb -ui
 helvetiscan --domain migros.ch --all
 ```
 
-**Build on a small VPS**
-
-The default build uses DuckDB's `bundled` feature, which compiles DuckDB from source and can exhaust RAM on small machines. To link a prebuilt `libduckdb` instead:
-
-```bash
-DUCKDB_DOWNLOAD_LIB=1 cargo build --no-default-features
-```
-
-That keeps the Rust build but skips the heavy bundled C++ compile step.
-
 **Key scan options** (all have defaults; override only what you need):
 
 | Flag | Default | Description |
@@ -100,6 +74,12 @@ That keeps the Rust build but skips the heavy bundled C++ compile step.
 | `--max-kbytes` | `128` | Body download cap (scan only) |
 | `--limit-success N` | — | Stop scan after N HTTP-200 writes |
 | `--rescan` | off | Re-scan already-completed rows (dns/tls/ports) |
+
+**CVE catalog update** (downloads CISA KEV feed, populates `cve_catalog` and matches against scanned domains):
+
+```bash
+helvetiscan update-cves
+```
 
 See [SCHEMA.md](SCHEMA.md) for the full database schema.
 
@@ -126,6 +106,12 @@ Model cascading failure scenarios: remove the top-N DNS hubs, measure reachabili
 
 **SME digital exposure scoring**
 → Cross-reference DNS data with open-port scans, certificate expiry, and HTTP security headers to produce a per-domain risk score — useful for the attack surface intelligence.
+
+**CVE correlation**
+→ Extract CMS and server version strings from HTTP responses, then match against a curated CVE catalog (seeded from the CISA Known Exploited Vulnerabilities feed). Transforms "runs WordPress" into "runs WordPress 6.1 with 14 known CVEs, 3 critical" — the difference between an inventory tool and an actionable security product.
+
+**Email security validation**
+→ Go beyond presence detection of SPF/DMARC records to policy analysis: catch `+all` (anyone can spoof), DMARC `p=none` (no enforcement), missing DKIM selectors, and SPF records exceeding the 10-lookup limit. Results feed directly into the risk score.
 
 ---
 
