@@ -140,15 +140,37 @@ erDiagram
         BOOLEAN   dkim_found
         TIMESTAMP scanned_at
     }
+    domain_classification {
+        VARCHAR   domain PK
+        VARCHAR   sector
+        VARCHAR   subsector
+        VARCHAR   source
+        DOUBLE    confidence
+        TIMESTAMP classified_at
+    }
+    sector_benchmarks {
+        VARCHAR   sector PK
+        VARCHAR   metric PK
+        INTEGER   domain_count
+        DOUBLE    mean_value
+        DOUBLE    median_value
+        DOUBLE    p25_value
+        DOUBLE    p75_value
+        DOUBLE    min_value
+        DOUBLE    max_value
+        TIMESTAMP computed_at
+    }
 
-    domains ||--o| dns_info      : "domain"
-    domains ||--o| tls_info      : "domain"
-    domains ||--o{ ports_info    : "domain"
-    domains ||--o{ subdomains    : "domain"
-    domains ||--o| http_headers  : "domain"
-    domains ||--o| whois_info    : "domain"
-    domains ||--o{ cve_matches   : "domain"
-    domains ||--o| email_security : "domain"
+    domains ||--o| dns_info               : "domain"
+    domains ||--o| tls_info               : "domain"
+    domains ||--o{ ports_info             : "domain"
+    domains ||--o{ subdomains             : "domain"
+    domains ||--o| http_headers           : "domain"
+    domains ||--o| whois_info             : "domain"
+    domains ||--o{ cve_matches            : "domain"
+    domains ||--o| email_security         : "domain"
+    domains ||--o| domain_classification  : "domain"
+    domain_classification ||--o{ sector_benchmarks : "sector"
 ```
 
 ## Table Reference
@@ -357,6 +379,48 @@ SELECT domain, dmarc_policy FROM email_security WHERE dmarc_policy = 'none' OR N
 SELECT domain, spf_dns_lookups FROM email_security WHERE spf_over_limit = true;
 ```
 
+### `domain_classification`
+
+Populated by `helvetiscan classify`. Assigns each domain to an industry sector using keyword heuristics against the domain name and page title.
+
+| Column | Type | Notes |
+|---|---|---|
+| `domain` | VARCHAR PK | |
+| `sector` | VARCHAR | e.g. `finance`, `healthcare`, `government`, `education`, `legal`, `retail`, `media`, `pharma` |
+| `subsector` | VARCHAR | Optional sub-category, e.g. `banking`, `insurance` |
+| `source` | VARCHAR | Classification method: `keyword` |
+| `confidence` | DOUBLE | Heuristic confidence score 0.0–1.0 |
+| `classified_at` | TIMESTAMP | |
+
+```sql
+-- Sector breakdown
+SELECT sector, COUNT(*) AS domains FROM domain_classification GROUP BY sector ORDER BY domains DESC;
+```
+
+### `sector_benchmarks`
+
+Populated by `helvetiscan benchmark`. Stores aggregate statistics for each sector × metric combination.
+
+| Column | Type | Notes |
+|---|---|---|
+| `sector` | VARCHAR PK | Industry sector from `domain_classification` |
+| `metric` | VARCHAR PK | `risk_score`, `hsts_adoption`, `dnssec_adoption`, `dmarc_weak_pct` |
+| `domain_count` | INTEGER | Number of domains in this sector |
+| `mean_value` | DOUBLE | Mean value of the metric |
+| `median_value` | DOUBLE | Median (P50) value |
+| `p25_value` | DOUBLE | 25th percentile |
+| `p75_value` | DOUBLE | 75th percentile |
+| `min_value` | DOUBLE | Minimum value |
+| `max_value` | DOUBLE | Maximum value |
+| `computed_at` | TIMESTAMP | Last computation time |
+
+```sql
+-- Compare risk scores across sectors
+SELECT sector, domain_count, median_value AS median_risk
+FROM sector_benchmarks WHERE metric = 'risk_score'
+ORDER BY median_value ASC;
+```
+
 ## `risk_score` View
 
 Computed on demand — no storage, always reflects the latest data. JOINs all tables.
@@ -444,8 +508,10 @@ ORDER BY domains DESC;
 | `subdomains` | `--full subdomains` | CT logs + AXFR + NS/MX subdomain harvest |
 | `whois` | `--full whois` | WHOIS query to whois.nic.ch (rate-limited, run separately) |
 | `update-cves` | — | Download CISA KEV feed, populate `cve_catalog`, match against `domains` |
+| `classify` | — | Classify domains by sector using keyword heuristics → `domain_classification` |
+| `benchmark` | — | Compute sector-level risk benchmarks → `sector_benchmarks` |
 | — | `--full all` | Run scan → dns → tls → ports → subdomains in sequence |
 
-`--full all` intentionally excludes `whois` and `update-cves` — both are slow or rate-limited. Run them separately.
+`--full all` intentionally excludes `whois`, `update-cves`, `classify`, and `benchmark` — these are slower or post-processing steps. Run them separately.
 
 Single-domain shortcut: `helvetiscan --domain example.ch --all`
