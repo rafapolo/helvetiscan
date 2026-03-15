@@ -109,9 +109,10 @@ The final database can answer questions such as:
 - Which Swiss cantons have the most exposed infrastructure?
 - How many .ch domains have orphaned subdomains vulnerable to takeover?
 
+See [domain analyses](analyses/analyse_domains.md)
+
 ## Planned Analyses
 
-- **Concentration risk** — How many DNS providers does the .ch namespace actually depend on?
 - **Sector patterns** — Which Swiss industries have the weakest security posture?
 - **Attack surface clustering** — Do domains sharing infrastructure share vulnerabilities?
 - **Supply chain exposure** — How many .ch sites are affected by a single vulnerable plugin?
