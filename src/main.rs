@@ -89,6 +89,8 @@ enum Command {
     Ports(PortsArgs),
     /// Discover subdomains via DNS zone transfer (AXFR) and NS/MX record harvest.
     Subdomains(SubdomainsArgs),
+    /// Fetch WHOIS registrar and registration date for all domains.
+    Whois(WhoisArgs),
 }
 
 #[derive(clap::ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
@@ -185,6 +187,9 @@ struct DnsArgs {
     #[arg(skip)]
     no_progress: bool,
 
+    #[arg(long, help = "Re-scan domains whose error_kind matches this value (e.g. 'timeout')")]
+    retry_errors: Option<String>,
+
     #[arg(long, default_value_t = false)]
     rescan: bool,
 }
@@ -215,6 +220,9 @@ struct TlsArgs {
     #[arg(skip)]
     no_progress: bool,
 
+    #[arg(long, help = "Re-scan domains whose error_kind matches this value (e.g. 'timeout')")]
+    retry_errors: Option<String>,
+
     #[arg(long, default_value_t = false)]
     rescan: bool,
 }
@@ -241,6 +249,9 @@ struct PortsArgs {
 
     #[arg(skip)]
     no_progress: bool,
+
+    #[arg(long, help = "Re-scan domains whose error_kind matches this value (e.g. 'timeout')")]
+    retry_errors: Option<String>,
 
     #[arg(long, default_value_t = false)]
     rescan: bool,
@@ -269,6 +280,50 @@ struct SubdomainsArgs {
 
     #[arg(skip)]
     no_progress: bool,
+}
+
+#[derive(Parser, Debug, Clone)]
+struct WhoisArgs {
+    #[arg(long, default_value = "data/domains.duckdb")]
+    db: PathBuf,
+
+    #[arg(long)]
+    domain: Option<String>,
+
+    #[arg(long, default_value_t = 500)]
+    write_batch_size: usize,
+
+    /// Keep concurrency low — whois.nic.ch rate-limits aggressively.
+    #[arg(long, default_value_t = 5)]
+    concurrency: usize,
+
+    #[arg(long, default_value = "5s", value_parser = parse_duration)]
+    connect_timeout: Duration,
+
+    #[arg(long, default_value = "1s", value_parser = parse_duration)]
+    progress_interval: Duration,
+
+    #[arg(skip)]
+    no_progress: bool,
+
+    /// Re-fetch domains that already have a whois_registrar value.
+    #[arg(long, default_value_t = false)]
+    rescan: bool,
+}
+
+impl Default for WhoisArgs {
+    fn default() -> Self {
+        Self {
+            db: PathBuf::from("data/domains.duckdb"),
+            domain: None,
+            write_batch_size: 500,
+            concurrency: 5,
+            connect_timeout: Duration::from_secs(5),
+            progress_interval: Duration::from_secs(1),
+            no_progress: false,
+            rescan: false,
+        }
+    }
 }
 
 impl Default for ScanArgs {
@@ -301,6 +356,7 @@ impl Default for DnsArgs {
             concurrency: 250,
             progress_interval: Duration::from_secs(1),
             no_progress: false,
+            retry_errors: None,
             rescan: false,
         }
     }
@@ -317,6 +373,7 @@ impl Default for TlsArgs {
             handshake_timeout: Duration::from_secs(8),
             progress_interval: Duration::from_secs(1),
             no_progress: false,
+            retry_errors: None,
             rescan: false,
         }
     }
@@ -352,6 +409,7 @@ impl Default for PortsArgs {
             connect_timeout: Duration::from_millis(800),
             progress_interval: Duration::from_secs(1),
             no_progress: false,
+            retry_errors: None,
             rescan: false,
         }
     }
@@ -475,6 +533,13 @@ struct PortsRow {
     open_ports: Vec<i32>,
 }
 
+#[derive(Debug, Clone)]
+struct WhoisRow {
+    domain: String,
+    registrar: Option<String>,
+    whois_created: Option<NaiveDate>,
+}
+
 #[derive(Debug)]
 struct SubdomainRow {
     domain: String,
@@ -569,6 +634,7 @@ async fn main() -> Result<()> {
         (None, false, _, None, Some(Command::Tls(args))) => cmd_tls(args).await,
         (None, false, _, None, Some(Command::Ports(args))) => cmd_ports(args).await,
         (None, false, _, None, Some(Command::Subdomains(args))) => cmd_subdomains(args).await,
+        (None, false, _, None, Some(Command::Whois(args))) => cmd_whois(args).await,
         (None, true, _, _, _) => Err(anyhow!("--all requires --domain")),
         (None, false, _, None, None) => Err(anyhow!("missing command: use a subcommand, or --domain <domain> --all, or --full <domain|dns|tls>")),
     }
@@ -627,9 +693,11 @@ fn ensure_schema(conn: &duckdb::Connection) -> Result<()> {
             ip          VARCHAR,
             updated_at  TIMESTAMP
         );
-        ALTER TABLE domains ADD COLUMN IF NOT EXISTS status     VARCHAR;
-        ALTER TABLE domains ADD COLUMN IF NOT EXISTS server     VARCHAR;
-        ALTER TABLE domains ADD COLUMN IF NOT EXISTS powered_by VARCHAR;
+        ALTER TABLE domains ADD COLUMN IF NOT EXISTS status           VARCHAR;
+        ALTER TABLE domains ADD COLUMN IF NOT EXISTS server           VARCHAR;
+        ALTER TABLE domains ADD COLUMN IF NOT EXISTS powered_by       VARCHAR;
+        ALTER TABLE domains ADD COLUMN IF NOT EXISTS whois_registrar  VARCHAR;
+        ALTER TABLE domains ADD COLUMN IF NOT EXISTS whois_created    DATE;
 
         CREATE TABLE IF NOT EXISTS dns_info (
             domain      VARCHAR PRIMARY KEY,
@@ -693,17 +761,19 @@ fn ensure_schema(conn: &duckdb::Connection) -> Result<()> {
 fn append_empty_domain_row(appender: &mut duckdb::Appender<'_>, domain: &str) -> Result<()> {
     appender.append_row(duckdb::params![
         domain,
-        Option::<&str>::None,
-        Option::<&str>::None,
-        Option::<i32>::None,
-        Option::<&str>::None,
-        Option::<&str>::None,
-        Option::<&str>::None,
-        Option::<i64>::None,
-        Option::<&str>::None,
-        Option::<&str>::None,
-        Option::<&str>::None,
-        Option::<&str>::None,
+        Option::<&str>::None,  // status
+        Option::<&str>::None,  // final_url
+        Option::<i32>::None,   // status_code
+        Option::<&str>::None,  // title
+        Option::<&str>::None,  // body_hash
+        Option::<&str>::None,  // error_kind
+        Option::<i64>::None,   // elapsed_ms
+        Option::<&str>::None,  // ip
+        Option::<&str>::None,  // updated_at
+        Option::<&str>::None,  // server
+        Option::<&str>::None,  // powered_by
+        Option::<&str>::None,  // whois_registrar
+        Option::<&str>::None,  // whois_created
     ])?;
     Ok(())
 }
@@ -948,9 +1018,18 @@ fn load_scan_targets(
     table: &str,
     timestamp_col: &str,
     rescan: bool,
+    retry_errors: Option<&str>,
 ) -> Result<Vec<String>> {
     if let Some(domain) = domain {
         return Ok(vec![sanitize_domain(domain).ok_or_else(|| anyhow!("invalid domain: {domain}"))?]);
+    }
+    if let Some(kind) = retry_errors {
+        let sql = format!("SELECT domain FROM {table} WHERE error_kind = ? ORDER BY domain");
+        let mut stmt = conn.prepare(&sql)?;
+        let domains: Vec<String> = stmt
+            .query_map([kind], |row| row.get(0))?
+            .collect::<std::result::Result<_, _>>()?;
+        return Ok(domains);
     }
     let sql = if rescan {
         "SELECT domain FROM domains ORDER BY domain".to_string()
@@ -1074,10 +1153,13 @@ async fn cmd_dns(args: DnsArgs) -> Result<()> {
     if args.concurrency == 0 {
         return Err(anyhow!("--concurrency must be > 0"));
     }
+    if args.retry_errors.is_some() && args.rescan {
+        return Err(anyhow!("--retry-errors and --rescan are mutually exclusive"));
+    }
 
     let conn =
         duckdb::Connection::open(&args.db).with_context(|| format!("open duckdb {:?}", args.db))?;
-    let pending = load_scan_targets(&conn, args.domain.as_deref(), "dns_info", "resolved_at", args.rescan)?;
+    let pending = load_scan_targets(&conn, args.domain.as_deref(), "dns_info", "resolved_at", args.rescan, args.retry_errors.as_deref())?;
     drop(conn);
 
     eprintln!("dns: {} domains pending", pending.len());
@@ -1160,10 +1242,13 @@ async fn cmd_tls(args: TlsArgs) -> Result<()> {
     if args.concurrency == 0 {
         return Err(anyhow!("--concurrency must be > 0"));
     }
+    if args.retry_errors.is_some() && args.rescan {
+        return Err(anyhow!("--retry-errors and --rescan are mutually exclusive"));
+    }
 
     let conn =
         duckdb::Connection::open(&args.db).with_context(|| format!("open duckdb {:?}", args.db))?;
-    let pending = load_scan_targets(&conn, args.domain.as_deref(), "tls_info", "scanned_at", args.rescan)?;
+    let pending = load_scan_targets(&conn, args.domain.as_deref(), "tls_info", "scanned_at", args.rescan, args.retry_errors.as_deref())?;
     drop(conn);
 
     eprintln!("tls: {} domains pending", pending.len());
@@ -1248,10 +1333,13 @@ async fn cmd_ports(args: PortsArgs) -> Result<()> {
     if args.concurrency == 0 {
         return Err(anyhow!("--concurrency must be > 0"));
     }
+    if args.retry_errors.is_some() && args.rescan {
+        return Err(anyhow!("--retry-errors and --rescan are mutually exclusive"));
+    }
 
     let conn =
         duckdb::Connection::open(&args.db).with_context(|| format!("open duckdb {:?}", args.db))?;
-    let pending = load_scan_targets(&conn, args.domain.as_deref(), "ports_info", "scanned_at", args.rescan)?;
+    let pending = load_scan_targets(&conn, args.domain.as_deref(), "ports_info", "scanned_at", args.rescan, args.retry_errors.as_deref())?;
     drop(conn);
 
     eprintln!("ports: {} domains pending", pending.len());
@@ -2867,6 +2955,248 @@ async fn cmd_subdomains(args: SubdomainsArgs) -> Result<()> {
     Ok(())
 }
 
+// ---- whois subcommand ----
+
+async fn fetch_whois(domain: String, connect_timeout: Duration) -> WhoisRow {
+    let mut row = WhoisRow { domain: domain.clone(), registrar: None, whois_created: None };
+
+    // Resolve whois.nic.ch and prefer IPv4 — IPv6 is often unreachable.
+    let addrs: Vec<std::net::SocketAddr> =
+        match tokio::time::timeout(connect_timeout, tokio::net::lookup_host("whois.nic.ch:43")).await {
+            Ok(Ok(iter)) => iter.collect(),
+            _ => return row,
+        };
+    let addr = match addrs.iter().find(|a| a.is_ipv4()).or_else(|| addrs.first()) {
+        Some(a) => *a,
+        None => return row,
+    };
+    let stream = match tokio::time::timeout(connect_timeout, tokio::net::TcpStream::connect(addr)).await {
+        Ok(Ok(s)) => s,
+        _ => return row,
+    };
+
+    use tokio::io::{AsyncWriteExt, AsyncBufReadExt, BufReader};
+    let (read_half, mut write_half) = tokio::io::split(stream);
+
+    let query = format!("{}\r\n", domain);
+    if write_half.write_all(query.as_bytes()).await.is_err() {
+        return row;
+    }
+    drop(write_half);
+
+    let mut reader = BufReader::new(read_half);
+    let mut lines: Vec<String> = Vec::new();
+    let mut buf = String::new();
+    loop {
+        buf.clear();
+        match tokio::time::timeout(connect_timeout, reader.read_line(&mut buf)).await {
+            Ok(Ok(0)) | Ok(Err(_)) | Err(_) => break,
+            Ok(Ok(_)) => lines.push(buf.trim_end_matches(['\r', '\n']).to_string()),
+        }
+    }
+
+    // Parse: label line ends with ':', value is the next non-empty line.
+    let mut i = 0;
+    while i < lines.len() {
+        let line = lines[i].trim();
+        if line.eq_ignore_ascii_case("Registrar:") {
+            if let Some(val) = lines[i + 1..].iter().find(|l| !l.trim().is_empty()) {
+                row.registrar = Some(val.trim().to_string());
+            }
+        }
+        if line.eq_ignore_ascii_case("First registration date:") {
+            if let Some(val) = lines[i + 1..].iter().find(|l| !l.trim().is_empty()) {
+                let date_str = val.trim().trim_start_matches("before").trim();
+                row.whois_created = chrono::NaiveDate::parse_from_str(date_str, "%Y-%m-%d").ok();
+            }
+        }
+        i += 1;
+    }
+
+    row
+}
+
+async fn dispatcher_loop_whois(
+    mut work_rx: mpsc::Receiver<String>,
+    result_tx: mpsc::Sender<WhoisRow>,
+    sem: Semaphore,
+    connect_timeout: Duration,
+    max_concurrency: usize,
+) -> Result<()> {
+    let sem = Arc::new(sem);
+    let mut joinset = JoinSet::<()>::new();
+    let mut batch = Vec::with_capacity(DISPATCH_BATCH_SIZE);
+
+    while let Some(domain) = work_rx.recv().await {
+        if result_tx.is_closed() { break; }
+        batch.push(domain);
+        if batch.len() < DISPATCH_BATCH_SIZE { continue; }
+
+        for domain in batch.drain(..) {
+            let permit = sem.clone().acquire_owned().await.context("semaphore closed")?;
+            let tx = result_tx.clone();
+            joinset.spawn(async move {
+                let _permit = permit;
+                let row = fetch_whois(domain, connect_timeout).await;
+                let _ = tx.send(row).await;
+            });
+            while joinset.len() >= max_concurrency {
+                if joinset.join_next().await.is_none() { break; }
+            }
+        }
+        tokio::time::sleep(DISPATCH_BATCH_SLEEP).await;
+    }
+
+    for domain in batch.drain(..) {
+        let permit = sem.clone().acquire_owned().await.context("semaphore closed")?;
+        let tx = result_tx.clone();
+        joinset.spawn(async move {
+            let _permit = permit;
+            let row = fetch_whois(domain, connect_timeout).await;
+            let _ = tx.send(row).await;
+        });
+        while joinset.len() >= max_concurrency {
+            if joinset.join_next().await.is_none() { break; }
+        }
+    }
+
+    while joinset.join_next().await.is_some() {}
+    Ok(())
+}
+
+fn flush_whois_batch(conn: &duckdb::Connection, batch: &mut Vec<WhoisRow>) -> Result<()> {
+    conn.execute_batch("BEGIN")?;
+    {
+        let mut stmt = conn.prepare(
+            "INSERT INTO domains (domain, whois_registrar, whois_created)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(domain) DO UPDATE SET
+                whois_registrar = excluded.whois_registrar,
+                whois_created   = excluded.whois_created",
+        )?;
+        for row in batch.iter() {
+            stmt.execute(duckdb::params![
+                row.domain.as_str(),
+                row.registrar.as_deref(),
+                row.whois_created.map(|d| d.to_string()),
+            ])?;
+        }
+    }
+    conn.execute_batch("COMMIT")?;
+    batch.clear();
+    Ok(())
+}
+
+fn writer_loop_whois(
+    db_path: PathBuf,
+    mut result_rx: mpsc::Receiver<WhoisRow>,
+    progress: Arc<Progress>,
+    done_tx: tokio::sync::oneshot::Sender<()>,
+    batch_size: usize,
+) -> Result<()> {
+    let conn = duckdb::Connection::open(&db_path)
+        .with_context(|| format!("whois writer: open duckdb {:?}", db_path))?;
+
+    let mut batch = Vec::with_capacity(batch_size);
+    while let Some(row) = result_rx.blocking_recv() {
+        batch.push(row);
+        progress.completed.fetch_add(1, Ordering::Relaxed);
+        if batch.len() >= batch_size {
+            flush_whois_batch(&conn, &mut batch)?;
+        }
+    }
+    if !batch.is_empty() {
+        flush_whois_batch(&conn, &mut batch)?;
+    }
+    let _ = done_tx.send(());
+    Ok(())
+}
+
+async fn cmd_whois(args: WhoisArgs) -> Result<()> {
+    if args.concurrency == 0 {
+        return Err(anyhow!("--concurrency must be > 0"));
+    }
+
+    let conn =
+        duckdb::Connection::open(&args.db).with_context(|| format!("open duckdb {:?}", args.db))?;
+    ensure_schema(&conn)?;
+
+    let pending: Vec<String> = if let Some(domain) = args.domain.as_deref() {
+        vec![sanitize_domain(domain).ok_or_else(|| anyhow!("invalid domain: {domain}"))?]
+    } else {
+        let sql = if args.rescan {
+            "SELECT domain FROM domains ORDER BY domain".to_string()
+        } else {
+            "SELECT domain FROM domains WHERE whois_registrar IS NULL ORDER BY domain".to_string()
+        };
+        let mut stmt = conn.prepare(&sql)?;
+        stmt.query_map([], |row| row.get(0))?
+            .collect::<std::result::Result<_, _>>()?
+    };
+    drop(conn);
+
+    eprintln!("whois: {} domains pending", pending.len());
+    if pending.is_empty() {
+        eprintln!("Nothing to do.");
+        return Ok(());
+    }
+
+    let progress = Arc::new(Progress::new(pending.len() as u64));
+    let work_buf = (args.concurrency * 2).clamp(100, 10_000);
+    let result_buf = (args.concurrency * 2).clamp(100, 10_000);
+
+    let (work_tx, work_rx) = mpsc::channel::<String>(work_buf);
+    let (result_tx, result_rx) = mpsc::channel::<WhoisRow>(result_buf);
+    let (done_tx, done_rx) = tokio::sync::oneshot::channel::<()>();
+
+    let writer_handle = tokio::task::spawn_blocking({
+        let db_path = args.db.clone();
+        let batch_size = args.write_batch_size;
+        let progress = progress.clone();
+        move || writer_loop_whois(db_path, result_rx, progress, done_tx, batch_size)
+    });
+
+    let reader_handle = tokio::spawn({
+        let progress = progress.clone();
+        async move {
+            for domain in pending {
+                if work_tx.send(domain).await.is_err() { break; }
+                progress.enqueued.fetch_add(1, Ordering::Relaxed);
+            }
+            Ok::<(), anyhow::Error>(())
+        }
+    });
+
+    let progress_handle = if args.no_progress {
+        None
+    } else {
+        Some(tokio::spawn(progress_reporter(
+            progress.clone(),
+            args.progress_interval,
+            done_rx,
+        )))
+    };
+
+    let dispatcher_handle = tokio::spawn(dispatcher_loop_whois(
+        work_rx,
+        result_tx,
+        Semaphore::new(args.concurrency),
+        args.connect_timeout,
+        args.concurrency,
+    ));
+
+    reader_handle.await.context("whois reader task panicked")?.context("whois reader failed")?;
+    dispatcher_handle.await.context("whois dispatcher task panicked")?.context("whois dispatcher failed")?;
+    writer_handle.await.context("whois writer task panicked")?.context("whois writer failed")?;
+
+    if let Some(h) = progress_handle {
+        h.abort();
+        let _ = h.await;
+    }
+
+    Ok(())
+}
+
 // ---- utilities ----
 
 fn sanitize_domain(line: &str) -> Option<String> {
@@ -3211,7 +3541,7 @@ mod tests {
             vec!["example.ch".to_string()]
         );
         assert_eq!(
-            load_scan_targets(&conn, Some("example.ch"), "dns_info", "resolved_at", false).unwrap(),
+            load_scan_targets(&conn, Some("example.ch"), "dns_info", "resolved_at", false, None).unwrap(),
             vec!["example.ch".to_string()]
         );
     }
