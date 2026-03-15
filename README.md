@@ -79,6 +79,16 @@ duckdb data/domains.duckdb -ui
 helvetiscan --domain migros.ch --all
 ```
 
+**Build on a small VPS**
+
+The default build uses DuckDB's `bundled` feature, which compiles DuckDB from source and can exhaust RAM on small machines. To link a prebuilt `libduckdb` instead:
+
+```bash
+DUCKDB_DOWNLOAD_LIB=1 cargo build --no-default-features
+```
+
+That keeps the Rust build but skips the heavy bundled C++ compile step.
+
 **Key scan options** (all have defaults; override only what you need):
 
 | Flag | Default | Description |
