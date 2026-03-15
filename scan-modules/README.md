@@ -164,34 +164,22 @@ Domain lifecycle, typosquatting, and subdomain takeover risks.
 
 ## Integration Map
 
-```
-┌─────────────────────────────────────────┐
-│           HELVETISCAN SCANNER           │
-├─────────────────────────────────────────┤
-│                                         │
-│  Input: Domain name (e.g., company.ch) │
-│                                         │
-│  ↓                                       │
-│                                         │
-│  [TLS & Certificates] ────────┐        │
-│  [DNS & DNSSEC] ──────────────┤        │
-│  [HTTP Security Headers] ─────┤        │
-│  [Open Ports] ────────────────┤────┐  │
-│  [Email Security] ────────────┤    │  │
-│  [Technology Fingerprinting] ──┤    │  │
-│  [Domain Protection] ──────────┘    │  │
-│                                      │  │
-│                                      ↓  │
-│                         [Risk Score Aggregation]
-│                                      │
-│                                      ↓
-│                    [Compliance Report Generator]
-│                    (ISG §4, DORA 16, NIS2)
-│                                      │
-│                                      ↓
-│                         [Output: Risk Report]
-│                                         │
-└─────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    Input["Domain name\ne.g. company.ch"]
+
+    Input --> TLS["TLS & Certificates"]
+    Input --> DNS["DNS & DNSSEC"]
+    Input --> HTTP["HTTP Security Headers"]
+    Input --> Ports["Open Ports"]
+    Input --> Email["Email Security"]
+    Input --> Tech["Technology Fingerprinting"]
+    Input --> Domain["Domain Protection"]
+
+    TLS & DNS & HTTP & Ports & Email & Tech & Domain --> Agg["Risk Score Aggregation"]
+
+    Agg --> Report["Compliance Report Generator\nISG §4 · DORA 16 · NIS2"]
+    Report --> Out["Risk Report"]
 ```
 
 ---
