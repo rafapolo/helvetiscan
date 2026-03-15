@@ -342,7 +342,6 @@ pub(crate) fn flush_batch(conn: &duckdb::Connection, batch: &mut Vec<Row>) -> Re
                 powered_by     = {},
                 redirect_chain = {},
                 cms            = {},
-                tech_version   = {},
                 updated_at     = NOW()
              WHERE domain = {};\n",
             sql_string(row.status.as_str()),
@@ -357,7 +356,6 @@ pub(crate) fn flush_batch(conn: &duckdb::Connection, batch: &mut Vec<Row>) -> Re
             sql_string_opt(row.powered_by.as_deref()),
             sql_string_list(&row.redirect_chain),
             sql_string_opt(row.cms.as_deref()),
-            sql_string_opt(row.tech_version.as_deref()),
             sql_string(row.domain.as_str()),
         ));
     }
@@ -475,7 +473,6 @@ pub(crate) async fn fetch_domain(
         elapsed_ms: start.elapsed().as_millis() as u64,
         redirect_chain: vec![],
         cms: None,
-        tech_version: None,
     }, None)
 }
 
@@ -644,10 +641,7 @@ async fn fetch_url_inner(
     } else {
         Some(format!("{:x}", md5::compute(&body)))
     };
-    let (cms, tech_version) = match detect_cms(powered_by.as_deref(), &body, server.as_deref(), powered_by.as_deref()) {
-        Some((name, ver)) => (Some(name), ver),
-        None => (None, None),
-    };
+    let cms = detect_cms(powered_by.as_deref(), &body, server.as_deref());
 
     let row = Row {
         domain: String::new(),
@@ -663,7 +657,6 @@ async fn fetch_url_inner(
         elapsed_ms: 0,
         redirect_chain: vec![],
         cms,
-        tech_version,
     };
 
     let headers = HttpHeadersRow {
@@ -706,102 +699,58 @@ fn extract_title(body: &[u8]) -> Option<String> {
     }
 }
 
-/// Extract a version string that looks like a semver token (contains digits and dots).
-fn extract_version_from_content(content: &str) -> Option<String> {
-    for token in content.split_whitespace().rev() {
-        if token.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false)
-            && token.contains('.')
-            && token.chars().all(|c| c.is_ascii_digit() || c == '.')
-        {
-            return Some(token.trim_end_matches('.').to_string());
-        }
-    }
-    None
-}
-
-/// Extract version from "Software/version" header format (e.g. "Apache/2.4.57").
-fn extract_header_version(header_value: &str) -> Option<String> {
-    if let Some(slash_pos) = header_value.find('/') {
-        let after = &header_value[slash_pos + 1..];
-        // Take the version part before any whitespace or parenthesis
-        let ver = after.split(|c: char| c == ' ' || c == '(').next()?;
-        if ver.contains('.') && ver.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) {
-            return Some(ver.to_string());
-        }
-    }
-    None
-}
 
 pub(crate) fn detect_cms(
     powered_by: Option<&str>,
     body: &[u8],
     server: Option<&str>,
-    _powered_by_raw: Option<&str>,
-) -> Option<(String, Option<String>)> {
+) -> Option<String> {
     if let Some(pb) = powered_by {
         let pb_lc = pb.to_ascii_lowercase();
-        if pb_lc.contains("wordpress") { return Some(("WordPress".into(), extract_header_version(pb))); }
-        if pb_lc.contains("drupal")    { return Some(("Drupal".into(), extract_header_version(pb))); }
-        if pb_lc.contains("joomla")    { return Some(("Joomla".into(), extract_header_version(pb))); }
-        if pb_lc.contains("typo3")     { return Some(("TYPO3".into(), extract_header_version(pb))); }
-        if pb_lc.contains("wix")       { return Some(("Wix".into(), None)); }
+        if pb_lc.contains("wordpress") { return Some("WordPress".into()); }
+        if pb_lc.contains("drupal")    { return Some("Drupal".into()); }
+        if pb_lc.contains("joomla")    { return Some("Joomla".into()); }
+        if pb_lc.contains("typo3")     { return Some("TYPO3".into()); }
+        if pb_lc.contains("wix")       { return Some("Wix".into()); }
         if pb_lc.contains("php/") || pb_lc.starts_with("php") {
-            return Some(("php".into(), extract_header_version(pb)));
+            return Some("php".into());
         }
     }
     let text = String::from_utf8_lossy(body);
     let lower = text.to_ascii_lowercase();
-    // meta generator tag — also extract version from the original (non-lowercased) content attr
     if let Some(start) = lower.find(r#"name="generator""#).or_else(|| lower.find(r#"name='generator'"#)) {
-        // Find the content= attribute nearby
-        let search_area_lower = &lower[start..std::cmp::min(start + 500, lower.len())];
-        let search_area_orig = &text[start..std::cmp::min(start + 500, text.len())];
-        let version = if let Some(c_pos) = search_area_lower.find("content=") {
-            let after = &search_area_orig[c_pos + 8..];
-            let after = after.trim_start_matches('"').trim_start_matches('\'');
-            let content_val: &str = if let Some(end) = after.find(|c: char| c == '"' || c == '\'') {
-                &after[..end]
-            } else {
-                after.split('>').next().unwrap_or("")
-            };
-            extract_version_from_content(content_val)
-        } else {
-            None
-        };
-        if search_area_lower.contains("wordpress") { return Some(("WordPress".into(), version)); }
-        if search_area_lower.contains("drupal")    { return Some(("Drupal".into(), version)); }
-        if search_area_lower.contains("joomla")    { return Some(("Joomla".into(), version)); }
-        if search_area_lower.contains("typo3")     { return Some(("TYPO3".into(), version)); }
-        if search_area_lower.contains("wix")       { return Some(("Wix".into(), None)); }
+        let mut end = std::cmp::min(start + 500, lower.len());
+        while !lower.is_char_boundary(end) { end -= 1; }
+        let search_area = &lower[start..end];
+        if search_area.contains("wordpress") { return Some("WordPress".into()); }
+        if search_area.contains("drupal")    { return Some("Drupal".into()); }
+        if search_area.contains("joomla")    { return Some("Joomla".into()); }
+        if search_area.contains("typo3")     { return Some("TYPO3".into()); }
+        if search_area.contains("wix")       { return Some("Wix".into()); }
     }
     // body fingerprints
     if lower.contains("wp-content/") || lower.contains("wp-includes/") {
-        return Some(("WordPress".into(), None));
+        return Some("WordPress".into());
     }
     if lower.contains("drupal.settings") || lower.contains("/sites/default/files/") {
-        return Some(("Drupal".into(), None));
+        return Some("Drupal".into());
     }
     if lower.contains("/components/com_") {
-        return Some(("Joomla".into(), None));
+        return Some("Joomla".into());
     }
     if lower.contains("typo3conf/") || lower.contains("typo3temp/") {
-        return Some(("TYPO3".into(), None));
+        return Some("TYPO3".into());
     }
     // Server header: Apache/nginx
     if let Some(srv) = server {
         let srv_lc = srv.to_ascii_lowercase();
-        if srv_lc.contains("apache") {
-            return Some(("apache".into(), extract_header_version(srv)));
-        }
-        if srv_lc.contains("nginx") {
-            return Some(("nginx".into(), extract_header_version(srv)));
-        }
+        if srv_lc.contains("apache") { return Some("apache".into()); }
+        if srv_lc.contains("nginx")  { return Some("nginx".into()); }
     }
-    // X-Powered-By: PHP
+    // X-Powered-By: PHP (fallback)
     if let Some(pb) = powered_by {
-        let pb_lc = pb.to_ascii_lowercase();
-        if pb_lc.contains("php") {
-            return Some(("php".into(), extract_header_version(pb)));
+        if pb.to_ascii_lowercase().contains("php") {
+            return Some("php".into());
         }
     }
     None

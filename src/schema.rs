@@ -27,7 +27,6 @@ pub(crate) fn ensure_schema(conn: &duckdb::Connection) -> Result<()> {
         ALTER TABLE domains ADD COLUMN IF NOT EXISTS whois_created    DATE;
         ALTER TABLE domains ADD COLUMN IF NOT EXISTS redirect_chain   VARCHAR[];
         ALTER TABLE domains ADD COLUMN IF NOT EXISTS cms              VARCHAR;
-        ALTER TABLE domains ADD COLUMN IF NOT EXISTS tech_version     VARCHAR;
 
         CREATE TABLE IF NOT EXISTS dns_info (
             domain      VARCHAR PRIMARY KEY,

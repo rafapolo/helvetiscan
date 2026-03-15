@@ -94,9 +94,9 @@ fn flush_batch_roundtrip() {
             title VARCHAR, body_hash VARCHAR, error_kind VARCHAR,
             elapsed_ms BIGINT, ip VARCHAR, updated_at TIMESTAMP,
             server VARCHAR, powered_by VARCHAR,
-            redirect_chain VARCHAR[], cms VARCHAR, tech_version VARCHAR
+            redirect_chain VARCHAR[], cms VARCHAR
         );
-        INSERT INTO domains VALUES ('test.ch', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+        INSERT INTO domains VALUES ('test.ch', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
     ").unwrap();
 
     let mut batch = vec![Row {
@@ -113,7 +113,6 @@ fn flush_batch_roundtrip() {
         elapsed_ms: 123,
         redirect_chain: vec![],
         cms: None,
-        tech_version: None,
     }];
 
     flush_batch(&conn, &mut batch).unwrap();
@@ -245,69 +244,59 @@ async fn sample_domains_e2e_scan() {
 
 // ---- detect_cms ----
 
-fn cms_name(result: Option<(String, Option<String>)>) -> Option<String> {
-    result.map(|(name, _)| name)
-}
-
 #[test]
 fn wp_content_in_body() {
-    assert_eq!(cms_name(detect_cms(None, b"<link rel='stylesheet' href='/wp-content/themes/x/style.css'>", None, None)), Some("WordPress".into()));
+    assert_eq!(detect_cms(None, b"<link rel='stylesheet' href='/wp-content/themes/x/style.css'>", None), Some("WordPress".into()));
 }
 
 #[test]
 fn wp_includes_in_body() {
-    assert_eq!(cms_name(detect_cms(None, b"<script src='/wp-includes/js/jquery.js'></script>", None, None)), Some("WordPress".into()));
+    assert_eq!(detect_cms(None, b"<script src='/wp-includes/js/jquery.js'></script>", None), Some("WordPress".into()));
 }
 
 #[test]
 fn powered_by_wordpress() {
-    assert_eq!(cms_name(detect_cms(Some("WordPress 6.4"), b"", None, None)), Some("WordPress".into()));
+    assert_eq!(detect_cms(Some("WordPress 6.4"), b"", None), Some("WordPress".into()));
 }
 
 #[test]
 fn drupal_settings_in_body() {
-    assert_eq!(cms_name(detect_cms(None, b"jQuery.extend(Drupal.settings, {});", None, None)), Some("Drupal".into()));
+    assert_eq!(detect_cms(None, b"jQuery.extend(Drupal.settings, {});", None), Some("Drupal".into()));
 }
 
 #[test]
 fn joomla_com_in_body() {
-    assert_eq!(cms_name(detect_cms(None, b"<a href='/components/com_content/'>read more</a>", None, None)), Some("Joomla".into()));
+    assert_eq!(detect_cms(None, b"<a href='/components/com_content/'>read more</a>", None), Some("Joomla".into()));
 }
 
 #[test]
 fn typo3conf_in_body() {
-    assert_eq!(cms_name(detect_cms(None, b"<link href='/typo3conf/ext/theme/Resources/Public/main.css'>", None, None)), Some("TYPO3".into()));
+    assert_eq!(detect_cms(None, b"<link href='/typo3conf/ext/theme/Resources/Public/main.css'>", None), Some("TYPO3".into()));
 }
 
 #[test]
 fn blank_html_returns_none() {
-    assert_eq!(detect_cms(None, b"<!DOCTYPE html><html><head></head><body></body></html>", None, None), None);
+    assert_eq!(detect_cms(None, b"<!DOCTYPE html><html><head></head><body></body></html>", None), None);
 }
 
 #[test]
 fn empty_body_returns_none() {
-    assert_eq!(detect_cms(None, b"", None, None), None);
+    assert_eq!(detect_cms(None, b"", None), None);
 }
 
 #[test]
 fn server_header_apache_version() {
-    let result = detect_cms(None, b"", Some("Apache/2.4.57"), None);
-    assert_eq!(cms_name(result.clone()), Some("apache".into()));
-    assert_eq!(result.and_then(|(_, v)| v), Some("2.4.57".into()));
+    assert_eq!(detect_cms(None, b"", Some("Apache/2.4.57")), Some("apache".into()));
 }
 
 #[test]
 fn server_header_nginx_version() {
-    let result = detect_cms(None, b"", Some("nginx/1.24.0"), None);
-    assert_eq!(cms_name(result.clone()), Some("nginx".into()));
-    assert_eq!(result.and_then(|(_, v)| v), Some("1.24.0".into()));
+    assert_eq!(detect_cms(None, b"", Some("nginx/1.24.0")), Some("nginx".into()));
 }
 
 #[test]
 fn powered_by_php_version() {
-    let result = detect_cms(Some("PHP/8.2.1"), b"", None, None);
-    assert_eq!(cms_name(result.clone()), Some("php".into()));
-    assert_eq!(result.and_then(|(_, v)| v), Some("8.2.1".into()));
+    assert_eq!(detect_cms(Some("PHP/8.2.1"), b"", None), Some("php".into()));
 }
 
 // ---- flush_http_headers_batch ----

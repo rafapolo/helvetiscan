@@ -104,7 +104,6 @@ pub(crate) struct Row {
     pub(crate) elapsed_ms: u64,
     pub(crate) redirect_chain: Vec<String>,
     pub(crate) cms: Option<String>,
-    pub(crate) tech_version: Option<String>,
 }
 
 #[derive(Debug, Clone)]
