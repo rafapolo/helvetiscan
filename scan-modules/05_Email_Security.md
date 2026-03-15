@@ -165,115 +165,67 @@ Prevention: Strong DMARC (p=reject) + SPF + DKIM would have alerted recipients
 
 ### Email Authentication Scanning
 
-```rust
-// Pseudocode: Email security scanner
-async fn scan_email_security(domain: &str) -> EmailSecResult {
-    // 1. SPF Record Check
-    let spf_record = dns_query(domain, "TXT", "v=spf1").await?;
-    let spf_analysis = validate_spf(&spf_record)?;
+```
+DKIM_SELECTORS = ["k1", "google", "sendgrid", "mailchimp", "default"]
 
-    // Check for SPF includes and recursion depth
-    let spf_includes = extract_spf_includes(&spf_record);
-    let lookup_count = count_spf_dns_lookups(&spf_includes)?;
+function scan_email_security(domain):
+    // 1. SPF
+    spf_record        = dns_query(domain, "TXT", filter="v=spf1")
+    spf               = validate_spf(spf_record)
+    spf_lookup_count  = count_dns_lookups(extract_includes(spf_record))
+    // RFC 7208: max 10 DNS lookups — exceed = SPF permerror
 
-    // 2. DKIM Key Discovery
-    let selectors = vec!["k1", "google", "sendgrid", "mailchimp", "default"];
-    let mut dkim_records = Vec::new();
-
-    for selector in selectors {
-        let selector_domain = format!("{}._domainkey.{}", selector, domain);
-        if let Ok(dkim) = dns_query(&selector_domain, "TXT").await {
-            let key_strength = extract_key_strength(&dkim)?;
-            dkim_records.push(DKIMKey {
+    // 2. DKIM — probe common selectors
+    dkim_keys = []
+    for selector in DKIM_SELECTORS:
+        record = dns_query(selector + "._domainkey." + domain, "TXT")
+        if record found:
+            dkim_keys.append({
                 selector,
-                strength: key_strength,
-                algorithm: extract_algorithm(&dkim),
-            });
-        }
-    }
+                key_bits:  extract_key_strength(record),
+                algorithm: extract_algorithm(record)
+            })
 
-    // 3. DMARC Policy Check
-    let dmarc_record = dns_query(&format!("_dmarc.{}", domain), "TXT").await?;
-    let dmarc_policy = parse_dmarc(&dmarc_record)?;
+    // 3. DMARC
+    dmarc_record = dns_query("_dmarc." + domain, "TXT")
+    dmarc        = parse_dmarc(dmarc_record)
+    // Extract: p (policy), sp (subdomain policy), rua (reporting endpoint)
 
-    // Extract policy enforcement
-    let p_policy = dmarc_policy.get("p"); // none, quarantine, reject?
-    let sp_policy = dmarc_policy.get("sp"); // subdomain policy
-    let reporting = dmarc_policy.get("rua"); // aggregate reports enabled?
+    // 4. Subdomain DMARC coverage
+    for subdomain in enumerate_subdomains(domain):
+        subdomain_dmarc = dns_query("_dmarc." + subdomain, "TXT")
+        // flag if subdomain has no own DMARC and no sp= on parent
 
-    // 4. Subdomain DMARC Check (subdomains often forgotten)
-    let subdomains = enumerate_subdomains(domain).await?;
-    for subdomain in subdomains {
-        let subdomain_dmarc = dns_query(&format!("_dmarc.{}", subdomain), "TXT").await;
-        // Check if subdomain has its own DMARC or inherits from parent
-    }
+    issues = detect_email_issues(spf, dmarc, dkim_keys)
 
-    // 5. Email Flow Testing
-    // Simulate sending email, check for DKIM signature and SPF pass
-    let test_email = send_test_email(domain).await?;
-    let dkim_valid = verify_dkim_signature(&test_email)?;
-    let spf_valid = check_spf_pass(&test_email)?;
-
-    // 6. Common Misconfigurations
-    let issues = detect_email_issues(&spf_record, &dmarc_policy, &dkim_records);
-
-    Ok(EmailSecResult {
-        domain,
-        spf: spf_analysis,
-        dkim: dkim_records,
-        dmarc: dmarc_policy,
+    return EmailSecResult {
+        spf,
+        dkim:  dkim_keys,
+        dmarc,
         issues,
-        overall_risk: calculate_email_risk(&spf_analysis, &dmarc_policy, &dkim_records),
-    })
-}
-
-fn detect_email_issues(spf: &SPF, dmarc: &DMARC, dkim: &[DKIM]) -> Vec<Issue> {
-    let mut issues = Vec::new();
-
-    // Issue 1: SPF only, no DKIM or DMARC
-    if spf.is_some() && dkim.is_empty() && dmarc.is_none() {
-        issues.push(Issue {
-            severity: HIGH,
-            message: "SPF present but DKIM unsigned and DMARC missing",
-        });
+        risk:  calculate_email_risk(spf, dmarc, dkim_keys)
     }
 
-    // Issue 2: DMARC p=none (no enforcement)
-    if dmarc.policy == "none" {
-        issues.push(Issue {
-            severity: HIGH,
-            message: "DMARC policy is p=none (monitoring only, no enforcement)",
-        });
-    }
+function detect_email_issues(spf, dmarc, dkim):
+    issues = []
 
-    // Issue 3: SPF softfail (~all) instead of hardfail (-all)
-    if spf.fail_mode == "softfail" {
-        issues.push(Issue {
-            severity: MEDIUM,
-            message: "SPF uses ~all (softfail) instead of -all (hardfail)",
-        });
-    }
+    if spf exists and dkim is empty and dmarc is null:
+        issues.append(HIGH, "SPF present but DKIM unsigned and DMARC missing")
 
-    // Issue 4: Wildcard SPF (include:*)
-    if spf.includes.contains("*") {
-        issues.push(Issue {
-            severity: MEDIUM,
-            message: "SPF uses overly broad include (allows too many IPs)",
-        });
-    }
+    if dmarc.policy == "none":
+        issues.append(HIGH, "DMARC p=none — monitoring only, no enforcement")
 
-    // Issue 5: DKIM key too weak (1024-bit)
-    for key in dkim {
-        if key.strength < 2048 {
-            issues.push(Issue {
-                severity: HIGH,
-                message: format!("DKIM key {} is {}-bit (weak)", key.selector, key.strength),
-            });
-        }
-    }
+    if spf.fail_mode == "softfail":  // ~all
+        issues.append(MEDIUM, "SPF uses ~all (softfail) instead of -all (hardfail)")
 
-    issues
-}
+    if spf.includes contains wildcard:
+        issues.append(MEDIUM, "SPF uses overly broad include (allows too many IPs)")
+
+    for key in dkim:
+        if key.key_bits < 2048:
+            issues.append(HIGH, "DKIM key '" + key.selector + "' is " + key.key_bits + "-bit (weak)")
+
+    return issues
 ```
 
 ---

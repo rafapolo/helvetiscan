@@ -114,55 +114,40 @@ Competitor sees: "pharma.ch is researching [drug class]" → competitive intelli
 
 ### HTTP Header Enumeration
 
-```rust
-// Pseudocode: Scan HTTP headers
-async fn scan_http_headers(domain: &str) -> HeaderResults {
-    // Follow redirects to final HTTPS endpoint
-    let response = http_client
-        .get(format!("https://{}", domain))
-        .follow_redirects()
-        .send()
-        .await?;
+```
+function scan_http_headers(domain):
+    response = http_get("https://" + domain, follow_redirects=true)
+    headers  = response.headers
 
-    // Extract all response headers
-    let headers = response.headers();
+    hsts        = headers["Strict-Transport-Security"]
+    csp         = headers["Content-Security-Policy"]
+    x_frame     = headers["X-Frame-Options"]
+    x_cto       = headers["X-Content-Type-Options"]
+    referrer    = headers["Referrer-Policy"]
+    permissions = headers["Permissions-Policy"]
 
-    // Parse security headers
-    let hsts = headers.get("Strict-Transport-Security");
-    let csp = headers.get("Content-Security-Policy");
-    let x_frame = headers.get("X-Frame-Options");
-    let x_content_type = headers.get("X-Content-Type-Options");
-    let referrer_policy = headers.get("Referrer-Policy");
-    let permissions_policy = headers.get("Permissions-Policy");
+    if csp:
+        directives   = parse_csp(csp)
+        csp_strength = evaluate_csp_strength(directives)
+        // flag: unsafe-inline, unsafe-eval, wildcard src (*)
 
-    // Parse CSP directives
-    if let Some(csp_header) = csp {
-        let directives = parse_csp_directives(csp_header)?;
-        validate_csp_strength(&directives)?;
+    if hsts:
+        max_age            = extract_max_age(hsts)
+        has_preload        = "preload" in hsts
+        has_subdomains     = "includeSubDomains" in hsts
+
+    issues = detect_header_issues(headers)
+
+    return HeaderResults {
+        hsts_present:          hsts != null,
+        csp_present:           csp  != null,
+        x_frame_options:       x_frame,
+        x_content_type_options: x_cto,
+        referrer_policy:       referrer,
+        permissions_policy:    permissions,
+        csp_strength,
+        issues
     }
-
-    // Parse HSTS parameters
-    if let Some(hsts_header) = hsts {
-        let max_age = extract_max_age(hsts_header)?;
-        let preload = hsts_header.contains("preload");
-        validate_hsts_params(max_age, preload)?;
-    }
-
-    // Test for common misconfigurations
-    let issues = detect_header_issues(&headers);
-
-    Ok(HeaderResults {
-        domain,
-        hsts_present: hsts.is_some(),
-        csp_present: csp.is_some(),
-        x_frame_options: x_frame,
-        x_content_type_options: x_content_type,
-        referrer_policy: referrer_policy,
-        permissions_policy: permissions_policy,
-        csp_strength: evaluate_csp(&csp),
-        issues: issues,
-    })
-}
 ```
 
 ### CSP Strength Evaluation

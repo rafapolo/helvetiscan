@@ -36,100 +36,54 @@
 
 ### Detection Techniques
 
-```rust
-// Pseudocode: Technology fingerprinting
-async fn fingerprint_technologies(domain: &str) -> TechResults {
-    let response = http_client.get(format!("https://{}", domain)).send().await?;
+```
+DETECTION_ENDPOINTS = ["/wp-admin/", "/administrator/", "/admin/",
+                        "/api/version", "/.env", "/composer.json"]
 
-    // 1. HTTP Header Fingerprinting
-    let server_header = response.headers().get("Server");
-    let x_powered_by = response.headers().get("X-Powered-By");
-    let x_aspnet_version = response.headers().get("X-AspNet-Version");
+function fingerprint_technologies(domain):
+    response = http_get("https://" + domain)
+    html     = response.body
+    headers  = response.headers
 
-    // 2. HTML Content Analysis
-    let html = response.text().await?;
+    // 1. HTTP header fingerprinting
+    server    = headers["Server"]           // e.g. "Apache/2.4.41"
+    x_powered = headers["X-Powered-By"]    // e.g. "PHP/7.4"
+    aspnet    = headers["X-AspNet-Version"]
 
-    // Look for CMS indicators
-    let cms = detect_cms(&html)?; // WordPress, Joomla, etc.
-    let js_frameworks = detect_js_frameworks(&html)?; // React, Vue, etc.
+    // 2. HTML analysis
+    cms        = detect_cms(html)
+    frameworks = detect_js_frameworks(html)
+    generator  = extract_meta(html, "generator")
 
-    // Extract comments, meta tags
-    let generator = extract_meta(&html, "generator");
-    let comments = extract_html_comments(&html);
+    // 3. Script source analysis
+    for each script_src in extract_script_sources(html):
+        framework = identify_framework(script_src)
 
-    // 3. JavaScript Analysis
-    let js_bundles = extract_script_sources(&html);
-    for src in js_bundles {
-        let framework = identify_framework_from_bundle(&src)?;
+    // 4. Probe known detection endpoints
+    for endpoint in DETECTION_ENDPOINTS:
+        if http_get(domain + endpoint).status == 200:
+            // Endpoint exposed — extract version info
+
+    // 5. CVE lookup per detected software + version
+    detected = [(cms.name, cms.version), (server.name, server.version), ...]
+    cves = []
+    for (software, version) in detected:
+        cves += query_cve_db(software, version)
+
+    cves.sort_by(cvss_score, descending)
+
+    return TechResults {
+        detected_software: detected,
+        cms, frameworks, cves,
+        risk: calculate_cve_risk(cves)
     }
 
-    // 4. Common Admin/Detection Endpoints
-    let endpoints = vec![
-        "/wp-admin/", // WordPress
-        "/administrator/", // Joomla
-        "/admin/", // Generic
-        "/api/version", // API version info
-        "/.env", // Node.js environment file
-        "/composer.json", // PHP package info
-    ];
-
-    for endpoint in endpoints {
-        if let Ok(resp) = http_client.get(format!("{}/{}", domain, endpoint)).send().await {
-            if resp.status().is_success() {
-                // Endpoint exists, may reveal version info
-            }
-        }
-    }
-
-    // 5. CVE Database Lookup
-    let detected_software = vec![
-        ("WordPress", "5.8.1"),
-        ("PHP", "7.4.3"),
-        ("Apache", "2.4.41"),
-    ];
-
-    let mut cves = Vec::new();
-    for (software, version) in detected_software {
-        let software_cves = query_cve_database(software, version).await?;
-        cves.extend(software_cves);
-    }
-
-    // Sort by CVSS score
-    cves.sort_by(|a, b| b.cvss_score.partial_cmp(&a.cvss_score).unwrap());
-
-    Ok(TechResults {
-        domain,
-        detected_software: detected_software,
-        cms: cms,
-        frameworks: js_frameworks,
-        cves: cves,
-        risk_level: calculate_cve_risk(&cves),
-    })
-}
-
-fn detect_cms(html: &str) -> Option<CMS> {
-    // WordPress indicators
-    if html.contains("wp-content") || html.contains("wp-includes") {
-        return Some(CMS::WordPress);
-    }
-
-    // Joomla indicators
-    if html.contains("//Joomla") || html.contains("com_") {
-        return Some(CMS::Joomla);
-    }
-
-    // Drupal indicators
-    if html.contains("Drupal") || html.contains("sites/default") {
-        return Some(CMS::Drupal);
-    }
-
-    // Magento indicators
-    if html.contains("mage/") || html.contains("skin/") {
-        return Some(CMS::Magento);
-    }
-
-    None
-}
+function detect_cms(html):
+    if "wp-content" or "wp-includes"  in html:  return WordPress
+    if "//Joomla"   or "com_"          in html:  return Joomla
+    if "Drupal"     or "sites/default" in html:  return Drupal
+    if "mage/"      or "skin/"         in html:  return Magento
+    return null
 ```
 
 ---

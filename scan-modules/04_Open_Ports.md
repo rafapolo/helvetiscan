@@ -135,69 +135,51 @@ containing patient medical records (GDPR violation)
 
 ### Port Scanning with Service Detection
 
-```rust
-// Pseudocode: Multi-threaded port scanner
-async fn scan_ports(domain: &str) -> PortScanResult {
-    let target_ips = resolve_dns(domain).await?;
+```
+PORTS = [21, 22, 23, 25, 53, 80, 110, 143, 443, 465, 587, 993,
+         3128, 3306, 3389, 5432, 5984, 6379, 8080, 8888, 9200,
+         27017, 1433, 445, ...]  // + all 65535 for full scan
 
-    let mut results = Vec::new();
-    let ports_to_scan = vec![
-        21, 22, 23, 25, 53, 80, 110, 143, 443, 465, 587, 993,
-        3128, 3306, 3389, 5432, 5984, 6379, 8080, 8888, 9200,
-        27017, 1433, 445, // ... and 65k+ for full scan
-    ];
+function scan_ports(domain):
+    target_ips = dns_resolve(domain)
+    open_ports = []
 
-    for ip in target_ips {
-        for &port in &ports_to_scan {
-            match try_connect(ip, port).await {
-                Ok(stream) => {
-                    // Port is open
-                    let banner = grab_banner(&stream).await;
-                    let service = identify_service(port, &banner);
-                    let vulns = correlate_cves(&service);
+    for each ip in target_ips:
+        for each port in PORTS (in parallel):
+            if tcp_connect(ip, port) succeeds:
+                banner  = grab_banner(ip, port)
+                service = identify_service(port, banner)
+                cves    = lookup_cves(service.name, service.version)
+                open_ports.append({
+                    ip, port, service, banner,
+                    vulnerabilities: cves,
+                    risk: assess_risk(port)
+                })
 
-                    results.push(OpenPort {
-                        ip,
-                        port,
-                        service,
-                        banner,
-                        vulnerabilities: vulns,
-                        risk_level: assess_port_risk(service),
-                    });
-                }
-                Err(timeout) => {
-                    // Port is closed or filtered
-                }
-            }
-        }
+    return PortScanResult {
+        open_ports,
+        risk_assessment: analyze_exposure(open_ports)
     }
 
-    Ok(PortScanResult {
-        domain,
-        open_ports: results,
-        risk_assessment: analyze_port_exposure(&results),
-    })
-}
-
-fn assess_port_risk(service: &Service) -> RiskLevel {
-    match service.port {
-        21 | 23 | 3306 | 5432 | 3389 | 445 | 6379 | 27017 => RiskLevel::CRITICAL,
-        22 | 25 | 53 | 8080 | 9200 => RiskLevel::HIGH,
-        80 | 443 => RiskLevel::LOW,
-        _ => RiskLevel::MEDIUM,
-    }
-}
+function assess_risk(port):
+    if port in [21, 23, 3306, 5432, 3389, 445, 6379, 27017]:  return CRITICAL
+    if port in [22, 25, 53, 8080, 9200]:                       return HIGH
+    if port in [80, 443]:                                       return LOW
+    return MEDIUM
 ```
 
 ### Banner Grabbing & Service Identification
 
-```bash
-# Example: Detect service version from banner
-nmap -sV -p 3306 target.ch
-# Output: 3306/tcp open mysql MySQL 5.7.25-22-log (Debian)
+```
+// Banner grabbing → service version detection
+banner  = tcp_connect_and_read(target, port=3306)
+// e.g. "5.7.25-22-log (Debian)"
 
-# Then correlate to CVEs:
-# MySQL 5.7.25 vulnerable to: CVE-2019-2614, CVE-2019-2627, CVE-2019-2628
+service = { name: "MySQL", version: "5.7.25" }
+
+// CVE database lookup
+cves = query_nvd(service.name, service.version)
+// Returns: CVE-2019-2614, CVE-2019-2627, CVE-2019-2628 ...
 ```
 
 ### CVE Correlation

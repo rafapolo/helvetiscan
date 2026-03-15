@@ -70,45 +70,31 @@
 
 ### Detection Method: TLS Handshake Probing
 
-```rust
-// Pseudocode: Rust async TLS scanner
-async fn scan_tls(domain: &str) -> TLSResult {
-    let mut client = TcpStream::connect((domain, 443)).await?;
-    let mut tls_conn = native_tls::TlsStream::new(client)?;
+```
+function scan_tls(domain):
+    connect TCP to domain:443
+    initiate TLS handshake
 
-    // Extract certificate chain
-    let peer_cert = tls_conn.peer_certificate()?;
-    let chain = tls_conn.peer_certificate_chain()?;
+    cert  = get_peer_certificate()
+    chain = get_certificate_chain()
 
-    // Parse X.509 certificate
-    let x509 = parse_x509(&peer_cert)?;
+    days_to_expiry = cert.not_after - today()
+    key_bits       = cert.public_key.bit_length()
+    sig_alg        = cert.signature_algorithm   // SHA256withRSA or SHA1withRSA?
+    tls_versions   = probe_supported_tls_versions(domain)
+    scts           = cert.signed_certificate_timestamps
 
-    // Check validity window
-    let days_to_expiry = (x509.not_after - now()).days();
-
-    // Extract key strength
-    let key_bits = x509.public_key.rsa_bits();
-
-    // Check signature algorithm
-    let sig_alg = x509.signature_algorithm; // SHA256withRSA or SHA1withRSA?
-
-    // Scan TLS protocol versions supported
-    let tls_versions = probe_tls_versions(domain).await?;
-
-    // Check for CT logs
-    let scts = x509.extensions.signed_certificate_timestamps;
-
-    Ok(TLSResult {
+    return TLSResult {
         domain,
-        cert: x509,
-        chain,
         days_to_expiry,
-        key_strength: key_bits,
+        key_strength:              key_bits,
         tls_versions,
-        certificate_transparency: scts.is_some(),
-        risk_level: calculate_tls_risk(&x509, &tls_versions),
-    })
-}
+        signature_algorithm:       sig_alg,
+        certificate_transparency:  scts != null,
+        self_signed:               cert.issuer == cert.subject,
+        chain_valid:               validate_chain(chain),
+        risk:                      calculate_tls_risk(cert, tls_versions)
+    }
 ```
 
 ### Scanning Coverage

@@ -84,76 +84,58 @@
 
 ### DNS Query Chain
 
-```rust
-// Pseudocode: DNS enumeration and DNSSEC validation
-async fn scan_dns(domain: &str) -> DNSResult {
-    // Resolve authoritative nameservers
-    let ns_records = resolve_ns(domain).await?;
+```
+function scan_dns(domain):
+    ns_records = resolve_ns(domain)
 
-    // Query each nameserver for standard records
-    for ns in &ns_records {
-        let a_records = query_dns(domain, "A", ns).await?;
-        let mx_records = query_dns(domain, "MX", ns).await?;
-        let txt_records = query_dns(domain, "TXT", ns).await?;
-        let caa_records = query_dns(domain, "CAA", ns).await?;
+    for each ns in ns_records:
+        a_records   = query(domain, "A",      ns)
+        mx_records  = query(domain, "MX",     ns)
+        txt_records = query(domain, "TXT",    ns)
+        caa_records = query(domain, "CAA",    ns)
 
-        // Check DNSSEC enablement
-        let dnssec_enabled = check_dnssec_enabled(domain, ns).await?;
+        dnssec_enabled = check_dnssec(domain, ns)
+        if dnssec_enabled:
+            dnskey       = query(domain, "DNSKEY", ns)
+            dnssec_valid = validate_dnssec_chain(domain, dnskey, ns)
 
-        if dnssec_enabled {
-            // Validate DNSKEY signatures
-            let dnskey = query_dns(domain, "DNSKEY", ns).await?;
-            let validate = validate_dnssec_chain(domain, &dnskey, ns).await?;
-        }
+        axfr_allowed  = attempt_zone_transfer(domain, ns)
+        open_resolver = query("8.8.8.8", "A", ns)  // recursive query test
 
-        // Test for zone transfer vulnerability
-        let axfr_result = attempt_zone_transfer(domain, ns).await;
+    subdomains = enumerate_subdomains(domain)
 
-        // Test for open resolver
-        let recursion_test = query_dns("8.8.8.8", "A", ns).await;
-    }
-
-    // Subdomain enumeration (brute force common subdomains)
-    let subdomains = enumerate_subdomains(domain).await?;
-
-    Ok(DNSResult {
-        domain,
-        ns_records,
-        a_records,
-        mx_records,
-        txt_records,
-        caa_records,
+    return DNSResult {
+        ns_records, a_records, mx_records, txt_records, caa_records,
         dnssec_enabled,
-        zone_transfer_vulnerable: axfr_result.is_ok(),
-        open_resolver: recursion_test.is_ok(),
-        subdomains,
-    })
-}
+        dnssec_valid,
+        zone_transfer_vulnerable: axfr_allowed,
+        open_resolver:            recursive query succeeded,
+        subdomains
+    }
 ```
 
 ### Subdomain Discovery
 
-```bash
-# Brute-force common subdomain patterns
-subdomains = [
+```
+COMMON_SUBDOMAINS = [
     "www", "mail", "ftp", "admin", "api", "test", "staging",
     "dev", "prod", "vpn", "remote", "webmail", "smtp", "pop3",
     "ntp", "dns", "git", "docker", "jenkins", "grafana",
-    "prometheus", "elasticsearch", "kibana", "redis", "mysql",
-    ...
-]
+    "prometheus", "elasticsearch", "kibana", "redis", "mysql", ...]
 
-for subdomain in subdomains {
-    result = resolve(f"{subdomain}.{domain}");
-    if result.is_some() {
-        discovered_subdomains.push({
-            name: subdomain,
-            ip: result.ip,
-            cname: result.cname,
-            ttl: result.ttl,
-        });
-    }
-}
+function enumerate_subdomains(domain):
+    discovered = []
+    for subdomain in COMMON_SUBDOMAINS:
+        fqdn   = subdomain + "." + domain
+        result = dns_resolve(fqdn)
+        if result exists:
+            discovered.append({
+                name:  fqdn,
+                ip:    result.ip,
+                cname: result.cname,
+                ttl:   result.ttl
+            })
+    return discovered
 ```
 
 ---

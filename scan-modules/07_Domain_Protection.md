@@ -140,135 +140,80 @@ Prevention:
 
 ### Domain Monitoring Engine
 
-```rust
-// Pseudocode: Domain expiry and brand protection scanner
-async fn scan_domain_protection(domain: &str) -> DomainProtectionResult {
-    // 1. WHOIS Lookup
-    let whois = query_whois(domain).await?;
+```
+function scan_domain_protection(domain):
+    // 1. WHOIS
+    whois          = query_whois(domain)
+    days_to_expiry = whois.expiry_date - today()
 
-    let registrant = whois.registrant_name;
-    let registrant_email = whois.registrant_email;
-    let expiry_date = whois.expiry_date;
-    let auto_renewal = whois.auto_renewal_enabled;
-    let registry_lock = whois.registry_lock;
+    // 2. Subdomain enumeration + orphan detection
+    subdomains = enumerate_subdomains(domain)
+    orphaned   = []
+    for subdomain in subdomains:
+        cname = get_cname(subdomain)
+        if cname exists and target_is_unreachable(cname):
+            orphaned.append({ subdomain, cname, risk: "subdomain takeover" })
 
-    // Calculate days until expiry
-    let days_to_expiry = (expiry_date - today()).days();
+    // 3. Typosquat detection
+    typosquats = detect_typosquats(domain)
+    // e.g. zurichbnk.ch, zurich-bank.ch, zurichbank.com ...
 
-    // 2. Subdomain Enumeration
-    let subdomains = enumerate_subdomains(domain).await?;
-    let mut orphaned = Vec::new();
+    // 4. Homoglyph detection
+    homoglyphs = detect_homoglyphs(domain)
+    // e.g. zurichbank.сh (Cyrillic 'с'), zür1chbank.ch (digit '1') ...
 
-    for subdomain in &subdomains {
-        // Check if CNAME is valid
-        if let Some(cname) = get_cname(subdomain).await {
-            // Try to access CNAME target
-            if !target_is_valid(&cname).await {
-                orphaned.push(DanglingCNAME {
-                    subdomain: subdomain.clone(),
-                    cname: cname.clone(),
-                    vulnerability: "subdomain takeover",
-                });
-            }
-        }
-    }
-
-    // 3. Typosquat Detection
-    let typosquats = detect_typosquats(domain).await?;
-    // Returns: zorichbank.ch, zurichbnk.ch, zurichbank-ch, etc.
-
-    // 4. Homoglyph Detection
-    let homoglyphs = detect_homoglyphs(domain)?;
-    // Returns: zorichbank.ch (o vs 0), zurichbank.сh (Cyrillic c vs Latin c)
-
-    // 5. WHOIS Privacy Check
-    let is_private = whois.privacy_protection_enabled;
-
-    Ok(DomainProtectionResult {
-        domain,
-        registrant,
-        registrant_email,
+    return DomainProtectionResult {
         days_to_expiry,
-        expiry_date,
-        auto_renewal_enabled: auto_renewal,
-        registry_lock_enabled: registry_lock,
+        auto_renewal:    whois.auto_renewal_enabled,
+        registry_lock:   whois.registry_lock,
+        whois_privacy:   whois.privacy_protection_enabled,
+        registrant_email: whois.registrant_email,
         orphaned_subdomains: orphaned,
-        discovered_typosquats: typosquats,
-        homoglyph_risks: homoglyphs,
-        privacy_protection: is_private,
-    })
-}
-
-async fn enumerate_subdomains(domain: &str) -> Result<Vec<String>> {
-    let mut subdomains = Vec::new();
-
-    // Common subdomain patterns
-    let patterns = vec![
-        "www", "mail", "ftp", "admin", "api", "test", "staging",
-        "dev", "prod", "vpn", "remote", "webmail", "smtp", "pop3",
-        "imap", "ntp", "dns", "cdn", "static", "assets", "img",
-        "blog", "shop", "store", "cart", "checkout", "payment",
-        "git", "gitlab", "github", "jenkins", "docker", "k8s",
-        "monitoring", "grafana", "prometheus", "elasticsearch",
-    ];
-
-    for pattern in patterns {
-        let subdomain = format!("{}.{}", pattern, domain);
-        if dns_resolves(&subdomain).await {
-            subdomains.push(subdomain);
-        }
+        typosquats,
+        homoglyph_risks: homoglyphs
     }
 
-    Ok(subdomains)
-}
+function enumerate_subdomains(domain):
+    PATTERNS = ["www", "mail", "ftp", "admin", "api", "test", "staging",
+                "dev", "prod", "vpn", "cdn", "static", "blog", "shop",
+                "git", "jenkins", "docker", "k8s", "grafana", ...]
+    discovered = []
+    for pattern in PATTERNS:
+        fqdn = pattern + "." + domain
+        if dns_resolves(fqdn):
+            discovered.append(fqdn)
+    return discovered
 
-fn detect_typosquats(domain: &str) -> Result<Vec<String>> {
-    let mut typosquats = Vec::new();
-    let parts: Vec<&str> = domain.split('.').collect();
-    let name = parts[0];
+function detect_typosquats(domain):
+    name       = domain.split(".")[0]
+    candidates = []
 
-    // Single character swaps
-    for i in 0..name.len() {
-        for c in 'a'..='z' {
-            let mut typo = name.to_string();
-            typo.remove(i);
-            typo.insert(i, c);
-            typosquats.push(format!("{}.ch", typo));
-        }
-    }
+    // Single-character substitutions
+    for each position i in name:
+        for each letter in a-z:
+            candidates.append(replace_char(name, i, letter) + ".ch")
 
-    // Adjacent character transposition (common typo)
-    for i in 0..name.len() - 1 {
-        let mut typo = name.to_string();
-        let chars: Vec<char> = typo.chars().collect();
-        typo = format!("{}{}{}",
-            &name[..i],
-            chars[i+1],
-            chars[i]
-        );
-        typosquats.push(format!("{}.ch", typo));
-    }
+    // Adjacent transpositions (common typing errors)
+    for each position i in 0..len(name)-2:
+        candidates.append(swap_chars(name, i, i+1) + ".ch")
 
-    // Homophone typos (l vs 1, o vs 0)
-    typosquats.push(name.replace('l', "1") + ".ch");
-    typosquats.push(name.replace('o', "0") + ".ch");
+    // Common lookalike substitutions
+    candidates.append(name.replace('l', '1') + ".ch")
+    candidates.append(name.replace('o', '0') + ".ch")
 
-    Ok(typosquats)
-}
+    return candidates
 ```
 
 ### WHOIS Monitoring
 
-```bash
-# Continuous WHOIS checks
-whois domain.ch | grep "Expiry\|paid\|until"
-# Output: Expiry Date: 2026-03-15
+```
+function check_expiry(domain):
+    whois           = query_whois(domain)
+    days_remaining  = whois.expiry_date - today()
 
-# Days until expiry calculation
-days=$(($(date -d "2026-03-15" +%s) - $(date +%s)) / 86400)
-if [ $days -lt 30 ]; then
-  echo "ALERT: Domain expires in $days days"
-fi
+    if days_remaining < 7:   alert(CRITICAL, domain + " expires in " + days_remaining + " days")
+    else if days_remaining < 30:  alert(HIGH,     domain + " expires in " + days_remaining + " days")
+    else if days_remaining < 90:  alert(MEDIUM,   domain + " expires in " + days_remaining + " days")
 ```
 
 ---
