@@ -176,12 +176,13 @@ fn seed_hardcoded_cves(conn: &duckdb::Connection) -> Result<usize> {
 pub(crate) fn run_cve_matching(conn: &duckdb::Connection) -> Result<usize> {
     conn.execute_batch(
         "INSERT INTO cve_matches (domain, technology, version, cve_id, severity, cvss_score, in_kev, published_at)
-         SELECT d.domain, c.technology, d.tech_version, c.cve_id, c.severity, c.cvss_score, c.in_kev, c.published_at
+         SELECT d.domain, c.technology, NULL, c.cve_id, c.severity, c.cvss_score, c.in_kev, c.published_at
          FROM domains d
          JOIN cve_catalog c ON lower(coalesce(d.cms, '')) = c.technology
                             OR lower(coalesce(d.server, '')) LIKE '%' || c.technology || '%'
-         WHERE d.tech_version IS NOT NULL
-         ON CONFLICT (domain, cve_id) DO UPDATE SET matched_at = CURRENT_TIMESTAMP",
+                            OR lower(coalesce(d.powered_by, '')) LIKE '%' || c.technology || '%'
+         WHERE d.cms IS NOT NULL OR d.server IS NOT NULL OR d.powered_by IS NOT NULL
+         ON CONFLICT (domain, cve_id) DO UPDATE SET matched_at = NOW()",
     )?;
 
     let count: i64 = conn.query_row(
