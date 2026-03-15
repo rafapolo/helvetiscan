@@ -1,6 +1,6 @@
-## HelvetiScan - Mapping the Swiss Digital Landscape
+## HelvetiScan - Mapping Swiss Cyberspace
 
-Scan, map and visualize the entire Swiss `.ch` namespace — over 2.5 million domains. A complete map of Switzerland's digital exposure - unpatched software, spoofable email, expired certificates, orphaned subdomains and beyond.
+Scan, map and visualize the entire Swiss `.ch` namespace — over 2.5 million domains. A complete map of Switzerland's digital surface - unpatched software, expired certificates, exposed databases, foreign dependencies, fakeable emails, weak or no encryptions and other uncharted vulnerabilities.
 
 This public visualization exposes the DNS dependency structure as an interactive force graph. See it online [here](https://xn--2dk.xyz/dataviz/swiss/?maxPoints=50000&sim=1).
 
@@ -10,28 +10,11 @@ This public visualization exposes the DNS dependency structure as an interactive
 
 </div>
 
- 50k domains on the image. Change `maxPoints` URL parameter for ammount of nodes to visualize.
+ 50k domains shown. Adjust `maxPoints` URL to load more — full dataset (2.5M nodes) requires a good GPU.
 
 ---
 
-## What it scans
-
-Seven modules, each covering a different layer of exposure:
-
-| Module | What it checks |
-|---|---|
-| **TLS & Certificates** | Expiration, chain validity, key strength, TLS version, CT logs |
-| **DNS & DNSSEC** | DNSSEC adoption, CAA records, zone transfers, open resolvers |
-| **HTTP Security Headers** | HSTS, CSP, X-Frame-Options, Referrer-Policy, Permissions-Policy |
-| **Open Ports** | Exposed databases, RDP, SMB, FTP, management interfaces |
-| **Email Security** | SPF, DKIM, DMARC — spoofing readiness across the namespace |
-| **Technology Fingerprinting** | CMS/framework detection, version extraction, CVE correlation |
-| **Domain Protection** | WHOIS expiry, typosquats, homoglyphs, orphaned subdomains |
-
-
----
-
-## How to use it?
+## How we use it?
 
 ```
 Swiss internet scanner - HTTP, DNS, TLS and port intelligence for the .ch namespace
@@ -60,42 +43,28 @@ Options:
   -h, --help             Print this help
 ```
 
-## Project structure
+---
 
-```
-├── src/
-│   ├── main.rs              # CLI entry point (clap subcommands, orchestration)
-│   ├── shared.rs            # Shared types, constants, DNS resolver, SQL helpers
-│   ├── schema.rs            # DuckDB schema initialisation
-│   ├── http_scan.rs         # HTTP header analysis, CMS/server fingerprinting
-│   ├── dns_scan.rs          # DNS resolution, DNSSEC, email security integration
-│   ├── tls_scan.rs          # TLS certificate inspection
-│   ├── ports_scan.rs        # Open port detection and banner grabbing
-│   ├── subdomains.rs        # Subdomain discovery (DNS + CT logs)
-│   ├── whois.rs             # WHOIS extraction and domain lifecycle tracking
-│   ├── email_security.rs    # SPF / DKIM / DMARC policy analysis
-│   ├── cve.rs               # CVE catalog and version-range matching
-│   ├── classify.rs          # Domain sector/subsector classification
-│   ├── benchmark.rs         # Performance benchmarks
-│   └── tests.rs             # Unit tests
-├── scan-modules/            # Per-module technical documentation (7 modules)
-├── web/
-│   ├── index.html           # Cosmograph visualisation
-│   ├── serve.js             # Bun static file server
-│   ├── nodes.arrow          # Pre-built graph data (served to browser)
-│   └── edges.arrow
-├── data/[^1]
-│   ├── domains.duckdb       # Queryable database (DuckDB)
-│   └── ...                  # Raw and intermediate data (gitignored)
-```
+## What do we scan?
+
+Seven modules, each covering a different layer of exposure:
+
+| Module | What it checks |
+|---|---|
+| **TLS & Certificates** | Expiration, chain validity, key strength, TLS version, CT logs |
+| **DNS & DNSSEC** | DNSSEC adoption, CAA records, zone transfers, open resolvers |
+| **HTTP Security Headers** | HSTS, CSP, X-Frame-Options, Referrer-Policy, Permissions-Policy |
+| **Open Ports** | Exposed databases, RDP, SMB, FTP, management interfaces |
+| **Email Security** | SPF, DKIM, DMARC — spoofing readiness across the namespace |
+| **Technology Fingerprinting** | CMS/framework detection, version extraction, CVE correlation |
+| **Domain Protection** | WHOIS expiry, typosquats, homoglyphs, orphaned subdomains |
 
 ---
 
+
 ## Research directions
 
-What the project currently does: Maps the digital landscape → Scans for exposure → Analyzes vulnerabilities → Scores risk → Reports findings
-
-The final database can answer questions such as:
+The final database can answer questions such as:[^1]
 
 - How many .ch domains depend on foreign infrastructure?
 - Which .ch domains expose databases to the open internet?
@@ -109,7 +78,7 @@ The final database can answer questions such as:
 - Which Swiss cantons have the most exposed infrastructure?
 - How many .ch domains have orphaned subdomains vulnerable to takeover?
 
-See [domain analyses](analyses/analyse_domains.md)
+#### → Read our [preliminary analyses](analyses/analyse_domains.md).
 
 ## Planned Analyses
 
@@ -120,4 +89,4 @@ See [domain analyses](analyses/analyse_domains.md)
 - **Trend detection** — Is DMARC adoption growing? Is DNSSEC adoption stalling?
 - **Threat prediction** — Can new typosquat registrations signal incoming phishing campaigns?
 
-[^1]: Data not published. Consider processed edges.arrow and nodes.arrow tables for dataviz.
+[^1]: Raw datasets are not published. Consider only processed edges.arrow and nodes.arrow for dataviz.
