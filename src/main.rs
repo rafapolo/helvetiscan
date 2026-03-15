@@ -16,6 +16,7 @@ mod email_security;
 mod cve;
 mod classify;
 mod benchmark;
+mod sovereignty;
 #[cfg(test)]
 mod tests;
 
@@ -67,6 +68,8 @@ enum Command {
     Classify(ClassifyArgs),
     /// Compute sector-level risk benchmarks across classified domains.
     Benchmark(BenchmarkArgs),
+    /// Map NS operators by jurisdiction and compute per-domain sovereignty scores.
+    Sovereignty(SovereigntyArgs),
 }
 
 #[derive(clap::ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
@@ -300,6 +303,24 @@ pub(crate) struct BenchmarkArgs {
     pub(crate) db: PathBuf,
 }
 
+#[derive(Parser, Debug)]
+pub(crate) struct SovereigntyArgs {
+    #[arg(long, default_value = "data/domains.duckdb")]
+    pub(crate) db: PathBuf,
+
+    /// Path to GeoLite2-ASN.mmdb (offline ASN lookup).
+    #[arg(long, default_value = "data/GeoLite2-ASN.mmdb")]
+    pub(crate) asn_mmdb: PathBuf,
+
+    /// Path to GeoLite2-Country.mmdb (offline country lookup).
+    #[arg(long, default_value = "data/GeoLite2-Country.mmdb")]
+    pub(crate) country_mmdb: PathBuf,
+
+    /// Re-resolve all operators even if already present in ns_operators.
+    #[arg(long, default_value_t = false)]
+    pub(crate) rescan: bool,
+}
+
 impl Default for WhoisArgs {
     fn default() -> Self {
         Self {
@@ -476,6 +497,7 @@ async fn main() -> Result<()> {
         (None, false, db, None, Some(Command::UpdateCves)) => cve::cmd_update_cves(db).await,
         (None, false, _, None, Some(Command::Classify(args))) => classify::cmd_classify(args.db).await,
         (None, false, _, None, Some(Command::Benchmark(args))) => benchmark::cmd_benchmark(args.db).await,
+        (None, false, _, None, Some(Command::Sovereignty(args))) => sovereignty::cmd_sovereignty(args).await,
         (None, true, _, _, _) => Err(anyhow!("--all requires --domain")),
         (None, false, _, None, None) => Err(anyhow!("missing command: use a subcommand, or --domain <domain> --all, or --full <domain|dns|tls>")),
     }
