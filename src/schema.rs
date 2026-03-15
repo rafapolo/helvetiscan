@@ -20,13 +20,14 @@ pub(crate) fn ensure_schema(conn: &duckdb::Connection) -> Result<()> {
             ip          VARCHAR,
             updated_at  TIMESTAMP
         );
-        ALTER TABLE domains ADD COLUMN IF NOT EXISTS status           VARCHAR;
-        ALTER TABLE domains ADD COLUMN IF NOT EXISTS server           VARCHAR;
-        ALTER TABLE domains ADD COLUMN IF NOT EXISTS powered_by       VARCHAR;
-        ALTER TABLE domains ADD COLUMN IF NOT EXISTS whois_registrar  VARCHAR;
-        ALTER TABLE domains ADD COLUMN IF NOT EXISTS whois_created    DATE;
-        ALTER TABLE domains ADD COLUMN IF NOT EXISTS redirect_chain   VARCHAR[];
-        ALTER TABLE domains ADD COLUMN IF NOT EXISTS cms              VARCHAR;
+        ALTER TABLE domains ADD COLUMN IF NOT EXISTS status             VARCHAR;
+        ALTER TABLE domains ADD COLUMN IF NOT EXISTS server             VARCHAR;
+        ALTER TABLE domains ADD COLUMN IF NOT EXISTS powered_by         VARCHAR;
+        ALTER TABLE domains ADD COLUMN IF NOT EXISTS whois_registrar    VARCHAR;
+        ALTER TABLE domains ADD COLUMN IF NOT EXISTS whois_created      DATE;
+        ALTER TABLE domains ADD COLUMN IF NOT EXISTS redirect_chain     VARCHAR[];
+        ALTER TABLE domains ADD COLUMN IF NOT EXISTS cms                VARCHAR;
+        ALTER TABLE domains ADD COLUMN IF NOT EXISTS sovereignty_score  INTEGER;
 
         CREATE TABLE IF NOT EXISTS dns_info (
             domain      VARCHAR PRIMARY KEY,
@@ -170,6 +171,23 @@ pub(crate) fn ensure_schema(conn: &duckdb::Connection) -> Result<()> {
             computed_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (sector, metric)
         );
+
+        CREATE TABLE IF NOT EXISTS ns_staging (
+            domain   VARCHAR NOT NULL,
+            operator VARCHAR NOT NULL,
+            PRIMARY KEY (domain, operator)
+        );
+
+        CREATE TABLE IF NOT EXISTS ns_operators (
+            operator     VARCHAR NOT NULL PRIMARY KEY,
+            sample_ns    VARCHAR,
+            resolved_ip  VARCHAR,
+            asn          VARCHAR,
+            asn_org      VARCHAR,
+            country_code VARCHAR,
+            jurisdiction VARCHAR NOT NULL DEFAULT 'OTHER',
+            updated_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
     ",
     )?;
     migrate_ports_info(conn)?;
@@ -201,6 +219,13 @@ pub(crate) fn ensure_schema(conn: &duckdb::Connection) -> Result<()> {
             EXISTS(SELECT 1 FROM cve_matches m WHERE m.domain = d.domain AND m.severity = 'CRITICAL') AS has_critical_cve,
             (coalesce(es.spf_too_permissive, false))                                    AS spf_permissive,
             (NOT coalesce(es.dkim_found, false))                                        AS no_dkim,
+            d.sovereignty_score,
+            CASE COALESCE(d.sovereignty_score, 0)
+                WHEN 3 THEN -5
+                WHEN 2 THEN -3
+                WHEN 1 THEN -1
+                ELSE 0
+            END                                                                          AS sovereignty_penalty,
             GREATEST(0,
                 100
                 - CASE WHEN h.hsts IS NULL AND d.status_code = 200                        THEN 10 ELSE 0 END
@@ -227,6 +252,12 @@ pub(crate) fn ensure_schema(conn: &duckdb::Connection) -> Result<()> {
                 - CASE WHEN EXISTS(SELECT 1 FROM cve_matches m WHERE m.domain = d.domain AND m.severity = 'CRITICAL') THEN 15 ELSE 0 END
                 - CASE WHEN coalesce(es.spf_too_permissive, false)                        THEN  7 ELSE 0 END
                 - CASE WHEN NOT coalesce(es.dkim_found, false)                            THEN  5 ELSE 0 END
+                - CASE COALESCE(d.sovereignty_score, 0)
+                      WHEN 3 THEN 5
+                      WHEN 2 THEN 3
+                      WHEN 1 THEN 1
+                      ELSE 0
+                  END
             )                                                                            AS score
         FROM domains d
         LEFT JOIN http_headers  h   ON h.domain   = d.domain
