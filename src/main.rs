@@ -589,17 +589,20 @@ fn print_single_domain_summary(db: &PathBuf, domain: &str) -> Result<()> {
     rows.push(tls_row);
 
     let ports_row = conn.query_row(
-        "SELECT status, error_kind, CAST(open_ports AS VARCHAR)
+        "SELECT COUNT(*) FILTER (WHERE open = true),
+                string_agg(CAST(port AS VARCHAR), ',' ORDER BY port) FILTER (WHERE open = true)
          FROM ports_info WHERE domain = ?1",
         duckdb::params![domain],
         |r| {
+            let open_count: i64 = r.get::<_, Option<i64>>(0)?.unwrap_or(0);
+            let open_list: Option<String> = r.get(1)?;
             Ok(SummaryRow {
                 scan: "ports",
-                status: r.get::<_, Option<String>>(0)?.unwrap_or_default(),
-                error_kind: r.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                status: if open_count > 0 { "ok".to_string() } else { "-".to_string() },
+                error_kind: String::new(),
                 details: format!(
-                    "open_ports={}",
-                    truncate_cell(&r.get::<_, Option<String>>(2)?.unwrap_or_else(|| "[]".to_string()), 40),
+                    "open_ports=[{}]",
+                    truncate_cell(&open_list.unwrap_or_default(), 40),
                 ),
             })
         },
