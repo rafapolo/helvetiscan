@@ -20,7 +20,6 @@ erDiagram
         VARCHAR   powered_by
         VARCHAR[] redirect_chain
         VARCHAR   cms
-        VARCHAR   tech_version
         INTEGER   sovereignty_score
         TIMESTAMP updated_at
     }
@@ -197,7 +196,6 @@ Populated by `helvetiscan scan`. One row per input domain.
 | `powered_by` | VARCHAR | `X-Powered-By:` response header |
 | `redirect_chain` | VARCHAR[] | Starting URL(s) when a redirect occurred |
 | `cms` | VARCHAR | Detected CMS (WordPress, Drupal, Joomla, TYPO3, Wix) |
-| `tech_version` | VARCHAR | Extracted version string (e.g. `6.4.2`, `2.4.57`) — from `<meta generator>`, `Server:`, or `X-Powered-By:` |
 | `sovereignty_score` | INTEGER | DNS sovereignty tier: 0=CH, 1=EU, 2=non-EU foreign, 3=US |
 | `updated_at` | TIMESTAMP | Last scan time |
 
@@ -277,7 +275,7 @@ Populated by `helvetiscan subdomains`. Composite primary key on `(domain, subdom
 |---|---|---|
 | `domain` | VARCHAR PK | Parent domain |
 | `subdomain` | VARCHAR PK | Discovered FQDN |
-| `source` | VARCHAR | `axfr` (zone transfer) or `mx_ns` (record harvest) |
+| `source` | VARCHAR | `ct` (certificate transparency), `axfr` (zone transfer), or `mx_ns` (NS/MX record harvest) |
 | `discovered_at` | TIMESTAMP | |
 
 ### `http_headers`
@@ -443,7 +441,6 @@ SELECT * FROM risk_score LIMIT 10;
 | `cert_expired` | BOOLEAN | Certificate past `valid_to` |
 | `cert_expiring` | BOOLEAN | `days_remaining` between 0 and 29 |
 | `no_dnssec` | BOOLEAN | No DNSKEY/DS records |
-| `no_dmarc` | BOOLEAN | No `_dmarc.` TXT record (replaced by `dmarc_weak` once email_security is populated) |
 | `domain_expiring` | BOOLEAN | Domain expires within 30 days |
 | `exposed_db_port` | BOOLEAN | Open port in (3306, 5432, 6379, 9200, 27017, 11211, 2375) |
 | `exposed_risky_port` | BOOLEAN | Open port in (445, 23, 3389, 5900) |
@@ -488,6 +485,24 @@ WHERE registrar IS NOT NULL
 GROUP BY registrar
 ORDER BY domains DESC;
 ```
+
+## `domain_percentile` View
+
+Computed on demand. Ranks each domain's risk score within its industry sector.
+
+```sql
+SELECT * FROM domain_percentile WHERE sector = 'finance' ORDER BY percentile_in_sector;
+```
+
+| Column | Type | Notes |
+|---|---|---|
+| `domain` | VARCHAR | |
+| `score` | INTEGER | Raw risk score from `risk_score` view |
+| `sector` | VARCHAR | From `domain_classification` |
+| `sector_median` | DOUBLE | Median risk score for this sector (from `sector_benchmarks`) |
+| `percentile_in_sector` | DOUBLE | 0.0–1.0 rank within the sector (PERCENT_RANK) |
+
+Requires both `domain_classification` and `sector_benchmarks` to be populated.
 
 ### `ns_staging`
 
