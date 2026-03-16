@@ -61,7 +61,6 @@ Seven modules, each covering a different layer of exposure:
 
 ---
 
-
 ## Research directions
 
 The final database can answer questions such as:[^1]
@@ -88,5 +87,15 @@ The final database can answer questions such as:[^1]
 - **Cascade modeling** — If the top 3 providers go down, how many domains go dark?
 - **Trend detection** — Is DMARC adoption growing? Is DNSSEC adoption stalling?
 - **Threat prediction** — Can new typosquat registrations signal incoming phishing campaigns?
+
+## Next Features
+
+- Generate tags and summaries for all webpages using local Ollama LLM
+- Track changes between scans with changelog table and severity classification
+- Generate PDF/HTML compliance reports using Typst templates  
+- Webhook/email alerting system based on changelog entries
+- Detect typosquat/phishing domains using .ch dataset permutations (ex: m1gros.ch)
+- Analyze DNS provider market share and jurisdiction
+- Model cascading DNS failure scenarios
 
 [^1]: Raw datasets are not published. Consider only processed edges.arrow and nodes.arrow for dataviz.
