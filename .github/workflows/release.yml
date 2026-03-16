@@ -39,19 +39,8 @@ jobs:
           key: ${{ matrix.target }}-cargo-${{ hashFiles('Cargo.lock') }}
           restore-keys: ${{ matrix.target }}-cargo-
 
-      - name: Install Linux dependencies
-        if: runner.os == 'Linux'
-        run: sudo apt-get install -y libduckdb-dev
-
-      - name: Build (macOS, bundled DuckDB)
-        if: runner.os == 'macOS'
+      - name: Build
         run: cargo build --release --target ${{ matrix.target }}
-
-      - name: Build (Linux, system DuckDB)
-        if: runner.os == 'Linux'
-        env:
-          DUCKDB_LIB_DIR: /usr/lib/x86_64-linux-gnu
-        run: cargo build --release --target ${{ matrix.target }} --no-default-features
 
       - name: Rename binary
         run: |
