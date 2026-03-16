@@ -366,7 +366,7 @@ fn make_whois_lines(text: &str) -> Vec<String> {
 #[test]
 fn parses_registrar() {
     let lines = make_whois_lines("Registrar: Switch\nFirst Registration Date: 2001-01-01\n");
-    let mut row = WhoisRow { domain: "x.ch".into(), registrar: None, whois_created: None, expires_at: None, status: None, dnssec_delegated: None };
+    let mut row = WhoisRow { domain: "x.ch".into(), registrar: None, whois_created: None, expires_at: None, status: None, dnssec_delegated: None, connected: false };
     parse_whois_response(&mut row, &lines);
     assert_eq!(row.registrar, Some("Switch".into()));
 }
@@ -374,7 +374,7 @@ fn parses_registrar() {
 #[test]
 fn parses_registered_date() {
     let lines = make_whois_lines("First Registration Date: 2001-01-01\n");
-    let mut row = WhoisRow { domain: "x.ch".into(), registrar: None, whois_created: None, expires_at: None, status: None, dnssec_delegated: None };
+    let mut row = WhoisRow { domain: "x.ch".into(), registrar: None, whois_created: None, expires_at: None, status: None, dnssec_delegated: None, connected: false };
     parse_whois_response(&mut row, &lines);
     assert_eq!(row.whois_created, Some(chrono::NaiveDate::from_ymd_opt(2001, 1, 1).unwrap()));
 }
@@ -382,7 +382,7 @@ fn parses_registered_date() {
 #[test]
 fn parses_expiration_date() {
     let lines = make_whois_lines("Expiration Date: 2030-06-15\n");
-    let mut row = WhoisRow { domain: "x.ch".into(), registrar: None, whois_created: None, expires_at: None, status: None, dnssec_delegated: None };
+    let mut row = WhoisRow { domain: "x.ch".into(), registrar: None, whois_created: None, expires_at: None, status: None, dnssec_delegated: None, connected: false };
     parse_whois_response(&mut row, &lines);
     assert_eq!(row.expires_at, Some(chrono::NaiveDate::from_ymd_opt(2030, 6, 15).unwrap()));
 }
@@ -390,7 +390,7 @@ fn parses_expiration_date() {
 #[test]
 fn parses_state() {
     let lines = make_whois_lines("State: active\n");
-    let mut row = WhoisRow { domain: "x.ch".into(), registrar: None, whois_created: None, expires_at: None, status: None, dnssec_delegated: None };
+    let mut row = WhoisRow { domain: "x.ch".into(), registrar: None, whois_created: None, expires_at: None, status: None, dnssec_delegated: None, connected: false };
     parse_whois_response(&mut row, &lines);
     assert_eq!(row.status, Some("active".into()));
 }
@@ -398,7 +398,7 @@ fn parses_state() {
 #[test]
 fn dnssec_signed_delegation() {
     let lines = make_whois_lines("DNSSEC: Signed Delegation\n");
-    let mut row = WhoisRow { domain: "x.ch".into(), registrar: None, whois_created: None, expires_at: None, status: None, dnssec_delegated: None };
+    let mut row = WhoisRow { domain: "x.ch".into(), registrar: None, whois_created: None, expires_at: None, status: None, dnssec_delegated: None, connected: false };
     parse_whois_response(&mut row, &lines);
     assert_eq!(row.dnssec_delegated, Some(true));
 }
@@ -406,7 +406,7 @@ fn dnssec_signed_delegation() {
 #[test]
 fn dnssec_unsigned() {
     let lines = make_whois_lines("DNSSEC: unsigned delegation\n");
-    let mut row = WhoisRow { domain: "x.ch".into(), registrar: None, whois_created: None, expires_at: None, status: None, dnssec_delegated: None };
+    let mut row = WhoisRow { domain: "x.ch".into(), registrar: None, whois_created: None, expires_at: None, status: None, dnssec_delegated: None, connected: false };
     parse_whois_response(&mut row, &lines);
     assert_eq!(row.dnssec_delegated, Some(false));
 }

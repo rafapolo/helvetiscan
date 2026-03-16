@@ -186,6 +186,9 @@ pub(crate) struct WhoisRow {
     pub(crate) expires_at:       Option<NaiveDate>,
     pub(crate) status:           Option<String>,
     pub(crate) dnssec_delegated: Option<bool>,
+    /// True when the TCP connection succeeded and a response was received.
+    /// False means a network/timeout failure — row should not be persisted.
+    pub(crate) connected:        bool,
 }
 
 #[derive(Debug)]

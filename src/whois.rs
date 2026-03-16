@@ -123,7 +123,7 @@ async fn dispatcher_loop_whois(
             joinset.spawn(async move {
                 let _permit = permit;
                 let row = fetch_whois(domain, connect_timeout).await;
-                let _ = tx.send(row).await;
+                if row.connected { let _ = tx.send(row).await; }
             });
             while joinset.len() >= max_concurrency {
                 if joinset.join_next().await.is_none() { break; }
@@ -138,7 +138,7 @@ async fn dispatcher_loop_whois(
         joinset.spawn(async move {
             let _permit = permit;
             let row = fetch_whois(domain, connect_timeout).await;
-            let _ = tx.send(row).await;
+            if row.connected { let _ = tx.send(row).await; }
         });
         while joinset.len() >= max_concurrency {
             if joinset.join_next().await.is_none() { break; }
@@ -157,6 +157,7 @@ async fn fetch_whois(domain: String, connect_timeout: Duration) -> WhoisRow {
         expires_at: None,
         status: None,
         dnssec_delegated: None,
+        connected: false,
     };
 
     // Resolve whois.nic.ch and prefer IPv4 — IPv6 is often unreachable.
@@ -194,6 +195,7 @@ async fn fetch_whois(domain: String, connect_timeout: Duration) -> WhoisRow {
         }
     }
 
+    row.connected = true;
     parse_whois_response(&mut row, &lines);
     row
 }
@@ -283,6 +285,12 @@ fn flush_whois_batch(conn: &duckdb::Connection, batch: &mut Vec<WhoisRow>) -> Re
                 dnssec_delegated = excluded.dnssec_delegated,
                 queried_at       = excluded.queried_at",
         )?;
+        let mut upd = conn.prepare(
+            "UPDATE domains SET
+                whois_registrar = ?2,
+                whois_created   = ?3
+             WHERE domain = ?1",
+        )?;
         for row in batch.iter() {
             stmt.execute(duckdb::params![
                 row.domain.as_str(),
@@ -292,9 +300,137 @@ fn flush_whois_batch(conn: &duckdb::Connection, batch: &mut Vec<WhoisRow>) -> Re
                 row.status.as_deref(),
                 row.dnssec_delegated,
             ])?;
+            upd.execute(duckdb::params![
+                row.domain.as_str(),
+                row.registrar.as_deref(),
+                row.whois_created.map(|d| d.to_string()),
+            ])?;
         }
     }
     conn.execute_batch("COMMIT")?;
     batch.clear();
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::NaiveDate;
+
+    fn make_row(domain: &str) -> WhoisRow {
+        WhoisRow {
+            domain: domain.into(),
+            registrar: None,
+            whois_created: None,
+            expires_at: None,
+            status: None,
+            dnssec_delegated: None,
+            connected: false,
+        }
+    }
+
+    fn parse(lines: &[&str]) -> WhoisRow {
+        let mut row = make_row("example.ch");
+        let owned: Vec<String> = lines.iter().map(|s| s.to_string()).collect();
+        parse_whois_response(&mut row, &owned);
+        row
+    }
+
+    #[test]
+    fn parse_typical_ch_response() {
+        let row = parse(&[
+            "Domain name:          example.ch",
+            "Registrar:            Infomaniak Network SA",
+            "First registration date: 2003-04-15",
+            "Expiration date:      2025-04-15",
+            "State:                Active",
+            "DNSSEC:               Signed delegation",
+        ]);
+        assert_eq!(row.registrar.as_deref(), Some("Infomaniak Network SA"));
+        assert_eq!(row.whois_created, NaiveDate::from_ymd_opt(2003, 4, 15));
+        assert_eq!(row.expires_at, NaiveDate::from_ymd_opt(2025, 4, 15));
+        assert_eq!(row.status.as_deref(), Some("Active"));
+        assert_eq!(row.dnssec_delegated, Some(true));
+    }
+
+    #[test]
+    fn parse_before_prefix_on_creation_date() {
+        let row = parse(&["First registration date: before 1999-01-01"]);
+        assert_eq!(row.whois_created, NaiveDate::from_ymd_opt(1999, 1, 1));
+    }
+
+    #[test]
+    fn parse_expiry_date_alias() {
+        let row = parse(&["Expiry date: 2026-12-31"]);
+        assert_eq!(row.expires_at, NaiveDate::from_ymd_opt(2026, 12, 31));
+    }
+
+    #[test]
+    fn parse_expires_alias() {
+        let row = parse(&["Expires: 2026-06-01"]);
+        assert_eq!(row.expires_at, NaiveDate::from_ymd_opt(2026, 6, 1));
+    }
+
+    #[test]
+    fn parse_dnssec_not_delegated() {
+        let row = parse(&["DNSSEC: No"]);
+        assert_eq!(row.dnssec_delegated, Some(false));
+    }
+
+    #[test]
+    fn parse_empty_response_leaves_all_none() {
+        let row = parse(&[]);
+        assert!(row.registrar.is_none());
+        assert!(row.whois_created.is_none());
+        assert!(row.expires_at.is_none());
+        assert!(row.status.is_none());
+        assert!(row.dnssec_delegated.is_none());
+    }
+
+    #[test]
+    fn connected_flag_false_by_default() {
+        assert!(!make_row("example.ch").connected);
+    }
+
+    #[test]
+    fn flush_writes_whois_info_and_denormalises_domains() {
+        let conn = duckdb::Connection::open_in_memory().unwrap();
+        crate::schema::ensure_schema(&conn).unwrap();
+
+        // Insert a domain row first so the UPDATE has a target
+        conn.execute(
+            "INSERT INTO domains (domain) VALUES ('example.ch')",
+            [],
+        ).unwrap();
+
+        let mut batch = vec![WhoisRow {
+            domain: "example.ch".into(),
+            registrar: Some("Infomaniak Network SA".into()),
+            whois_created: NaiveDate::from_ymd_opt(2003, 4, 15),
+            expires_at: NaiveDate::from_ymd_opt(2025, 4, 15),
+            status: Some("Active".into()),
+            dnssec_delegated: Some(true),
+            connected: true,
+        }];
+
+        flush_whois_batch(&conn, &mut batch).unwrap();
+        assert!(batch.is_empty());
+
+        // whois_info populated
+        let registrar: String = conn
+            .query_row("SELECT registrar FROM whois_info WHERE domain = 'example.ch'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(registrar, "Infomaniak Network SA");
+
+        // domains denormalised columns populated (Bug 1)
+        let (wr, wc): (Option<String>, Option<String>) = conn
+            .query_row(
+                "SELECT whois_registrar, whois_created::VARCHAR FROM domains WHERE domain = 'example.ch'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(wr.as_deref(), Some("Infomaniak Network SA"));
+        assert_eq!(wc.as_deref(), Some("2003-04-15"));
+    }
 }
