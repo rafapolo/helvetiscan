@@ -112,62 +112,43 @@ pub(crate) struct ScanArgs {
     #[arg(long, help = "Re-scan domains whose error_kind matches this value (e.g. 'timeout')")]
     pub(crate) retry_errors: Option<String>,
 
-    #[arg(long, default_value = "1s", value_parser = shared::parse_duration)]
-    pub(crate) progress_interval: Duration,
-
     #[arg(skip)]
     pub(crate) no_progress: bool,
-
-    /// Stop after this many successful HTTP 200 responses have been written.
-    #[arg(long = "limit-success")]
-    pub(crate) limit_success: Option<usize>,
-
-    /// Re-scan a subset of existing HTTP rows: ip, server, or all domain rows.
-    #[arg(long)]
-    pub(crate) backfill: Option<BackfillMode>,
 
     /// Save each fetched HTML body to <path>/<domain>.html.zip
     #[arg(long)]
     pub(crate) save_html: Option<PathBuf>,
+
+    /// Path to GeoLite2-Country.mmdb for hosting country lookup (optional).
+    #[arg(long, default_value = "data/GeoLite2-Country.mmdb")]
+    pub(crate) country_mmdb: PathBuf,
 }
 
 #[derive(Parser, Debug, Clone)]
 pub(crate) struct DnsArgs {
-    #[arg(long, default_value = "data/domains.duckdb")]
+    #[arg(long, default_value = "data/domains.db")]
     pub(crate) db: PathBuf,
 
     #[arg(long)]
     pub(crate) domain: Option<String>,
 
-    #[arg(long, default_value_t = 1_000)]
-    pub(crate) write_batch_size: usize,
-
     #[arg(long, default_value_t = 250)]
     pub(crate) concurrency: usize,
-
-    #[arg(long, default_value = "1s", value_parser = shared::parse_duration)]
-    pub(crate) progress_interval: Duration,
 
     #[arg(skip)]
     pub(crate) no_progress: bool,
 
     #[arg(long, help = "Re-scan domains whose error_kind matches this value (e.g. 'timeout')")]
     pub(crate) retry_errors: Option<String>,
-
-    #[arg(long, default_value_t = false)]
-    pub(crate) rescan: bool,
 }
 
 #[derive(Parser, Debug, Clone)]
 pub(crate) struct TlsArgs {
-    #[arg(long, default_value = "data/domains.duckdb")]
+    #[arg(long, default_value = "data/domains.db")]
     pub(crate) db: PathBuf,
 
     #[arg(long)]
     pub(crate) domain: Option<String>,
-
-    #[arg(long, default_value_t = 250)]
-    pub(crate) write_batch_size: usize,
 
     #[arg(long, default_value_t = 150)]
     pub(crate) concurrency: usize,
@@ -345,14 +326,11 @@ impl Default for ScanArgs {
 impl Default for DnsArgs {
     fn default() -> Self {
         Self {
-            db: PathBuf::from("data/domains.duckdb"),
+            db: PathBuf::from("data/domains.db"),
             domain: None,
-            write_batch_size: 1_000,
             concurrency: 250,
-            progress_interval: Duration::from_secs(1),
             no_progress: false,
             retry_errors: None,
-            rescan: false,
         }
     }
 }
@@ -360,16 +338,13 @@ impl Default for DnsArgs {
 impl Default for TlsArgs {
     fn default() -> Self {
         Self {
-            db: PathBuf::from("data/domains.duckdb"),
+            db: PathBuf::from("data/domains.db"),
             domain: None,
-            write_batch_size: 250,
             concurrency: 150,
             connect_timeout: Duration::from_secs(5),
             handshake_timeout: Duration::from_secs(8),
-            progress_interval: Duration::from_secs(1),
             no_progress: false,
             retry_errors: None,
-            rescan: false,
         }
     }
 }
@@ -377,12 +352,9 @@ impl Default for TlsArgs {
 impl Default for SubdomainsArgs {
     fn default() -> Self {
         Self {
-            db: PathBuf::from("data/domains.duckdb"),
+            db: PathBuf::from("data/domains.db"),
             domain: None,
             concurrency: 200,
-            progress_interval: Duration::from_secs(1),
-            write_batch_size: 500,
-            rescan: false,
             no_progress: false,
         }
     }

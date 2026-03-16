@@ -399,8 +399,8 @@ fn writer_loop_dns(
     done_tx: tokio::sync::oneshot::Sender<()>,
     batch_size: usize,
 ) -> Result<()> {
-    let conn = duckdb::Connection::open(&db_path)
-        .with_context(|| format!("dns writer: open duckdb {:?}", db_path))?;
+    let conn = crate::shared::open_db(&db_path)
+        .with_context(|| format!("dns writer: open db {:?}", db_path))?;
 
     let mut batch = Vec::with_capacity(batch_size);
     while let Some(row) = result_rx.blocking_recv() {
