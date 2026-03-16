@@ -19,21 +19,17 @@ use crate::dns_scan::resolve_first_ip;
 use crate::PortsArgs;
 
 pub(crate) fn load_ports_targets(
-    conn: &duckdb::Connection,
+    conn: &rusqlite::Connection,
     domain: Option<&str>,
-    rescan: bool,
 ) -> Result<Vec<String>> {
     if let Some(domain) = domain {
         return Ok(vec![sanitize_domain(domain).ok_or_else(|| anyhow!("invalid domain: {domain}"))?]);
     }
-    let sql = if rescan {
-        "SELECT domain FROM domains ORDER BY domain".to_string()
-    } else {
+    let mut stmt = conn.prepare(
         "SELECT d.domain FROM domains d
          WHERE NOT EXISTS (SELECT 1 FROM ports_info p WHERE p.domain = d.domain)
-         ORDER BY d.domain".to_string()
-    };
-    let mut stmt = conn.prepare(&sql)?;
+         ORDER BY d.domain"
+    )?;
     let domains: Vec<String> = stmt
         .query_map([], |row| row.get(0))?
         .collect::<std::result::Result<_, _>>()?;
@@ -44,13 +40,9 @@ pub(crate) async fn cmd_ports(args: PortsArgs) -> Result<()> {
     if args.concurrency == 0 {
         return Err(anyhow!("--concurrency must be > 0"));
     }
-    if args.retry_errors.is_some() && args.rescan {
-        return Err(anyhow!("--retry-errors and --rescan are mutually exclusive"));
-    }
-
     let conn =
-        duckdb::Connection::open(&args.db).with_context(|| format!("open duckdb {:?}", args.db))?;
-    let pending = load_ports_targets(&conn, args.domain.as_deref(), args.rescan)?;
+        crate::shared::open_db(&args.db).with_context(|| format!("open db {:?}", args.db))?;
+    let pending = load_ports_targets(&conn, args.domain.as_deref())?;
     drop(conn);
 
     if pending.is_empty() {

@@ -213,30 +213,17 @@ pub(crate) struct SubdomainsArgs {
     #[arg(long, default_value_t = 200)]
     pub(crate) concurrency: usize,
 
-    #[arg(long, default_value = "1s", value_parser = shared::parse_duration)]
-    pub(crate) progress_interval: Duration,
-
-    #[arg(long, default_value_t = 500)]
-    pub(crate) write_batch_size: usize,
-
-    /// Re-probe domains already present in the subdomains table.
-    #[arg(long, default_value_t = false)]
-    pub(crate) rescan: bool,
-
     #[arg(skip)]
     pub(crate) no_progress: bool,
 }
 
 #[derive(Parser, Debug, Clone)]
 pub(crate) struct WhoisArgs {
-    #[arg(long, default_value = "data/domains.duckdb")]
+    #[arg(long, default_value = "data/domains.db")]
     pub(crate) db: PathBuf,
 
     #[arg(long)]
     pub(crate) domain: Option<String>,
-
-    #[arg(long, default_value_t = 500)]
-    pub(crate) write_batch_size: usize,
 
     /// Keep concurrency low — whois.nic.ch rate-limits aggressively.
     #[arg(long, default_value_t = 5)]
@@ -245,32 +232,25 @@ pub(crate) struct WhoisArgs {
     #[arg(long, default_value = "5s", value_parser = shared::parse_duration)]
     pub(crate) connect_timeout: Duration,
 
-    #[arg(long, default_value = "1s", value_parser = shared::parse_duration)]
-    pub(crate) progress_interval: Duration,
-
     #[arg(skip)]
     pub(crate) no_progress: bool,
-
-    /// Re-fetch domains that already have a whois_registrar value.
-    #[arg(long, default_value_t = false)]
-    pub(crate) rescan: bool,
 }
 
 #[derive(Parser, Debug)]
 pub(crate) struct ClassifyArgs {
-    #[arg(long, default_value = "data/domains.duckdb")]
+    #[arg(long, default_value = "data/domains.db")]
     pub(crate) db: PathBuf,
 }
 
 #[derive(Parser, Debug)]
 pub(crate) struct BenchmarkArgs {
-    #[arg(long, default_value = "data/domains.duckdb")]
+    #[arg(long, default_value = "data/domains.db")]
     pub(crate) db: PathBuf,
 }
 
 #[derive(Parser, Debug)]
 pub(crate) struct SovereigntyArgs {
-    #[arg(long, default_value = "data/domains.duckdb")]
+    #[arg(long, default_value = "data/domains.db")]
     pub(crate) db: PathBuf,
 
     /// Path to GeoLite2-ASN.mmdb (offline ASN lookup).
@@ -281,22 +261,38 @@ pub(crate) struct SovereigntyArgs {
     #[arg(long, default_value = "data/GeoLite2-Country.mmdb")]
     pub(crate) country_mmdb: PathBuf,
 
-    /// Re-resolve all operators even if already present in ns_operators.
-    #[arg(long, default_value_t = false)]
-    pub(crate) rescan: bool,
+}
+
+#[derive(Parser, Debug)]
+pub(crate) struct FullArgs {
+    #[arg(long, default_value = "data/domains.db")]
+    pub(crate) db: PathBuf,
+
+    /// Path to GeoLite2-ASN.mmdb (offline ASN lookup).
+    #[arg(long, default_value = "data/GeoLite2-ASN.mmdb")]
+    pub(crate) asn_mmdb: PathBuf,
+
+    /// Path to GeoLite2-Country.mmdb (offline country lookup).
+    #[arg(long, default_value = "data/GeoLite2-Country.mmdb")]
+    pub(crate) country_mmdb: PathBuf,
+
+    /// Number of concurrent requests for network scans.
+    #[arg(long, default_value_t = 500)]
+    pub(crate) concurrency: usize,
+
+    /// Save each fetched HTML body to <path>/<domain>.html.zip
+    #[arg(long)]
+    pub(crate) save_html: Option<PathBuf>,
 }
 
 impl Default for WhoisArgs {
     fn default() -> Self {
         Self {
-            db: PathBuf::from("data/domains.duckdb"),
+            db: PathBuf::from("data/domains.db"),
             domain: None,
-            write_batch_size: 500,
             concurrency: 5,
             connect_timeout: Duration::from_secs(5),
-            progress_interval: Duration::from_secs(1),
             no_progress: false,
-            rescan: false,
         }
     }
 }
@@ -304,21 +300,18 @@ impl Default for WhoisArgs {
 impl Default for ScanArgs {
     fn default() -> Self {
         Self {
-            db: PathBuf::from("data/domains.duckdb"),
+            db: PathBuf::from("data/domains.db"),
             domain: None,
-            write_batch_size: 1_000,
             concurrency: 500,
             connect_timeout: Duration::from_secs(5),
             request_timeout: Duration::from_secs(20),
             max_kbytes: 128,
             max_redirects: 5,
             user_agent: "helvetiscan/1.0".to_string(),
-            progress_interval: Duration::from_secs(1),
             no_progress: false,
-            limit_success: None,
-            backfill: None,
             retry_errors: None,
             save_html: None,
+            country_mmdb: PathBuf::from("data/GeoLite2-Country.mmdb"),
         }
     }
 }

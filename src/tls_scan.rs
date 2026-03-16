@@ -40,13 +40,9 @@ pub(crate) async fn cmd_tls(args: TlsArgs) -> Result<()> {
     if args.concurrency == 0 {
         return Err(anyhow!("--concurrency must be > 0"));
     }
-    if args.retry_errors.is_some() && args.rescan {
-        return Err(anyhow!("--retry-errors and --rescan are mutually exclusive"));
-    }
-
     let conn =
-        duckdb::Connection::open(&args.db).with_context(|| format!("open duckdb {:?}", args.db))?;
-    let pending = crate::dns_scan::load_scan_targets(&conn, args.domain.as_deref(), "tls_info", "scanned_at", args.rescan, args.retry_errors.as_deref())?;
+        crate::shared::open_db(&args.db).with_context(|| format!("open db {:?}", args.db))?;
+    let pending = crate::dns_scan::load_scan_targets(&conn, args.domain.as_deref(), "tls_info", "scanned_at", args.retry_errors.as_deref())?;
     drop(conn);
 
     if pending.is_empty() {

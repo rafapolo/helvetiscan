@@ -19,11 +19,10 @@ use crate::email_security::{analyze_email_security, flush_email_security_batch, 
 use crate::DnsArgs;
 
 pub(crate) fn load_scan_targets(
-    conn: &duckdb::Connection,
+    conn: &rusqlite::Connection,
     domain: Option<&str>,
     table: &str,
     timestamp_col: &str,
-    rescan: bool,
     retry_errors: Option<&str>,
 ) -> Result<Vec<String>> {
     if let Some(domain) = domain {
@@ -37,17 +36,13 @@ pub(crate) fn load_scan_targets(
             .collect::<std::result::Result<_, _>>()?;
         return Ok(domains);
     }
-    let sql = if rescan {
-        "SELECT domain FROM domains ORDER BY domain".to_string()
-    } else {
-        format!(
-            "SELECT d.domain
-             FROM domains d
-             LEFT JOIN {table} t ON t.domain = d.domain
-             WHERE t.domain IS NULL OR t.{timestamp_col} IS NULL
-             ORDER BY d.domain"
-        )
-    };
+    let sql = format!(
+        "SELECT d.domain
+         FROM domains d
+         LEFT JOIN {table} t ON t.domain = d.domain
+         WHERE t.domain IS NULL OR t.{timestamp_col} IS NULL
+         ORDER BY d.domain"
+    );
     let mut stmt = conn.prepare(&sql)?;
     let domains: Vec<String> = stmt
         .query_map([], |row| row.get(0))?
@@ -59,13 +54,9 @@ pub(crate) async fn cmd_dns(args: DnsArgs) -> Result<()> {
     if args.concurrency == 0 {
         return Err(anyhow!("--concurrency must be > 0"));
     }
-    if args.retry_errors.is_some() && args.rescan {
-        return Err(anyhow!("--retry-errors and --rescan are mutually exclusive"));
-    }
-
     let conn =
-        duckdb::Connection::open(&args.db).with_context(|| format!("open duckdb {:?}", args.db))?;
-    let pending = load_scan_targets(&conn, args.domain.as_deref(), "dns_info", "resolved_at", args.rescan, args.retry_errors.as_deref())?;
+        crate::shared::open_db(&args.db).with_context(|| format!("open db {:?}", args.db))?;
+    let pending = load_scan_targets(&conn, args.domain.as_deref(), "dns_info", "resolved_at", args.retry_errors.as_deref())?;
     drop(conn);
 
     if pending.is_empty() {
