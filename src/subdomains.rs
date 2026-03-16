@@ -49,7 +49,7 @@ pub(crate) async fn cmd_subdomains(args: SubdomainsArgs) -> Result<()> {
     }
 
     let resolver = build_default_resolver();
-    let progress = Arc::new(Progress::new(pending.len() as u64));
+    let progress = Arc::new(Progress::new(pending.len() as u64, "found", "no result"));
     let work_buf = (args.concurrency * 2).clamp(1_000, 100_000);
     let result_buf = (args.concurrency * 2).clamp(1_000, 100_000);
 
@@ -362,6 +362,11 @@ fn writer_loop_subdomains(
 
     let mut batch = Vec::with_capacity(batch_size);
     while let Some(row) = result_rx.blocking_recv() {
+        if row.found.is_empty() {
+            progress.errors.fetch_add(1, Ordering::Relaxed);
+        } else {
+            progress.ok.fetch_add(row.found.len() as u64, Ordering::Relaxed);
+        }
         batch.push(row);
         progress.completed.fetch_add(1, Ordering::Relaxed);
         if batch.len() >= batch_size {
@@ -371,6 +376,7 @@ fn writer_loop_subdomains(
     if !batch.is_empty() {
         flush_subdomains_batch(&conn, &mut batch)?;
     }
+    conn.execute_batch("CHECKPOINT")?;
     let _ = done_tx.send(());
     Ok(())
 }

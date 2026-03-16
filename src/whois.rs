@@ -45,7 +45,7 @@ pub(crate) async fn cmd_whois(args: WhoisArgs) -> Result<()> {
         return Ok(());
     }
 
-    let progress = Arc::new(Progress::new(pending.len() as u64));
+    let progress = Arc::new(Progress::new(pending.len() as u64, "registrar", "unknown"));
     let work_buf = (args.concurrency * 2).clamp(100, 10_000);
     let result_buf = (args.concurrency * 2).clamp(100, 10_000);
 
@@ -257,6 +257,11 @@ fn writer_loop_whois(
 
     let mut batch = Vec::with_capacity(batch_size);
     while let Some(row) = result_rx.blocking_recv() {
+        if row.registrar.is_some() {
+            progress.ok.fetch_add(1, Ordering::Relaxed);
+        } else {
+            progress.errors.fetch_add(1, Ordering::Relaxed);
+        }
         batch.push(row);
         progress.completed.fetch_add(1, Ordering::Relaxed);
         if batch.len() >= batch_size {
@@ -266,6 +271,7 @@ fn writer_loop_whois(
     if !batch.is_empty() {
         flush_whois_batch(&conn, &mut batch)?;
     }
+    conn.execute_batch("CHECKPOINT")?;
     let _ = done_tx.send(());
     Ok(())
 }

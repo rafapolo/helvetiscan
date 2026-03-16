@@ -85,14 +85,13 @@ pub(crate) async fn cmd_scan(args: ScanArgs) -> Result<()> {
 
     let resolver = build_default_resolver();
     let client = build_client(&args, resolver.clone())?;
-    let progress = Arc::new(Progress::new(pending.len() as u64));
+    let progress = Arc::new(Progress::new(pending.len() as u64, "HTTP 200", "errors"));
 
     let work_buf = (args.concurrency * 2).clamp(1_000, 100_000);
     let result_buf = (args.concurrency * 2).clamp(1_000, 100_000);
 
     let (work_tx, work_rx) = mpsc::channel::<String>(work_buf);
-    let (result_tx, result_rx) = mpsc::channel::<Row>(result_buf);
-    let (headers_tx, headers_rx) = mpsc::channel::<HttpHeadersRow>(result_buf);
+    let (result_tx, result_rx) = mpsc::channel::<(Row, Option<HttpHeadersRow>)>(result_buf);
     let (done_tx, done_rx) = tokio::sync::oneshot::channel::<()>();
 
     let writer_handle = tokio::task::spawn_blocking({
@@ -101,12 +100,6 @@ pub(crate) async fn cmd_scan(args: ScanArgs) -> Result<()> {
         let limit = args.limit_success;
         let progress = progress.clone();
         move || writer_loop_db(db_path, result_rx, progress, done_tx, batch_size, limit)
-    });
-
-    let headers_writer_handle = tokio::task::spawn_blocking({
-        let db_path = args.db.clone();
-        let batch_size = args.write_batch_size;
-        move || writer_loop_http_headers(db_path, headers_rx, batch_size)
     });
 
     let reader_handle = tokio::spawn({
@@ -136,7 +129,6 @@ pub(crate) async fn cmd_scan(args: ScanArgs) -> Result<()> {
     let dispatcher_handle = tokio::spawn(dispatcher_loop(
         work_rx,
         result_tx,
-        headers_tx,
         sem,
         client,
         resolver,
@@ -155,10 +147,6 @@ pub(crate) async fn cmd_scan(args: ScanArgs) -> Result<()> {
         .await
         .context("writer task panicked")?
         .context("writer failed")?;
-    headers_writer_handle
-        .await
-        .context("http_headers writer task panicked")?
-        .context("http_headers writer failed")?;
 
     if let Some(h) = progress_handle {
         h.abort();
@@ -192,8 +180,7 @@ fn build_client(args: &ScanArgs, resolver: hickory_resolver::TokioResolver) -> R
 
 async fn dispatcher_loop(
     mut work_rx: mpsc::Receiver<String>,
-    result_tx: mpsc::Sender<Row>,
-    headers_tx: mpsc::Sender<HttpHeadersRow>,
+    result_tx: mpsc::Sender<(Row, Option<HttpHeadersRow>)>,
     sem: Semaphore,
     client: Client,
     resolver: hickory_resolver::TokioResolver,
@@ -225,7 +212,6 @@ async fn dispatcher_loop(
             let client = client.clone();
             let resolver = resolver.clone();
             let tx = result_tx.clone();
-            let htx = headers_tx.clone();
             let args_task = args.clone();
 
             joinset.spawn(async move {
@@ -233,11 +219,8 @@ async fn dispatcher_loop(
                 if tx.is_closed() {
                     return;
                 }
-                let (row, headers) = fetch_domain(&client, &resolver, domain, &args_task).await;
-                if let Some(h) = headers {
-                    let _ = htx.send(h).await;
-                }
-                let _ = tx.send(row).await;
+                let result = fetch_domain(&client, &resolver, domain, &args_task).await;
+                let _ = tx.send(result).await;
             });
 
             while joinset.len() >= max_concurrency {
@@ -260,7 +243,6 @@ async fn dispatcher_loop(
         let client = client.clone();
         let resolver = resolver.clone();
         let tx = result_tx.clone();
-        let htx = headers_tx.clone();
         let args_task = args.clone();
 
         joinset.spawn(async move {
@@ -268,11 +250,8 @@ async fn dispatcher_loop(
             if tx.is_closed() {
                 return;
             }
-            let (row, headers) = fetch_domain(&client, &resolver, domain, &args_task).await;
-            if let Some(h) = headers {
-                let _ = htx.send(h).await;
-            }
-            let _ = tx.send(row).await;
+            let result = fetch_domain(&client, &resolver, domain, &args_task).await;
+            let _ = tx.send(result).await;
         });
 
         while joinset.len() >= max_concurrency {
@@ -289,7 +268,7 @@ async fn dispatcher_loop(
 
 fn writer_loop_db(
     db_path: PathBuf,
-    mut result_rx: mpsc::Receiver<Row>,
+    mut result_rx: mpsc::Receiver<(Row, Option<HttpHeadersRow>)>,
     progress: Arc<Progress>,
     done_tx: tokio::sync::oneshot::Sender<()>,
     batch_size: usize,
@@ -299,20 +278,25 @@ fn writer_loop_db(
         .with_context(|| format!("writer: open duckdb {:?}", db_path))?;
 
     let mut batch: Vec<Row> = Vec::with_capacity(batch_size);
+    let mut headers_batch: Vec<HttpHeadersRow> = Vec::with_capacity(batch_size);
 
-    while let Some(row) = result_rx.blocking_recv() {
+    while let Some((row, headers)) = result_rx.blocking_recv() {
         if row.status_code == Some(200) {
-            progress.http_200.fetch_add(1, Ordering::Relaxed);
+            progress.ok.fetch_add(1, Ordering::Relaxed);
         }
-        if row.error_kind == Some(ErrorKind::Timeout) {
-            progress.timeout.fetch_add(1, Ordering::Relaxed);
+        if row.error_kind.is_some() {
+            progress.errors.fetch_add(1, Ordering::Relaxed);
+        }
+        if let Some(h) = headers {
+            headers_batch.push(h);
         }
         batch.push(row);
         progress.completed.fetch_add(1, Ordering::Relaxed);
         if batch.len() >= batch_size {
             flush_batch(&conn, &mut batch)?;
+            flush_http_headers_batch(&conn, &mut headers_batch)?;
         }
-        if limit.is_some_and(|l| progress.http_200.load(Ordering::Relaxed) as usize >= l) {
+        if limit.is_some_and(|l| progress.ok.load(Ordering::Relaxed) as usize >= l) {
             break;
         }
     }
@@ -320,7 +304,11 @@ fn writer_loop_db(
     if !batch.is_empty() {
         flush_batch(&conn, &mut batch)?;
     }
+    if !headers_batch.is_empty() {
+        flush_http_headers_batch(&conn, &mut headers_batch)?;
+    }
 
+    conn.execute_batch("CHECKPOINT")?;
     let _ = done_tx.send(());
     Ok(())
 }
@@ -401,25 +389,6 @@ pub(crate) fn flush_http_headers_batch(conn: &duckdb::Connection, batch: &mut Ve
     Ok(())
 }
 
-fn writer_loop_http_headers(
-    db_path: PathBuf,
-    mut result_rx: mpsc::Receiver<HttpHeadersRow>,
-    batch_size: usize,
-) -> Result<()> {
-    let conn = duckdb::Connection::open(&db_path)
-        .with_context(|| format!("http_headers writer: open duckdb {:?}", db_path))?;
-    let mut batch = Vec::with_capacity(batch_size);
-    while let Some(row) = result_rx.blocking_recv() {
-        batch.push(row);
-        if batch.len() >= batch_size {
-            flush_http_headers_batch(&conn, &mut batch)?;
-        }
-    }
-    if !batch.is_empty() {
-        flush_http_headers_batch(&conn, &mut batch)?;
-    }
-    Ok(())
-}
 
 pub(crate) async fn fetch_domain(
     client: &Client,

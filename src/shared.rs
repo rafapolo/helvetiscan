@@ -206,19 +206,23 @@ pub(crate) struct Progress {
     pub(crate) total: u64,
     pub(crate) enqueued: AtomicU64,
     pub(crate) completed: AtomicU64,
-    pub(crate) http_200: AtomicU64,
-    pub(crate) timeout: AtomicU64,
+    pub(crate) ok: AtomicU64,
+    pub(crate) errors: AtomicU64,
+    pub(crate) ok_label: &'static str,
+    pub(crate) err_label: &'static str,
 }
 
 impl Progress {
-    pub(crate) fn new(total: u64) -> Self {
+    pub(crate) fn new(total: u64, ok_label: &'static str, err_label: &'static str) -> Self {
         Self {
             started: Instant::now(),
             total,
             enqueued: AtomicU64::new(0),
             completed: AtomicU64::new(0),
-            http_200: AtomicU64::new(0),
-            timeout: AtomicU64::new(0),
+            ok: AtomicU64::new(0),
+            errors: AtomicU64::new(0),
+            ok_label,
+            err_label,
         }
     }
 }
@@ -474,8 +478,8 @@ pub(crate) async fn progress_reporter(
             _ = ticker.tick() => {
                 let enq = progress.enqueued.load(Ordering::Relaxed);
                 let done = progress.completed.load(Ordering::Relaxed);
-                let ok200 = progress.http_200.load(Ordering::Relaxed);
-                let timeouts = progress.timeout.load(Ordering::Relaxed);
+                let ok_count = progress.ok.load(Ordering::Relaxed);
+                let err_count = progress.errors.load(Ordering::Relaxed);
                 let inflight = enq.saturating_sub(done);
                 let now = Instant::now();
                 let dt = (now - last_t).as_secs_f64().max(0.001);
@@ -498,9 +502,11 @@ pub(crate) async fn progress_reporter(
                     "running: {} · queued: {} · pending {}",
                     fmt_num(inflight), fmt_num(enq), fmt_num(total)
                 );
+                let ok_label = progress.ok_label;
+                let err_label = progress.err_label;
                 let line3 = format!(
-                    "HTTP_OK: {} · timeout: {} · avg: {avg_rate:.1}/s",
-                    fmt_num(ok200), fmt_num(timeouts)
+                    "{ok_label}: {} · {err_label}: {} · avg: {avg_rate:.1}/s",
+                    fmt_num(ok_count), fmt_num(err_count)
                 );
 
                 if first {

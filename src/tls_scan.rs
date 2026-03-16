@@ -56,7 +56,7 @@ pub(crate) async fn cmd_tls(args: TlsArgs) -> Result<()> {
 
     let resolver = build_default_resolver();
     let tls_connector = build_tls_connector();
-    let progress = Arc::new(Progress::new(pending.len() as u64));
+    let progress = Arc::new(Progress::new(pending.len() as u64, "valid TLS", "errors"));
     let work_buf = (args.concurrency * 2).clamp(1_000, 100_000);
     let result_buf = (args.concurrency * 2).clamp(1_000, 100_000);
 
@@ -395,6 +395,11 @@ fn writer_loop_tls(
 
     let mut batch = Vec::with_capacity(batch_size);
     while let Some(row) = result_rx.blocking_recv() {
+        if row.error_kind.is_none() {
+            progress.ok.fetch_add(1, Ordering::Relaxed);
+        } else {
+            progress.errors.fetch_add(1, Ordering::Relaxed);
+        }
         batch.push(row);
         progress.completed.fetch_add(1, Ordering::Relaxed);
         if batch.len() >= batch_size {
@@ -404,6 +409,7 @@ fn writer_loop_tls(
     if !batch.is_empty() {
         flush_tls_batch(&conn, &mut batch)?;
     }
+    conn.execute_batch("CHECKPOINT")?;
     let _ = done_tx.send(());
     Ok(())
 }

@@ -59,7 +59,7 @@ pub(crate) async fn cmd_ports(args: PortsArgs) -> Result<()> {
     }
 
     let resolver = build_default_resolver();
-    let progress = Arc::new(Progress::new(pending.len() as u64));
+    let progress = Arc::new(Progress::new(pending.len() as u64, "open ports", "no resolve"));
     let work_buf = (args.concurrency * 2).clamp(1_000, 100_000);
     let result_buf = (args.concurrency * 2).clamp(1_000, 100_000);
 
@@ -266,6 +266,12 @@ fn writer_loop_ports(
 
     let mut batch = Vec::with_capacity(batch_size);
     while let Some(row) = result_rx.blocking_recv() {
+        let open_count = row.results.iter().filter(|r| r.open).count() as u64;
+        if open_count > 0 {
+            progress.ok.fetch_add(open_count, Ordering::Relaxed);
+        } else if row.ip.is_none() {
+            progress.errors.fetch_add(1, Ordering::Relaxed);
+        }
         batch.push(row);
         progress.completed.fetch_add(1, Ordering::Relaxed);
         if batch.len() >= batch_size {
@@ -275,6 +281,7 @@ fn writer_loop_ports(
     if !batch.is_empty() {
         flush_ports_batch(&conn, &mut batch)?;
     }
+    conn.execute_batch("CHECKPOINT")?;
     let _ = done_tx.send(());
     Ok(())
 }
