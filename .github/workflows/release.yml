@@ -60,7 +60,7 @@ jobs:
           ldd ${{ matrix.artifact }} || true
           echo ""
           echo "=== Verifying no dynamic executable ==="
-          if ldd ${{ matrix.artifact }} 2>&1 | grep -q "not a dynamic executable"; then
+          if ldd ${{ matrix.artifact }} 2>&1 | grep -qE "not a dynamic executable|statically linked"; then
             echo "✓ Binary is statically linked"
           else
             echo "✗ Binary has dynamic dependencies!"
