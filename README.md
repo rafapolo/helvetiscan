@@ -17,12 +17,12 @@ This public visualization exposes the DNS dependency structure as an interactive
 ## How we use it?
 
 ```
-Swiss internet scanner - HTTP, DNS, TLS and port intelligence for the .ch namespace
+Swiss Cyberspace scanner - HTTP, DNS, TLS and port intelligence for the .ch namespace
 
 Usage: helvetiscan [OPTIONS] [COMMAND]
 
 Commands:
-  init         Populate domains.duckdb from a plain-text domain list (one domain/line)
+  init         Populate domains.duckdb from a plain-text domain list (one domain/line). Safe to re-run: skips if the table already has rows
   scan         HTTP scan: fetch status, title, server headers for all pending domains
   dns          Resolve DNS metadata for all domains missing a dns_info row
   tls          Scan TLS metadata for all domains missing a tls_info row
@@ -32,15 +32,14 @@ Commands:
   update-cves  Fetch/refresh the CVE catalog from CISA KEV and seed built-in entries
   classify     Classify domains by industry sector using keyword heuristics
   benchmark    Compute sector-level risk benchmarks across classified domains
+  sovereignty  Map NS operators by jurisdiction and compute per-domain sovereignty scores
   help         Print this message or the help of the given subcommand(s)
 
 Options:
       --domain <DOMAIN>  Scan only this single domain
-      --all              Run HTTP, DNS, TLS, and ports scans together
       --db <DB>          [default: data/domains.duckdb]
-      --full <FULL>      Full rescan shortcut using default arguments 
-                         [possible values: domain, dns, tls, ports, subdomains, whois, all]
-  -h, --help             Print this help
+      --full <FULL>      Full rescan shortcut using default arguments [possible values: domain, dns, tls, ports, subdomains, whois, all]
+  -h, --help             Print help
 ```
 
 ---

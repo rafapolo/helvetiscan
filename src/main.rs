@@ -24,15 +24,11 @@ mod tests;
 
 #[derive(Parser, Debug)]
 #[command(name = "helvetiscan")]
-#[command(about = "Swiss internet scanner - HTTP, DNS, TLS and port intelligence for the .ch namespace")]
+#[command(about = "Swiss Cyberspace scanner - HTTP, DNS, TLS and port intelligence for the .ch namespace")]
 struct Cli {
     /// Scan only this single domain.
     #[arg(long)]
     domain: Option<String>,
-
-    /// Run HTTP, DNS, TLS, and ports scans together.
-    #[arg(long, default_value_t = false)]
-    all: bool,
 
     #[arg(long, default_value = "data/domains.duckdb")]
     db: PathBuf,
@@ -453,58 +449,67 @@ fn raise_nofile_limit() {
 async fn main() -> Result<()> {
     raise_nofile_limit();
     let cli = Cli::parse();
-    match (cli.domain, cli.all, cli.db, cli.full, cli.command) {
-        (Some(domain), true, db, None, None) => cmd_single_all(db, &domain).await,
-        (Some(_), false, _, None, None) => Err(anyhow!("use --domain together with --all or a subcommand")),
-        (Some(_), true, _, Some(_), _) => Err(anyhow!("use either --all or --full, not both")),
-        (Some(_), true, _, _, Some(_)) => Err(anyhow!("use either top-level --domain --all or a subcommand, not both")),
-        (Some(_), false, _, Some(_), _) => Err(anyhow!("use either --domain with a subcommand or use --full")),
-        (Some(_), false, _, _, Some(_)) => Err(anyhow!("top-level --domain is only supported with --all; use command --domain otherwise")),
-        (None, false, _db, Some(_), Some(_)) => Err(anyhow!("use either a subcommand or --full, not both")),
-        (None, false, db, Some(FullTarget::Domain), None) => {
+    match (cli.domain, cli.db, cli.full, cli.command) {
+        // --domain alone → run all scans on that domain
+        (Some(domain), db, None, None) => cmd_single_all(db, &domain).await,
+        // --domain with a subcommand → inject domain into subcommand args
+        (Some(domain), _, None, Some(cmd)) => {
+            match cmd {
+                Command::Scan(mut a) => { if a.domain.is_none() { a.domain = Some(domain); } http_scan::cmd_scan(a).await }
+                Command::Dns(mut a)  => { if a.domain.is_none() { a.domain = Some(domain); } dns_scan::cmd_dns(a).await }
+                Command::Tls(mut a)  => { if a.domain.is_none() { a.domain = Some(domain); } tls_scan::cmd_tls(a).await }
+                Command::Ports(mut a) => { if a.domain.is_none() { a.domain = Some(domain); } ports_scan::cmd_ports(a).await }
+                Command::Subdomains(mut a) => { if a.domain.is_none() { a.domain = Some(domain); } subdomains::cmd_subdomains(a).await }
+                Command::Whois(mut a) => { if a.domain.is_none() { a.domain = Some(domain); } whois::cmd_whois(a).await }
+                _ => Err(anyhow!("--domain is not supported with this subcommand")),
+            }
+        }
+        (Some(_), _, Some(_), _) => Err(anyhow!("--full cannot be combined with --domain")),
+        (None, _db, Some(_), Some(_)) => Err(anyhow!("use either a subcommand or --full, not both")),
+        (None, db, Some(FullTarget::Domain), None) => {
             let args = ScanArgs { db, backfill: Some(BackfillMode::Full), ..ScanArgs::default() };
             http_scan::cmd_scan(args).await
         }
-        (None, false, db, Some(FullTarget::Dns), None) => {
+        (None, db, Some(FullTarget::Dns), None) => {
             let args = DnsArgs { db, rescan: true, ..DnsArgs::default() };
             dns_scan::cmd_dns(args).await
         }
-        (None, false, db, Some(FullTarget::Tls), None) => {
+        (None, db, Some(FullTarget::Tls), None) => {
             let args = TlsArgs { db, rescan: true, ..TlsArgs::default() };
             tls_scan::cmd_tls(args).await
         }
-        (None, false, db, Some(FullTarget::Ports), None) => {
+        (None, db, Some(FullTarget::Ports), None) => {
             let args = PortsArgs { db, rescan: true, ..PortsArgs::default() };
             ports_scan::cmd_ports(args).await
         }
-        (None, false, db, Some(FullTarget::Subdomains), None) => {
+        (None, db, Some(FullTarget::Subdomains), None) => {
             let args = SubdomainsArgs { db, rescan: true, ..SubdomainsArgs::default() };
             subdomains::cmd_subdomains(args).await
         }
-        (None, false, db, Some(FullTarget::Whois), None) => {
+        (None, db, Some(FullTarget::Whois), None) => {
             let args = WhoisArgs { db, rescan: true, ..WhoisArgs::default() };
             whois::cmd_whois(args).await
         }
-        (None, false, db, Some(FullTarget::All), None) => {
+        (None, db, Some(FullTarget::All), None) => {
             http_scan::cmd_scan(ScanArgs { db: db.clone(), ..ScanArgs::default() }).await?;
             dns_scan::cmd_dns(DnsArgs { db: db.clone(), ..DnsArgs::default() }).await?;
             tls_scan::cmd_tls(TlsArgs { db: db.clone(), ..TlsArgs::default() }).await?;
             ports_scan::cmd_ports(PortsArgs { db: db.clone(), ..PortsArgs::default() }).await?;
-            subdomains::cmd_subdomains(SubdomainsArgs { db, ..SubdomainsArgs::default() }).await
+            subdomains::cmd_subdomains(SubdomainsArgs { db: db.clone(), ..SubdomainsArgs::default() }).await?;
+            whois::cmd_whois(WhoisArgs { db, ..WhoisArgs::default() }).await
         }
-        (None, false, _, None, Some(Command::Init(args))) => schema::cmd_init(args),
-        (None, false, _, None, Some(Command::Scan(args))) => http_scan::cmd_scan(args).await,
-        (None, false, _, None, Some(Command::Dns(args))) => dns_scan::cmd_dns(args).await,
-        (None, false, _, None, Some(Command::Tls(args))) => tls_scan::cmd_tls(args).await,
-        (None, false, _, None, Some(Command::Ports(args))) => ports_scan::cmd_ports(args).await,
-        (None, false, _, None, Some(Command::Subdomains(args))) => subdomains::cmd_subdomains(args).await,
-        (None, false, _, None, Some(Command::Whois(args))) => whois::cmd_whois(args).await,
-        (None, false, db, None, Some(Command::UpdateCves)) => cve::cmd_update_cves(db).await,
-        (None, false, _, None, Some(Command::Classify(args))) => classify::cmd_classify(args.db).await,
-        (None, false, _, None, Some(Command::Benchmark(args))) => benchmark::cmd_benchmark(args.db).await,
-        (None, false, _, None, Some(Command::Sovereignty(args))) => sovereignty::cmd_sovereignty(args).await,
-        (None, true, _, _, _) => Err(anyhow!("--all requires --domain")),
-        (None, false, _, None, None) => Err(anyhow!("missing command: use a subcommand, or --domain <domain> --all, or --full <domain|dns|tls>")),
+        (None, _, None, Some(Command::Init(args))) => schema::cmd_init(args),
+        (None, _, None, Some(Command::Scan(args))) => http_scan::cmd_scan(args).await,
+        (None, _, None, Some(Command::Dns(args))) => dns_scan::cmd_dns(args).await,
+        (None, _, None, Some(Command::Tls(args))) => tls_scan::cmd_tls(args).await,
+        (None, _, None, Some(Command::Ports(args))) => ports_scan::cmd_ports(args).await,
+        (None, _, None, Some(Command::Subdomains(args))) => subdomains::cmd_subdomains(args).await,
+        (None, _, None, Some(Command::Whois(args))) => whois::cmd_whois(args).await,
+        (None, db, None, Some(Command::UpdateCves)) => cve::cmd_update_cves(db).await,
+        (None, _, None, Some(Command::Classify(args))) => classify::cmd_classify(args.db).await,
+        (None, _, None, Some(Command::Benchmark(args))) => benchmark::cmd_benchmark(args.db).await,
+        (None, _, None, Some(Command::Sovereignty(args))) => sovereignty::cmd_sovereignty(args).await,
+        (None, _, None, None) => Err(anyhow!("missing command: use a subcommand, or --domain <domain>, or --full <domain|dns|tls>")),
     }
 }
 
@@ -538,6 +543,20 @@ async fn cmd_single_all(db: PathBuf, domain: &str) -> Result<()> {
         domain: Some(domain.clone()),
         no_progress: true,
         ..PortsArgs::default()
+    })
+    .await?;
+    subdomains::cmd_subdomains(SubdomainsArgs {
+        db: db.clone(),
+        domain: Some(domain.clone()),
+        no_progress: true,
+        ..SubdomainsArgs::default()
+    })
+    .await?;
+    whois::cmd_whois(WhoisArgs {
+        db: db.clone(),
+        domain: Some(domain.clone()),
+        no_progress: true,
+        ..WhoisArgs::default()
     })
     .await?;
     print_single_domain_summary(&db, &domain)
