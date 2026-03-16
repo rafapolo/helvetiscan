@@ -66,24 +66,8 @@ enum Command {
     Benchmark(BenchmarkArgs),
     /// Map NS operators by jurisdiction and compute per-domain sovereignty scores.
     Sovereignty(SovereigntyArgs),
-}
-
-#[derive(clap::ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum BackfillMode {
-    Ip,
-    Server,
-    Full,
-}
-
-#[derive(clap::ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
-enum FullTarget {
-    Domain,
-    Dns,
-    Tls,
-    Ports,
-    Subdomains,
-    Whois,
-    All,
+    /// Run the full pipeline: scan → dns → tls → ports → subdomains → whois → cves → classify → sovereignty → benchmark.
+    Full(FullArgs),
 }
 
 #[derive(Parser, Debug)]
