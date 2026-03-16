@@ -354,6 +354,9 @@ pub(crate) fn append_empty_domain_row(appender: &mut duckdb::Appender<'_>, domai
         Option::<&str>::None,  // powered_by
         Option::<&str>::None,  // whois_registrar
         Option::<&str>::None,  // whois_created
+        duckdb::types::Value::Null,    // redirect_chain
+        Option::<&str>::None,  // cms
+        Option::<i32>::None,   // sovereignty_score
     ])?;
     Ok(())
 }

@@ -18,6 +18,8 @@ erDiagram
         VARCHAR   ip
         VARCHAR   server
         VARCHAR   powered_by
+        VARCHAR   whois_registrar
+        DATE      whois_created
         VARCHAR[] redirect_chain
         VARCHAR   cms
         INTEGER   sovereignty_score
@@ -194,6 +196,8 @@ Populated by `helvetiscan scan`. One row per input domain.
 | `ip` | VARCHAR | Resolved IP used for the request |
 | `server` | VARCHAR | `Server:` response header |
 | `powered_by` | VARCHAR | `X-Powered-By:` response header |
+| `whois_registrar` | VARCHAR | Registrar name (denormalised from `whois_info`) |
+| `whois_created` | DATE | First registration date (denormalised from `whois_info`) |
 | `redirect_chain` | VARCHAR[] | Starting URL(s) when a redirect occurred |
 | `cms` | VARCHAR | Detected CMS (WordPress, Drupal, Joomla, TYPO3, Wix) |
 | `sovereignty_score` | INTEGER | DNS sovereignty tier: 0=CH, 1=EU, 2=non-EU foreign, 3=US |
