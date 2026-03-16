@@ -1,6 +1,5 @@
+@ -1,360 +0,0 @@
 # Helvetiscan — Scan Modules Documentation
-
-**Complete Technical Reference for Each Scanning Component**
 
 ---
 
@@ -15,6 +14,28 @@ This directory contains detailed technical documentation for each of the 7 core 
 - **Real-world examples** (Swiss SME cases)
 - **Compliance reporting** (ISG, DORA, NIS2)
 - **Integration points** (how modules work together)
+
+---
+
+## Integration Map
+
+```mermaid
+flowchart TD
+    Input["Domain name\ne.g. company.ch"]
+
+    Input --> TLS["TLS & Certificates"]
+    Input --> DNS["DNS & DNSSEC"]
+    Input --> HTTP["HTTP Security Headers"]
+    Input --> Ports["Open Ports"]
+    Input --> Email["Email Security"]
+    Input --> Tech["Technology Fingerprinting"]
+    Input --> Domain["Domain Protection"]
+
+    TLS & DNS & HTTP & Ports & Email & Tech & Domain --> Agg["Risk Score Aggregation"]
+
+    Agg --> Report["Compliance Report Generator\nISG §4 · DORA 16 · NIS2"]
+    Report --> Out["Risk Report"]
+```
 
 ---
 
@@ -159,28 +180,6 @@ Domain lifecycle, typosquatting, and subdomain takeover risks.
 - **100–250:** Yellow (Medium Risk)
 - **250–400:** Orange (High Risk)
 - **400+:** Red (Critical Risk)
-
----
-
-## Integration Map
-
-```mermaid
-flowchart TD
-    Input["Domain name\ne.g. company.ch"]
-
-    Input --> TLS["TLS & Certificates"]
-    Input --> DNS["DNS & DNSSEC"]
-    Input --> HTTP["HTTP Security Headers"]
-    Input --> Ports["Open Ports"]
-    Input --> Email["Email Security"]
-    Input --> Tech["Technology Fingerprinting"]
-    Input --> Domain["Domain Protection"]
-
-    TLS & DNS & HTTP & Ports & Email & Tech & Domain --> Agg["Risk Score Aggregation"]
-
-    Agg --> Report["Compliance Report Generator\nISG §4 · DORA 16 · NIS2"]
-    Report --> Out["Risk Report"]
-```
 
 ---
 

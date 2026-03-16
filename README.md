@@ -6,7 +6,7 @@ This public visualization exposes the DNS dependency structure as an interactive
 
 <div align="center">
 
-![50k nodes sample](50knodes.jpg)
+![50k nodes sample](docs/50knodes.jpg)
 
 </div>
 
