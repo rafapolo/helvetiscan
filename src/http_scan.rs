@@ -270,14 +270,17 @@ fn writer_loop_db(
     mut result_rx: mpsc::Receiver<(Row, Option<HttpHeadersRow>)>,
     progress: Arc<Progress>,
     done_tx: tokio::sync::oneshot::Sender<()>,
-    batch_size: usize,
-    limit: Option<usize>,
+    country_mmdb: PathBuf,
 ) -> Result<()> {
-    let conn = duckdb::Connection::open(&db_path)
-        .with_context(|| format!("writer: open duckdb {:?}", db_path))?;
+    const BATCH_SIZE: usize = 1_000;
+    let conn = crate::shared::open_db(&db_path)
+        .with_context(|| format!("writer: open db {:?}", db_path))?;
 
-    let mut batch: Vec<Row> = Vec::with_capacity(batch_size);
-    let mut headers_batch: Vec<HttpHeadersRow> = Vec::with_capacity(batch_size);
+    let country_reader: Option<maxminddb::Reader<Vec<u8>>> =
+        maxminddb::Reader::open_readfile(&country_mmdb).ok();
+
+    let mut batch: Vec<Row> = Vec::with_capacity(BATCH_SIZE);
+    let mut headers_batch: Vec<HttpHeadersRow> = Vec::with_capacity(BATCH_SIZE);
 
     while let Some((row, headers)) = result_rx.blocking_recv() {
         if row.status_code == Some(200) {
