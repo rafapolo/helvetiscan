@@ -165,6 +165,7 @@ async fn sample_domains_e2e_scan() {
         limit_success: None,
         backfill: None,
         retry_errors: None,
+        save_html: None,
     })
     .await
     .unwrap();

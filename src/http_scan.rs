@@ -438,7 +438,7 @@ pub(crate) async fn fetch_domain(
         if url.is_empty() {
             continue;
         }
-        match fetch_url(client, &url, args).await {
+        match fetch_url(client, &url, &domain, args).await {
             Ok((mut row, mut headers)) => {
                 let redirect_chain = if row.final_url.as_deref() != Some(url.as_str()) {
                     vec![url.clone()]
@@ -557,8 +557,8 @@ async fn raw_http_redirect_location(
     None
 }
 
-async fn fetch_url(client: &Client, url: &str, args: &ScanArgs) -> std::result::Result<(Row, Option<HttpHeadersRow>), FetchErr> {
-    let (row, headers) = fetch_url_inner(client, url, args).await?;
+async fn fetch_url(client: &Client, url: &str, domain: &str, args: &ScanArgs) -> std::result::Result<(Row, Option<HttpHeadersRow>), FetchErr> {
+    let (row, headers) = fetch_url_inner(client, url, domain, args).await?;
 
     if row.status_code == Some(400)
         && url.starts_with("http://")
@@ -567,7 +567,7 @@ async fn fetch_url(client: &Client, url: &str, args: &ScanArgs) -> std::result::
         if let Some(location) =
             raw_http_redirect_location(url, &args.user_agent, args.connect_timeout).await
         {
-            return fetch_url_inner(client, &location, args).await;
+            return fetch_url_inner(client, &location, domain, args).await;
         }
     }
 
@@ -577,6 +577,7 @@ async fn fetch_url(client: &Client, url: &str, args: &ScanArgs) -> std::result::
 async fn fetch_url_inner(
     client: &Client,
     url: &str,
+    domain: &str,
     args: &ScanArgs,
 ) -> std::result::Result<(Row, Option<HttpHeadersRow>), FetchErr> {
     let resp = client.get(url).send().await.map_err(|e| FetchErr {
@@ -624,6 +625,12 @@ async fn fetch_url_inner(
         let remaining = max_bytes - body.len();
         let take = remaining.min(chunk.len());
         body.extend_from_slice(&chunk[..take]);
+    }
+
+    if let Some(ref base) = args.save_html {
+        if status.is_success() && !body.is_empty() {
+            save_html_zip(base, domain, body.clone()).await;
+        }
     }
 
     let mut error_kind = if status.is_client_error() || status.is_server_error() {
@@ -754,6 +761,24 @@ pub(crate) fn detect_cms(
         }
     }
     None
+}
+
+async fn save_html_zip(base: &std::path::Path, domain: &str, body: Vec<u8>) {
+    let zip_path = base.join(format!("{domain}.html.zip"));
+    if zip_path.exists() { return; }
+    let base = base.to_path_buf();
+    let _ = tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+        std::fs::create_dir_all(&base)?;
+        let file = std::fs::File::create(&zip_path)?;
+        let mut zip = zip::ZipWriter::new(file);
+        let opts = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+        zip.start_file("index.html", opts)?;
+        use std::io::Write as _;
+        zip.write_all(&body)?;
+        zip.finish()?;
+        Ok(())
+    }).await;
 }
 
 fn classify_reqwest_error(e: &reqwest::Error) -> ErrorKind {

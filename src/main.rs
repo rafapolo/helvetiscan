@@ -145,6 +145,10 @@ pub(crate) struct ScanArgs {
     /// Re-scan a subset of existing HTTP rows: ip, server, or all domain rows.
     #[arg(long)]
     pub(crate) backfill: Option<BackfillMode>,
+
+    /// Save each fetched HTML body to <path>/<domain>.html.zip
+    #[arg(long)]
+    pub(crate) save_html: Option<PathBuf>,
 }
 
 #[derive(Parser, Debug, Clone)]
@@ -353,6 +357,7 @@ impl Default for ScanArgs {
             limit_success: None,
             backfill: None,
             retry_errors: None,
+            save_html: None,
         }
     }
 }
