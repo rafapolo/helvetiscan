@@ -545,9 +545,9 @@ fn print_single_domain_summary(db: &PathBuf, domain: &str) -> Result<()> {
     rows.push(domain_row);
 
     let dns_row = conn.query_row(
-        "SELECT status, error_kind, CAST(a AS VARCHAR), CAST(ns AS VARCHAR)
+        "SELECT status, error_kind, a, ns
          FROM dns_info WHERE domain = ?1",
-        duckdb::params![domain],
+        rusqlite::params![domain],
         |r| {
             Ok(SummaryRow {
                 scan: "dns",
