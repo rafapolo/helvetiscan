@@ -33,15 +33,10 @@ jobs:
         if: contains(matrix.target, 'musl')
         run: sudo apt-get install -y musl-tools
 
-      - name: Cache cargo
-        uses: actions/cache@v4
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ matrix.target }}-cargo-${{ hashFiles('Cargo.lock') }}
-          restore-keys: ${{ matrix.target }}-cargo-
+          key: ${{ matrix.target }}
 
       - name: Build
         run: cargo build --release --target ${{ matrix.target }}
