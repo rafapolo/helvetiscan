@@ -96,10 +96,9 @@ pub(crate) async fn cmd_scan(args: ScanArgs) -> Result<()> {
 
     let writer_handle = tokio::task::spawn_blocking({
         let db_path = args.db.clone();
-        let batch_size = args.write_batch_size;
-        let limit = args.limit_success;
         let progress = progress.clone();
-        move || writer_loop_db(db_path, result_rx, progress, done_tx, batch_size, limit)
+        let country_mmdb = args.country_mmdb.clone();
+        move || writer_loop_db(db_path, result_rx, progress, done_tx, country_mmdb)
     });
 
     let reader_handle = tokio::spawn({
