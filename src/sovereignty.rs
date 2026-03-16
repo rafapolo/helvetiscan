@@ -410,3 +410,108 @@ fn print_summary(conn: &duckdb::Connection) -> Result<()> {
     println!();
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ---- country_to_jurisdiction ----
+
+    #[test]
+    fn jurisdiction_ch() {
+        assert_eq!(country_to_jurisdiction("CH"), "CH");
+    }
+
+    #[test]
+    fn jurisdiction_us() {
+        assert_eq!(country_to_jurisdiction("US"), "US");
+    }
+
+    #[test]
+    fn jurisdiction_eu_members() {
+        for code in &["DE", "FR", "IT", "AT", "NL", "PL", "SE"] {
+            assert_eq!(country_to_jurisdiction(code), "EU", "expected EU for {code}");
+        }
+    }
+
+    #[test]
+    fn jurisdiction_other() {
+        for code in &["JP", "CN", "BR", "IN", "AU"] {
+            assert_eq!(country_to_jurisdiction(code), "OTHER", "expected OTHER for {code}");
+        }
+    }
+
+    #[test]
+    fn jurisdiction_empty_is_other() {
+        assert_eq!(country_to_jurisdiction(""), "OTHER");
+    }
+
+    // ---- normalize_ns_to_operator ----
+
+    #[test]
+    fn ns_operator_cloudflare() {
+        assert_eq!(normalize_ns_to_operator("ns1.cloudflare.com"), "Cloudflare");
+        assert_eq!(normalize_ns_to_operator("ns2.cloudflare.com."), "Cloudflare");
+    }
+
+    #[test]
+    fn ns_operator_infomaniak() {
+        assert_eq!(normalize_ns_to_operator("ns1.infomaniak.ch"), "Infomaniak");
+        assert_eq!(normalize_ns_to_operator("ns.infomaniak.ch"), "Infomaniak");
+    }
+
+    #[test]
+    fn ns_operator_aws_route53() {
+        assert_eq!(normalize_ns_to_operator("ns-123.awsdns-45.com"), "AWS Route53");
+        assert_eq!(normalize_ns_to_operator("ns-42.awsdns-07.org"), "AWS Route53");
+    }
+
+    #[test]
+    fn ns_operator_azure() {
+        assert_eq!(normalize_ns_to_operator("ns1-01.azure-dns.com"), "Azure DNS");
+    }
+
+    #[test]
+    fn ns_operator_switch() {
+        assert_eq!(normalize_ns_to_operator("ns.switch.ch"), "Switch");
+    }
+
+    #[test]
+    fn ns_operator_fallback_sld_tld() {
+        // Unknown NS falls back to SLD.TLD
+        assert_eq!(normalize_ns_to_operator("ns1.example.net"), "example.net");
+        assert_eq!(normalize_ns_to_operator("ns1.example.net."), "example.net");
+    }
+
+    #[test]
+    fn ns_operator_single_label_fallback() {
+        // Single label with no dot → returned as-is
+        assert_eq!(normalize_ns_to_operator("localhost"), "localhost");
+    }
+
+    // ---- parse_duckdb_varchar_array ----
+
+    #[test]
+    fn parse_array_empty() {
+        assert!(parse_duckdb_varchar_array("[]").is_empty());
+        assert!(parse_duckdb_varchar_array("").is_empty());
+    }
+
+    #[test]
+    fn parse_array_single_quoted() {
+        let result = parse_duckdb_varchar_array("['ns1.example.com']");
+        assert_eq!(result, vec!["ns1.example.com"]);
+    }
+
+    #[test]
+    fn parse_array_multiple_quoted() {
+        let result = parse_duckdb_varchar_array("['ns1.example.com', 'ns2.example.com']");
+        assert_eq!(result, vec!["ns1.example.com", "ns2.example.com"]);
+    }
+
+    #[test]
+    fn parse_array_trims_whitespace() {
+        let result = parse_duckdb_varchar_array("[ 'a.com' , 'b.com' ]");
+        assert_eq!(result, vec!["a.com", "b.com"]);
+    }
+}

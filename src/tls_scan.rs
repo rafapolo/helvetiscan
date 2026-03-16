@@ -471,3 +471,105 @@ fn flush_tls_batch(conn: &duckdb::Connection, batch: &mut Vec<TlsRow>) -> Result
     batch.clear();
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::NaiveDate;
+    use crate::shared::{TlsRow, ScanStatus};
+
+    #[test]
+    fn asn1_date_epoch() {
+        assert_eq!(asn1_date(0), Some(NaiveDate::from_ymd_opt(1970, 1, 1).unwrap()));
+    }
+
+    #[test]
+    fn asn1_date_known_timestamp() {
+        // 1_700_000_000 seconds after epoch = 2023-11-14
+        assert_eq!(asn1_date(1_700_000_000), Some(NaiveDate::from_ymd_opt(2023, 11, 14).unwrap()));
+    }
+
+    #[test]
+    fn asn1_date_negative_is_before_epoch() {
+        // -86400 = 1969-12-31
+        assert_eq!(asn1_date(-86400), Some(NaiveDate::from_ymd_opt(1969, 12, 31).unwrap()));
+    }
+
+    #[test]
+    fn flush_tls_batch_roundtrip() {
+        let conn = duckdb::Connection::open_in_memory().unwrap();
+        crate::schema::ensure_schema(&conn).unwrap();
+
+        let mut batch = vec![TlsRow {
+            domain: "test.ch".into(),
+            status: ScanStatus::Ok,
+            error_kind: None,
+            cert_issuer: Some("Let's Encrypt".into()),
+            cert_subject: Some("CN=test.ch".into()),
+            valid_from: Some(NaiveDate::from_ymd_opt(2024, 1, 1).unwrap()),
+            valid_to: Some(NaiveDate::from_ymd_opt(2025, 1, 1).unwrap()),
+            days_remaining: Some(90),
+            expired: Some(false),
+            self_signed: Some(false),
+            tls_version: Some("TLSv1_3".into()),
+            cipher: None,
+            san: vec!["test.ch".into(), "www.test.ch".into()],
+            key_algorithm: Some("RSA".into()),
+            key_size: Some(2048),
+            signature_algorithm: Some("SHA256withRSA".into()),
+            cert_fingerprint: Some("deadbeef".into()),
+            ct_logged: Some(true),
+            ocsp_must_staple: Some(false),
+        }];
+
+        // Pre-insert into domains to satisfy any FK if needed; tls_info has no FK
+        flush_tls_batch(&conn, &mut batch).unwrap();
+        assert!(batch.is_empty());
+
+        let issuer: Option<String> = conn
+            .query_row("SELECT cert_issuer FROM tls_info WHERE domain='test.ch'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(issuer.as_deref(), Some("Let's Encrypt"));
+
+        let san_len: i64 = conn
+            .query_row("SELECT len(san) FROM tls_info WHERE domain='test.ch'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(san_len, 2);
+    }
+
+    #[test]
+    fn flush_tls_batch_upserts() {
+        let conn = duckdb::Connection::open_in_memory().unwrap();
+        crate::schema::ensure_schema(&conn).unwrap();
+
+        let make_row = |issuer: &str| TlsRow {
+            domain: "upsert.ch".into(),
+            status: ScanStatus::Ok,
+            error_kind: None,
+            cert_issuer: Some(issuer.into()),
+            cert_subject: None,
+            valid_from: None,
+            valid_to: None,
+            days_remaining: None,
+            expired: None,
+            self_signed: None,
+            tls_version: None,
+            cipher: None,
+            san: vec![],
+            key_algorithm: None,
+            key_size: None,
+            signature_algorithm: None,
+            cert_fingerprint: None,
+            ct_logged: None,
+            ocsp_must_staple: None,
+        };
+
+        flush_tls_batch(&conn, &mut vec![make_row("OldCA")]).unwrap();
+        flush_tls_batch(&conn, &mut vec![make_row("NewCA")]).unwrap();
+
+        let issuer: Option<String> = conn
+            .query_row("SELECT cert_issuer FROM tls_info WHERE domain='upsert.ch'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(issuer.as_deref(), Some("NewCA"));
+    }
+}

@@ -401,3 +401,89 @@ fn flush_subdomains_batch(conn: &duckdb::Connection, batch: &mut Vec<SubdomainRo
     batch.clear();
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::shared::SubdomainRow;
+
+    fn in_memory_db() -> duckdb::Connection {
+        let conn = duckdb::Connection::open_in_memory().unwrap();
+        crate::schema::ensure_schema(&conn).unwrap();
+        conn
+    }
+
+    #[test]
+    fn flush_subdomains_batch_roundtrip() {
+        let conn = in_memory_db();
+
+        let mut batch = vec![SubdomainRow {
+            domain: "example.ch".into(),
+            found: vec![
+                ("www.example.ch".into(), "ct"),
+                ("mail.example.ch".into(), "ct"),
+            ],
+        }];
+
+        flush_subdomains_batch(&conn, &mut batch).unwrap();
+        assert!(batch.is_empty());
+
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM subdomains WHERE domain='example.ch'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 2);
+
+        let source: String = conn
+            .query_row(
+                "SELECT source FROM subdomains WHERE subdomain='www.example.ch'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(source, "ct");
+    }
+
+    #[test]
+    fn flush_subdomains_batch_empty_found_is_noop() {
+        let conn = in_memory_db();
+
+        let mut batch = vec![SubdomainRow {
+            domain: "empty.ch".into(),
+            found: vec![],
+        }];
+
+        flush_subdomains_batch(&conn, &mut batch).unwrap();
+        assert!(batch.is_empty());
+
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM subdomains", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn flush_subdomains_batch_deduplicates_on_conflict() {
+        let conn = in_memory_db();
+
+        let row = SubdomainRow {
+            domain: "dup.ch".into(),
+            found: vec![("www.dup.ch".into(), "ct")],
+        };
+
+        flush_subdomains_batch(&conn, &mut vec![SubdomainRow { domain: "dup.ch".into(), found: vec![("www.dup.ch".into(), "ct")] }]).unwrap();
+        flush_subdomains_batch(&conn, &mut vec![row]).unwrap();
+
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM subdomains WHERE domain='dup.ch'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1, "ON CONFLICT DO NOTHING should prevent duplicates");
+    }
+}

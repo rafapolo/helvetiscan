@@ -193,3 +193,96 @@ pub(crate) fn run_cve_matching(conn: &duckdb::Connection) -> Result<usize> {
 
     Ok(count as usize)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn in_memory_db() -> duckdb::Connection {
+        let conn = duckdb::Connection::open_in_memory().unwrap();
+        crate::schema::ensure_schema(&conn).unwrap();
+        conn
+    }
+
+    #[test]
+    fn seed_inserts_all_hardcoded_cves() {
+        let conn = in_memory_db();
+        let count = seed_hardcoded_cves(&conn).unwrap();
+        assert_eq!(count, SEED_CVES.len());
+
+        let in_db: i64 = conn
+            .query_row("SELECT COUNT(*) FROM cve_catalog", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(in_db as usize, SEED_CVES.len());
+    }
+
+    #[test]
+    fn seed_is_idempotent() {
+        let conn = in_memory_db();
+        seed_hardcoded_cves(&conn).unwrap();
+        seed_hardcoded_cves(&conn).unwrap();
+
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM cve_catalog", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count as usize, SEED_CVES.len());
+    }
+
+    #[test]
+    fn run_cve_matching_matches_wordpress_domain() {
+        let conn = in_memory_db();
+        seed_hardcoded_cves(&conn).unwrap();
+
+        conn.execute_batch(
+            "INSERT INTO domains (domain, status, cms) VALUES ('wp-site.ch', 'ok', 'WordPress')",
+        )
+        .unwrap();
+
+        let matched = run_cve_matching(&conn).unwrap();
+        assert!(matched > 0, "expected at least one WordPress CVE match");
+
+        let domain_match: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM cve_matches WHERE domain='wp-site.ch'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(domain_match > 0);
+    }
+
+    #[test]
+    fn run_cve_matching_no_match_for_unknown_cms() {
+        let conn = in_memory_db();
+        seed_hardcoded_cves(&conn).unwrap();
+
+        conn.execute_batch(
+            "INSERT INTO domains (domain, status, cms) VALUES ('unknown.ch', 'ok', 'SomeCMS')",
+        )
+        .unwrap();
+
+        let matched = run_cve_matching(&conn).unwrap();
+        assert_eq!(matched, 0);
+    }
+
+    #[test]
+    fn all_seed_cves_have_valid_cve_ids() {
+        for &(_, cve_id, _, _, _, _, _) in SEED_CVES {
+            assert!(
+                cve_id.starts_with("CVE-"),
+                "expected CVE ID format for: {cve_id}"
+            );
+        }
+    }
+
+    #[test]
+    fn all_seed_cves_have_known_severity() {
+        let valid = ["LOW", "MEDIUM", "HIGH", "CRITICAL"];
+        for &(_, _, severity, _, _, _, _) in SEED_CVES {
+            assert!(
+                valid.contains(&severity),
+                "unexpected severity '{severity}'"
+            );
+        }
+    }
+}
