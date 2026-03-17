@@ -1,37 +1,6 @@
-# Domain Analysis
-*Dataset: 2,549,281 domains — data/domains.db*
+# Key Findings
 
-Key findings:
-  - §01: 1,947,451 of 2,549,281 domains (76.4%) serve a live HTTP response; 1 in 4 is dead
-  - §02: DNS failure accounts for 74.9% of errors (450,916 domains) — registered but no A record
-  - §03: HTTP 200+206 combined cover 84.6% of live responses; 93,814 (4.8%) actively block the scanner
-  - §04: Apache 38.3% and nginx 34.0% cover 72% of .ch web servers; Cloudflare proxies 10.2%
-  - §05: WordPress holds 71.5% of identifiable CMS installs (376,098 domains, ~19% of all live .ch)
-  - §06: 43,473 live sites advertise EOL PHP — 40.6% of 107K installs with version exposed; PHP 7.4.33 most common
-  - §07: Median response time 1,102 ms; p99 reaches 10,774 ms; slowest domain times out at 106 s
-  - §08: 430,233 live domains (22.1%) redirect cross-domain — parking services, CDN edges, or brand consolidation
-  - §09: 245,047 domains (12.6% of live) flagged as parked or abandoned — no title or generic placeholder
-  - §10: 130,937 IPs host 1,816,085 live domains — mean 13.9 per IP, heavily skewed toward shared hosting
-  - §11: Single IP (Hostpoint 217.26.48.101) hosts 133,425 domains (6.9%); top 10 IPs cover ~21% of live .ch
-  - §12: 712,945 domains (36.6%) share a page body hash; 147,983 share a single Hostpoint parking page
-  - §13: 1,397,073 domains (71.7%) end on HTTPS; 550,378 (28.3%) still serve over plain HTTP
-  - §14: 40.6% of .ch domains hosted abroad; Germany leads at 17.3%, US at 11.6%
-  - §15: 955,764 domains (49.1%) send zero security headers; only 30.2% use HSTS despite 71.7% serving HTTPS
-  - §16: TLS 1.3 at 92.9%; Let's Encrypt issues 83.1% of certs; 60,171 expire within 30 days [59.5% scanned]
-  - §17: 43.3% of scanned domains fully spoofable; DKIM only 6.8%; 24.7% of DMARC adopters on p=none [36.2% scanned]
-  - §18: 313,472 domains (16% of live) expose MySQL; 87,292 expose SMB; 1,742 expose Docker API [83.9% scanned]
-  - §19: DNSSEC signed on 46.2% of scanned domains — above global averages [32.2% scanned]
-  - §20: 86.7% of .ch hosting stays within Europe; North America (US cloud) accounts for 13.0%
-  - §21: Top Swiss domestic hosting IPs (Hostpoint, Swisscom, Infomaniak)
-  - §22: Largest foreign IP concentrations (Wix 77K, Register.it 35K, Shopify 15K)
-  - §23: Domains in weak-jurisdiction countries (501 in RU/BY/IR/CN/SY)
-  - §24: US cloud exposure via server header (Cloudflare 181K, Vercel 10K, AWS 6K = 10.1%)
-  - §25: TLS key sizes (no RSA <2048; ECDSA at 15.4%; 1,091 certs expiring in 7 days)
-  - §26: Email spoofing exposure (305K domains = 43.3% fully spoofable)
-  - §27: Open CORS (*) on 28,891 domains
-  - §28: DNS hygiene (98.4% no CAA, 33% wildcard, 86K no-MX-with-SPF)
-  - §29: AXFR zone transfer leaks (2,300 parent domains, 27K subdomains exposed)
-  - §30: Most common ports beyond 80/443 (FTP open on 688K = 42% of scanned)
+→ See also [Research Questions](RESEARCH.md)
 
 ---
 
@@ -557,6 +526,22 @@ Expired and self-signed certificates surface in the `tls_failed` error class fro
 
 ---
 
+## 31. WordPress version currency **[preliminary — partial versioned sample]**
+
+*Based on 3,475 WordPress installs with a detectable version (out of 376,098 total WordPress sites).*
+
+| WordPress status | Count | Share of versioned |
+|------------------|-------|--------------------|
+| Current (6.8–6.9) | 2,668 | 76.8% |
+| Minor outdated (6.0–6.7) | 501 | 14.4% |
+| Major outdated (<6.0) | 245 | 7.1% |
+
+Top versions: `6.9.4` (2,140), `6.8.5` (203), `6.9.1` (101), `6.7.5` (82).
+
+**21.5% of versioned WordPress installs run outdated releases.** 56.6% of WP sites conceal their version entirely — the real outdated count is likely higher. With 376K WP installs representing the largest single technology surface in .ch, even a conservative outdated rate implies tens of thousands of unpatched sites.
+
+---
+
 ## 30. Most common open ports beyond 80/443 *(RESEARCH.md)* **[preliminary — 83.9% scanned]**
 
 *Based on 1,633,972 distinct domains with port scan data.*
@@ -573,3 +558,33 @@ Expired and self-signed certificates surface in the `tls_failed` error class fro
 | 6443  | Kubernetes API    |     2,057         | High risk if unauthenticated |
 
 **FTP (port 21) is open on 688,489 domains** — 42% of all scanned domains — making it by far the most common non-web service. FTP transmits credentials in cleartext. SSH (port 22) at 430K is expected for managed hosting but represents a large brute-force attack surface. **2,057 domains expose the Kubernetes API (6443)**, typically requiring authentication but representing a high-value target if misconfigured.
+
+---
+
+## 32. CVE exposure at scale — maximum vulnerable population
+
+*Dataset: 2,549,281 .ch domains. These figures represent the **maximum exposed population** — domains running a technology to which at least one cataloged CVE applies. Actual vulnerable count depends on software version, which is not yet compared against affected ranges. Treat all matches as "possibly vulnerable, requires verification."*
+
+| Technology | .ch domains | CRITICAL CVEs | HIGH CVEs | Notes |
+|---|---|---|---|---|
+| Apache | ~682,000 | 3 | 1 | 38% of live .ch domains |
+| nginx / OpenResty | ~605,000 | 0 | 3 | Includes ~35K OpenResty via alias |
+| WordPress | ~376,000 | 1 | 3 | 71% of CMS installs |
+| PHP (EOL branch) | ~43,000 | 2 | 1 | EOL PHP 5.x–7.4 only |
+| LiteSpeed | ~35,000 | 1 | 2 | |
+| TYPO3 | ~26,000 | 2 | 1 | Strong in CH enterprise |
+| Joomla | ~23,000 | 2 | 0 | |
+| Microsoft IIS | ~16,500 | 3 | 0 | |
+| Plesk | ~15,000 | 1 | 0 | Via `X-Powered-By: PleskLin` |
+| ASP.NET | ~12,000 | 0 | 2 | |
+| Drupal | ~10,000 | 3 | 0 | All CRITICAL |
+
+- **Apache and nginx together cover 72% of live .ch domains** and have cataloged CVEs. Even if only a fraction run unpatched versions, the absolute numbers are large.
+- **43,000+ domains expose end-of-life PHP** (branches 5.x, 7.0–7.4), all of which have unpatched RCE-class CVEs in their version range.
+- **LiteSpeed (35K), IIS (16.5K), Plesk (15K), and ASP.NET (12K)** add ~79,000 additional domains with CVE exposure beyond the core web stack.
+- **Drupal has the highest CRITICAL ratio** — all three seeded CVEs are CRITICAL 9.8, including the widely-exploited Drupalgeddon2.
+- **IIS carries the highest per-domain risk among newly-covered technologies**: all three seeded CVEs are CRITICAL 9.8; one (CVE-2017-7269) is in the CISA KEV and targets IIS 6.0, still detectable in the dataset.
+
+**How matching works:** The scanner maintains a `cve_catalog` table seeded with 34 hand-picked high-severity CVEs plus entries from the CISA Known Exploited Vulnerabilities (KEV) feed (fetched on each `update-cves` run; KEV entries are actively exploited in the wild). Technologies are fingerprinted from `Server:` header, `X-Powered-By:` header, CMS body patterns, and TCP port banners. The port + keyword combination prevents cross-technology false matches. Matching is **version-unaware** — any domain running a covered technology is flagged regardless of installed version, avoiding false negatives at the cost of some false positives.
+
+**Exclusions:** Cloudflare (181K), Wix/Pepyaka (103K), Squarespace (20K), and Vercel (10K) are intentionally excluded — operators of sites behind these platforms cannot patch the underlying infrastructure.

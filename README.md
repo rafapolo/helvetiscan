@@ -1,8 +1,7 @@
 ## HelvetiScan - Mapping Swiss Cyberspace
 
-Scan, map and visualize the entire Swiss `.ch` namespace — over 2.5 million domains. A complete map of Switzerland's digital surface - unpatched software, expired certificates, exposed databases, foreign dependencies, fakeable emails, weak or no encryptions and other uncharted vulnerabilities.
+Scan, map and visualize the entire Swiss `.ch` namespace — over 2.5 million domains. A complete map of Switzerland's digital surface - unpatched software, expired certificates, exposed databases, foreign dependencies, fakeable emails, weak or no encryptions and other previously uncharted vulnerabilities.
 
-This public visualization exposes the DNS dependency structure as an interactive force graph. See it online [here](https://xn--2dk.xyz/dataviz/swiss/?maxPoints=50000&sim=1).
 
 <div align="center">
 
@@ -10,11 +9,15 @@ This public visualization exposes the DNS dependency structure as an interactive
 
 </div>
 
- ##### 50k domains shown in this graph. Adjust `maxPoints` URL to load more — full dataset (2.5M nodes) requires more than 16GB RAM for the webGPU processing.
+This public visualization exposes the DNS dependency structure as an interactive force graph. See it online [here](https://xn--2dk.xyz/dataviz/swiss/?maxPoints=50000&sim=1).
+
+50 thousand domains shown in this graph, just 2%. Adjust `maxPoints` in the URL to load more.[^2]
+ 
+ 
 
 ---
 
-## How we use it?
+## The Tool
 
 ```
 Swiss Cyberspace scanner - HTTP, DNS, TLS, HTTP, ports, WHOIS, MX and CVEs
@@ -37,7 +40,6 @@ Commands:
 
 Options:
       --domain <DOMAIN>              Scan only this single domain
-      --db <DB>                      [default: data/domains.db]
       --retry-errors <RETRY_ERRORS>  Re-scan domains whose error_kind matches this value (e.g. 'timeout')
 ```
 
@@ -45,9 +47,9 @@ The full HTTP scan completes in under four hours on a 1 Gbps connection.
 
 ---
 
-## What do we scan?
+## The Mapping
 
-Seven modules, each covering a different layer of exposure:
+→ [Scan Modules and Security Scoring](docs/README.md)
 
 | Module | What it checks |
 |---|---|
@@ -61,42 +63,36 @@ Seven modules, each covering a different layer of exposure:
 
 ---
 
-## Research directions
+## The Findings (preliminary)
 
-The final database can answer questions such as:[^1]
+-  76.4% has a live HTTP response; 1 in 4 is dead
+-  DNS failure accounts for 74.9% of errors (450,916 domains) — registered but no server
+-  Apache 38.3% and nginx 34.0% cover 72% of .ch web servers; Cloudflare proxies 10.2%
+-  WordPress holds 71.5% of identifiable CMS installs (376,098 domains, ~19% of all live .ch)
+-  43,473 live sites advertise EOL PHP — 40.6% of 107K installs with version exposed; PHP 7.4.33 most common
+-  22.1% redirect cross-domain — parking services, CDN edges, or brand consolidation
+-  12.6% of live flagged as parked or abandoned — no title or generic placeholder
+-  130,937 IPs host 1,816,085 live domains — mean 13.9 per IP, heavily skewed toward shared hosting
+-  Single IP (Hostpoint 217.26.48.101) hosts 133,425 domains (6.9%); top 10 IPs cover ~21% of live .ch
+-  147,983 share a single Hostpoint parking page
+-  71.7% end on HTTPS; 28.3% still serve over plain HTTP
+-  40.6% of .ch domains hosted abroad; Germany leads at 17.3%, US at 11.6%
+-  49.1% send zero security headers; only 30.2% use HSTS despite 71.7% serving HTTPS
+-  TLS 1.3 at 92.9%; Let's Encrypt issues 83.1% of certs; 60,171 expire within 30 days [59.5% scanned]
+-  43.3% of scanned domains fully spoofable; DKIM only 6.8%; 24.7% of DMARC adopters on p=none [36.2% scanned]
+-  313,472 domains (16% of live) expose MySQL; 87,292 expose SMB; 1,742 expose Docker API [83.9% scanned]
+-  86.7% of .ch hosting stays within Europe; North America (US cloud) accounts for 13.0%
+-  Largest foreign IP concentrations (Wix 77K, Register.it 35K, Shopify 15K)
+-  Domains in weak-jurisdiction countries (501 in RU/BY/IR/CN/SY)
+-  US cloud exposure via server header (Cloudflare 181K, Vercel 10K, AWS 6K = 10.1%)
+-  TLS key sizes (no RSA <2048; ECDSA at 15.4%; 1,091 certs expiring in 7 days)
+-  Email spoofing exposure (305K domains = 43.3% fully spoofable)
+-  AXFR zone transfer leaks (2,300 parent domains, 27K subdomains exposed)
+-  Most common ports beyond 80/443 (FTP open on 688K = 42% of scanned)
 
-- How many .ch domains depend on foreign infrastructure?
-- Which .ch domains expose databases to the open internet?
-- How many Swiss companies can have their email spoofed?
-- How many .ch sites run software with known vulnerabilities?
-- Which Swiss industries have the weakest security posture?
-- How many Swiss domains expire in the next 30 days without auto-renewal?
-- Which open ports appear most frequently across .ch?
-- What's the most common CMS running on .ch domains?
-- How many .ch mail servers use weak DKIM keys?
-- Which Swiss cantons have the most exposed infrastructure?
-- How many .ch domains have orphaned subdomains vulnerable to takeover?
+→ [See more](docs/FINDINGS.md)[^1]
 
-#### → Read our [preliminary analyses](analyses/analyse_domains.md).
-
-## Planned Analyses
-
-- **Sector patterns** — Which Swiss industries have the weakest security posture?
-- **Attack surface clustering** — Do domains sharing infrastructure share vulnerabilities?
-- **Supply chain exposure** — How many .ch sites are affected by a single vulnerable plugin?
-- **Cascade modeling** — If the top 3 providers go down, how many domains go dark?
-- **Trend detection** — Is DMARC adoption growing? Is DNSSEC adoption stalling?
-- **Threat prediction** — Can new typosquat registrations signal incoming phishing campaigns?
-
-#### → Read our [Infrastructure sovereignty](RESEARCH.md) questions.
-
-## Roadmap
-
-- Generate tags and summaries for all webpages using local Ollama LLM
-- Track changes between scans with changelog table and severity classification
-- Webhook/email alerting system based on changelog entries
-- Detect typosquat/phishing domains using .ch dataset permutations (ex: m1gros.ch)
-- Analyze DNS provider market share and jurisdiction
-- Model cascading DNS failure scenarios
+---
 
 [^1]: Raw datasets are not published. Consider only processed edges.arrow and nodes.arrow for dataviz.
+[^2]: Full dataset visualiaztion requires more than 16GB RAM for a proper WebGPU processing.

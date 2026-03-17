@@ -54,3 +54,34 @@ Questions answerable from a populated helvetiscan database. Each maps to one or 
 - Which registrars hold the most .ch domains? → `whois_info.registrar`
 - Is there a correlation between registrar and security posture? → `whois_info` + `risk_score`
 - Which registrars have the most domains with DNSSEC delegated? → `whois_info.dnssec_delegated`
+
+---
+
+## Findings gap analysis
+*What's missing or underrepresented in key-findings.md (§1–§30) — assessed 2026-03-17*
+
+### Already computed, not yet a finding
+
+**CVE exposure at scale** — the biggest omission. `preliminary-exposure.md` has the numbers: Apache (682K domains, 3 CRITICAL CVEs), nginx (605K, 3 HIGH), WordPress (376K, 1 CRITICAL), EOL PHP (43K, 2 CRITICAL). The combined "maximum exposed population" across those four technologies alone exceeds 1M .ch domains. This is the most actionable security finding in the dataset and has no slot in the 30. Belongs as §31 or folded into a new "CVE exposure" section.
+
+**FTP cleartext exposure** — §30 buries it in a ports table. "FTP open on 688K domains — 42% of scanned .ch — transmitting credentials in cleartext" deserves its own finding, not a row in a survey.
+
+**WordPress version lag** — `domains-overview.md` §13 (partial scan, now removed): 21.5% of versioned WP installs are outdated, and 56.6% hide their version entirely. Given 376K WP installs, the absolute outdated count is significant. Ported to key-findings §31.
+
+### Existing findings weaker than they could be
+
+**§20 (continental breakdown)** is a restatement of §14 (country breakdown) — both say the same thing about Switzerland vs abroad at different granularities. Could be merged to free a slot.
+
+**§21 and §22** (Swiss domestic IPs, foreign IP concentrations) are supporting tables for §10/§11, not standalone headline findings. Could be collapsed into §10/§11 notes.
+
+### High-value findings not yet computed (require DB queries)
+
+**DNS namespace concentration** (→ task 19 / `dns_concentration` table): which NS operators control what fraction of .ch, and what happens if the top few fail? "If provider X goes offline, Y% of .ch domains stop resolving" is the kind of systemic risk finding that resonates with NCSC and enterprise audiences. Feeds directly into hub resilience.
+
+**Hub resilience** (→ task 21 / `hub_resilience` table): cascading failure scenarios — minimum operator set whose removal takes 10%/25%/50% of .ch offline. Extends DNS concentration into a quantified infrastructure risk statement.
+
+**Sector-differentiated risk** (→ `domain_classification` + `risk_score`): healthcare vs finance vs government security posture. Which sector has the most domains below 50/100? Which has the worst DMARC enforcement? High publication value.
+
+**Domain expiry risk** (→ `whois_info.expires_at`): how many .ch domains expire in the next 30/90 days, and are any high-value (many subdomains, classified sector)?
+
+**Subdomain takeover surface** (→ `subdomains` + DNS): orphaned CNAMEs pointing to decommissioned services. Not yet computed.
