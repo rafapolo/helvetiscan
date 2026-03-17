@@ -14,7 +14,11 @@ use crate::shared::{
 };
 use crate::WhoisArgs;
 
-pub(crate) async fn cmd_whois(args: WhoisArgs) -> Result<()> {
+pub(crate) async fn cmd_whois(
+    args: WhoisArgs,
+    ext_shutdown_rx: Option<tokio::sync::watch::Receiver<bool>>,
+    ext_progress: Option<std::sync::Arc<Progress>>,
+) -> Result<()> {
     if args.concurrency == 0 {
         return Err(anyhow!("--concurrency must be > 0"));
     }
@@ -43,7 +47,13 @@ pub(crate) async fn cmd_whois(args: WhoisArgs) -> Result<()> {
         return Ok(());
     }
 
-    let progress = Arc::new(Progress::new(pending.len() as u64, "registrar", "unknown"));
+    let (progress, own_progress) = match ext_progress {
+        Some(p) => {
+            p.total.store(pending.len() as u64, std::sync::atomic::Ordering::Relaxed);
+            (p, false)
+        }
+        None => (Arc::new(Progress::new(pending.len() as u64, "registrar", "unknown")), true),
+    };
     let work_buf = (args.concurrency * 2).clamp(100, 10_000);
     let result_buf = (args.concurrency * 2).clamp(100, 10_000);
 
@@ -58,12 +68,17 @@ pub(crate) async fn cmd_whois(args: WhoisArgs) -> Result<()> {
         move || writer_loop_whois(db_path, result_rx, progress, done_tx, batch_size)
     });
 
-    let (shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);
-    tokio::spawn(async move {
-        crate::shared::wait_for_shutdown_signal().await;
-
-        let _ = shutdown_tx.send(true);
-    });
+    let mut shutdown_rx = match ext_shutdown_rx {
+        Some(rx) => rx,
+        None => {
+            let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+            tokio::spawn(async move {
+                crate::shared::wait_for_shutdown_signal().await;
+                let _ = shutdown_tx.send(true);
+            });
+            shutdown_rx
+        }
+    };
 
     let reader_handle = tokio::spawn({
         let progress = progress.clone();
@@ -82,7 +97,8 @@ pub(crate) async fn cmd_whois(args: WhoisArgs) -> Result<()> {
         }
     });
 
-    let progress_handle = if args.no_progress {
+    let progress_handle = if args.no_progress || !own_progress {
+        drop(done_rx);
         None
     } else {
         Some(tokio::spawn(progress_reporter(

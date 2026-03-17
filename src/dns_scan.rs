@@ -50,7 +50,11 @@ pub(crate) fn load_scan_targets(
     Ok(domains)
 }
 
-pub(crate) async fn cmd_dns(args: DnsArgs) -> Result<()> {
+pub(crate) async fn cmd_dns(
+    args: DnsArgs,
+    ext_shutdown_rx: Option<tokio::sync::watch::Receiver<bool>>,
+    ext_progress: Option<std::sync::Arc<Progress>>,
+) -> Result<()> {
     if args.concurrency == 0 {
         return Err(anyhow!("--concurrency must be > 0"));
     }
@@ -65,7 +69,13 @@ pub(crate) async fn cmd_dns(args: DnsArgs) -> Result<()> {
     }
 
     let resolver = build_default_resolver();
-    let progress = Arc::new(Progress::new(pending.len() as u64, "resolved", "errors"));
+    let (progress, own_progress) = match ext_progress {
+        Some(p) => {
+            p.total.store(pending.len() as u64, std::sync::atomic::Ordering::Relaxed);
+            (p, false)
+        }
+        None => (Arc::new(Progress::new(pending.len() as u64, "resolved", "errors")), true),
+    };
     let work_buf = (args.concurrency * 2).clamp(1_000, 100_000);
     let result_buf = (args.concurrency * 2).clamp(1_000, 100_000);
 
@@ -80,12 +90,17 @@ pub(crate) async fn cmd_dns(args: DnsArgs) -> Result<()> {
         move || writer_loop_dns(db_path, result_rx, progress, done_tx, batch_size)
     });
 
-    let (shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);
-    tokio::spawn(async move {
-        crate::shared::wait_for_shutdown_signal().await;
-
-        let _ = shutdown_tx.send(true);
-    });
+    let mut shutdown_rx = match ext_shutdown_rx {
+        Some(rx) => rx,
+        None => {
+            let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+            tokio::spawn(async move {
+                crate::shared::wait_for_shutdown_signal().await;
+                let _ = shutdown_tx.send(true);
+            });
+            shutdown_rx
+        }
+    };
 
     let reader_handle = tokio::spawn({
         let progress = progress.clone();
@@ -104,7 +119,8 @@ pub(crate) async fn cmd_dns(args: DnsArgs) -> Result<()> {
         }
     });
 
-    let progress_handle = if args.no_progress {
+    let progress_handle = if args.no_progress || !own_progress {
+        drop(done_rx);
         None
     } else {
         Some(tokio::spawn(progress_reporter(

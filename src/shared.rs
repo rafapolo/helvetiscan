@@ -204,7 +204,7 @@ pub(crate) struct SubdomainRow {
 #[derive(Debug)]
 pub(crate) struct Progress {
     pub(crate) started: Instant,
-    pub(crate) total: u64,
+    pub(crate) total: AtomicU64,
     pub(crate) enqueued: AtomicU64,
     pub(crate) completed: AtomicU64,
     pub(crate) ok: AtomicU64,
@@ -217,7 +217,7 @@ impl Progress {
     pub(crate) fn new(total: u64, ok_label: &'static str, err_label: &'static str) -> Self {
         Self {
             started: Instant::now(),
-            total,
+            total: AtomicU64::new(total),
             enqueued: AtomicU64::new(0),
             completed: AtomicU64::new(0),
             ok: AtomicU64::new(0),
@@ -493,6 +493,78 @@ pub(crate) async fn wait_for_shutdown_signal() {
     eprintln!("\nflushing batches...");
 }
 
+pub(crate) async fn multi_progress_reporter(
+    modules: Vec<(&'static str, std::sync::Arc<Progress>)>,
+    interval: std::time::Duration,
+    mut done_rx: tokio::sync::oneshot::Receiver<()>,
+) {
+    use std::sync::atomic::Ordering;
+
+    let interval = if interval.is_zero() {
+        std::time::Duration::from_secs(1)
+    } else {
+        interval
+    };
+    let mut ticker = tokio::time::interval(interval);
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+    let n = modules.len();
+    let mut first = true;
+    let mut last_done: Vec<u64> = vec![0; n];
+    let mut last_t = std::time::Instant::now();
+
+    loop {
+        tokio::select! {
+            _ = &mut done_rx => break,
+            _ = ticker.tick() => {
+                let now = std::time::Instant::now();
+                let dt = (now - last_t).as_secs_f64().max(0.001);
+
+                // Move cursor up to overwrite previous output
+                if !first {
+                    // Move up n lines
+                    eprint!("\x1B[{}A\r", n);
+                }
+
+                for (i, (name, progress)) in modules.iter().enumerate() {
+                    let done = progress.completed.load(Ordering::Relaxed);
+                    let total = progress.total.load(Ordering::Relaxed);
+                    let ok_count = progress.ok.load(Ordering::Relaxed);
+                    let err_count = progress.errors.load(Ordering::Relaxed);
+                    let elapsed = progress.started.elapsed().as_secs_f64().max(0.001);
+                    let avg_rate = done as f64 / elapsed;
+
+                    let delta = done.saturating_sub(last_done[i]) as f64;
+                    let _inst_rate = delta / dt;
+
+                    let eta_str = if avg_rate > 0.0 && total > done {
+                        format_eta((total - done) as f64 / avg_rate)
+                    } else if total > 0 && done >= total {
+                        "done".to_string()
+                    } else {
+                        "?".to_string()
+                    };
+
+                    let bar = progress_bar(done, total, 24);
+                    let pct = if total > 0 { done as f64 / total as f64 * 100.0 } else { 0.0 };
+
+                    eprintln!(
+                        "{name:<12} {bar} {:5.1}% ETA {eta_str:<8}  {}={:<8} {}={:<6} {avg_rate:.1}/s",
+                        pct,
+                        progress.ok_label, fmt_num(ok_count),
+                        progress.err_label, fmt_num(err_count),
+                    );
+                    last_done[i] = done;
+                }
+
+                last_t = now;
+                first = false;
+                let _ = std::io::Write::flush(&mut std::io::stderr());
+            }
+        }
+    }
+}
+
 pub(crate) async fn progress_reporter(
     progress: std::sync::Arc<Progress>,
     interval: Duration,
@@ -540,7 +612,7 @@ pub(crate) async fn progress_reporter(
                 let _inst_rate = delta / dt;
                 let elapsed = progress.started.elapsed().as_secs_f64().max(0.001);
                 let avg_rate = (done as f64) / elapsed;
-                let total = progress.total;
+                let total = progress.total.load(Ordering::Relaxed);
                 let eta_str = if avg_rate > 0.0 && total > done {
                     let remaining_secs = (total - done) as f64 / avg_rate;
                     format_eta(remaining_secs)

@@ -19,7 +19,11 @@ use crate::shared::{
 use crate::dns_scan::{collect_ip_strings, collect_lookup_strings};
 use crate::SubdomainsArgs;
 
-pub(crate) async fn cmd_subdomains(args: SubdomainsArgs) -> Result<()> {
+pub(crate) async fn cmd_subdomains(
+    args: SubdomainsArgs,
+    ext_shutdown_rx: Option<tokio::sync::watch::Receiver<bool>>,
+    ext_progress: Option<std::sync::Arc<Progress>>,
+) -> Result<()> {
     if args.concurrency == 0 {
         return Err(anyhow!("--concurrency must be > 0"));
     }
@@ -47,7 +51,13 @@ pub(crate) async fn cmd_subdomains(args: SubdomainsArgs) -> Result<()> {
     }
 
     let resolver = build_default_resolver();
-    let progress = Arc::new(Progress::new(pending.len() as u64, "found", "no result"));
+    let (progress, own_progress) = match ext_progress {
+        Some(p) => {
+            p.total.store(pending.len() as u64, std::sync::atomic::Ordering::Relaxed);
+            (p, false)
+        }
+        None => (Arc::new(Progress::new(pending.len() as u64, "found", "no result")), true),
+    };
     let work_buf = (args.concurrency * 2).clamp(1_000, 100_000);
     let result_buf = (args.concurrency * 2).clamp(1_000, 100_000);
 
@@ -62,18 +72,37 @@ pub(crate) async fn cmd_subdomains(args: SubdomainsArgs) -> Result<()> {
         move || writer_loop_subdomains(db_path, result_rx, progress, done_tx, batch_size)
     });
 
+    let mut shutdown_rx = match ext_shutdown_rx {
+        Some(rx) => rx,
+        None => {
+            let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+            tokio::spawn(async move {
+                crate::shared::wait_for_shutdown_signal().await;
+                let _ = shutdown_tx.send(true);
+            });
+            shutdown_rx
+        }
+    };
+
     let reader_handle = tokio::spawn({
         let progress = progress.clone();
         async move {
             for domain in pending {
-                if work_tx.send(domain).await.is_err() { break; }
-                progress.enqueued.fetch_add(1, Ordering::Relaxed);
+                tokio::select! {
+                    biased;
+                    _ = shutdown_rx.changed() => break,
+                    result = work_tx.send(domain) => {
+                        if result.is_err() { break; }
+                        progress.enqueued.fetch_add(1, Ordering::Relaxed);
+                    }
+                }
             }
             Ok::<(), anyhow::Error>(())
         }
     });
 
-    let progress_handle = if args.no_progress {
+    let progress_handle = if args.no_progress || !own_progress {
+        drop(done_rx);
         None
     } else {
         Some(tokio::spawn(progress_reporter(

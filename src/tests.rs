@@ -325,7 +325,7 @@ async fn sample_domains_e2e_scan() {
         retry_errors: None,
         save_html: None,
         country_mmdb: std::path::PathBuf::from("data/GeoLite2-Country.mmdb"),
-    })
+    }, None, None)
     .await
     .unwrap();
 
@@ -335,7 +335,7 @@ async fn sample_domains_e2e_scan() {
         concurrency: 10,
         no_progress: true,
         retry_errors: None,
-    })
+    }, None, None)
     .await
     .unwrap();
 
@@ -347,7 +347,7 @@ async fn sample_domains_e2e_scan() {
         handshake_timeout: Duration::from_secs(8),
         no_progress: true,
         retry_errors: None,
-    })
+    }, None, None)
     .await
     .unwrap();
 
@@ -358,7 +358,7 @@ async fn sample_domains_e2e_scan() {
         connect_timeout: Duration::from_millis(800),
         no_progress: true,
         retry_errors: None,
-    })
+    }, None, None)
     .await
     .unwrap();
 
@@ -755,4 +755,229 @@ fn classify_admin_ch_is_government() {
 fn classify_unknown_returns_none() {
     let result = classify_by_keywords("randomsite.ch", Some("Welcome to our website"));
     assert!(result.is_none());
+}
+
+// ---- parallel pipeline infrastructure ----
+
+#[test]
+fn progress_total_is_atomic() {
+    use std::sync::atomic::Ordering;
+    use crate::shared::Progress;
+
+    let p = Progress::new(0, "ok", "err");
+    assert_eq!(p.total.load(Ordering::Relaxed), 0);
+    p.total.store(500, Ordering::Relaxed);
+    assert_eq!(p.total.load(Ordering::Relaxed), 500);
+}
+
+#[test]
+fn progress_total_set_by_new() {
+    use std::sync::atomic::Ordering;
+    use crate::shared::Progress;
+
+    let p = Progress::new(1234, "ok", "err");
+    assert_eq!(p.total.load(Ordering::Relaxed), 1234);
+}
+
+#[tokio::test]
+async fn error_rate_supervisor_cancels_on_high_error_rate() {
+    use std::sync::Arc;
+    use std::sync::atomic::Ordering;
+    use crate::shared::Progress;
+
+    let prog = Arc::new(Progress::new(200, "ok", "err"));
+    prog.total.store(200, Ordering::Relaxed);
+    prog.completed.store(150, Ordering::Relaxed);
+    prog.errors.store(130, Ordering::Relaxed); // 86% error rate
+
+    let (cancel_tx, mut cancel_rx) = tokio::sync::watch::channel(false);
+
+    let supervisor = tokio::spawn(crate::error_rate_supervisor(
+        vec![("test-module", prog, cancel_tx)],
+        0.5,  // 50% threshold
+        100,  // min_samples
+    ));
+
+    // Supervisor polls every 2s; give it up to 5s
+    tokio::time::timeout(Duration::from_secs(5), async {
+        cancel_rx.changed().await.unwrap();
+        assert!(*cancel_rx.borrow(), "cancel channel should be set to true");
+    })
+    .await
+    .expect("supervisor did not cancel module within 5s");
+
+    supervisor.abort();
+}
+
+#[tokio::test]
+async fn error_rate_supervisor_does_not_cancel_below_threshold() {
+    use std::sync::Arc;
+    use std::sync::atomic::Ordering;
+    use crate::shared::Progress;
+
+    let prog = Arc::new(Progress::new(200, "ok", "err"));
+    prog.total.store(200, Ordering::Relaxed);
+    prog.completed.store(150, Ordering::Relaxed);
+    prog.errors.store(30, Ordering::Relaxed); // 20% error rate, below 50% threshold
+
+    let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
+
+    // Run supervisor for one poll cycle (slightly more than 2s)
+    let supervisor = tokio::spawn(crate::error_rate_supervisor(
+        vec![("test-module", prog, cancel_tx)],
+        0.5,
+        100,
+    ));
+
+    tokio::time::sleep(Duration::from_millis(2500)).await;
+
+    // Cancel channel should remain false
+    assert!(!*cancel_rx.borrow(), "supervisor should not cancel a module below the error threshold");
+
+    supervisor.abort();
+}
+
+#[tokio::test]
+async fn error_rate_supervisor_does_not_cancel_below_min_samples() {
+    use std::sync::Arc;
+    use std::sync::atomic::Ordering;
+    use crate::shared::Progress;
+
+    let prog = Arc::new(Progress::new(200, "ok", "err"));
+    prog.total.store(200, Ordering::Relaxed);
+    prog.completed.store(50, Ordering::Relaxed); // only 50 samples, below min_samples=100
+    prog.errors.store(50, Ordering::Relaxed);    // 100% error rate
+
+    let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
+
+    let supervisor = tokio::spawn(crate::error_rate_supervisor(
+        vec![("test-module", prog, cancel_tx)],
+        0.5,
+        100, // min_samples
+    ));
+
+    tokio::time::sleep(Duration::from_millis(2500)).await;
+
+    assert!(!*cancel_rx.borrow(), "supervisor must not cancel before min_samples is reached");
+
+    supervisor.abort();
+}
+
+#[tokio::test]
+async fn error_rate_supervisor_exits_when_all_done() {
+    use std::sync::Arc;
+    use std::sync::atomic::Ordering;
+    use crate::shared::Progress;
+
+    // completed == total → all done
+    let prog = Arc::new(Progress::new(100, "ok", "err"));
+    prog.total.store(100, Ordering::Relaxed);
+    prog.completed.store(100, Ordering::Relaxed);
+    prog.errors.store(5, Ordering::Relaxed); // low error rate
+
+    let (cancel_tx, _cancel_rx) = tokio::sync::watch::channel(false);
+
+    let supervisor = tokio::spawn(crate::error_rate_supervisor(
+        vec![("test-module", prog, cancel_tx)],
+        0.5,
+        100,
+    ));
+
+    // Supervisor should exit naturally (completed >= total) within a few poll cycles
+    tokio::time::timeout(Duration::from_secs(6), supervisor)
+        .await
+        .expect("supervisor did not exit after all modules completed")
+        .expect("supervisor task panicked");
+}
+
+#[tokio::test]
+async fn ext_shutdown_rx_stops_dns_reader() {
+    // Verify: a pre-fired shutdown_rx causes the reader to stop immediately,
+    // resulting in zero enqueued domains even when there are pending ones in the DB.
+    use std::sync::Arc;
+    use std::sync::atomic::Ordering;
+    use crate::shared::Progress;
+
+    // Set up a temp DB with a few domains
+    let db_path = std::env::temp_dir().join(format!(
+        "helvetiscan-shutdown-test-{}.db",
+        std::process::id()
+    ));
+    crate::schema::cmd_init(crate::InitArgs {
+        input: std::path::PathBuf::from("data/sample_domains.txt"),
+        db: db_path.clone(),
+    })
+    .unwrap();
+
+    // Pre-fire the shutdown channel (send true before passing to module)
+    let (tx, rx) = tokio::sync::watch::channel(false);
+    tx.send(true).unwrap();
+
+    let prog = Arc::new(Progress::new(0, "resolved", "errors"));
+
+    let result = crate::dns_scan::cmd_dns(
+        crate::DnsArgs {
+            db: db_path.clone(),
+            domain: None,
+            concurrency: 10,
+            no_progress: true,
+            retry_errors: None,
+        },
+        Some(rx),
+        Some(prog.clone()),
+    )
+    .await;
+
+    let _ = std::fs::remove_file(&db_path);
+
+    assert!(result.is_ok(), "cmd_dns with pre-fired shutdown should return Ok");
+    // total was set (domains existed in DB); enqueued should be 0 because reader broke immediately
+    let total = prog.total.load(Ordering::Relaxed);
+    let enqueued = prog.enqueued.load(Ordering::Relaxed);
+    assert!(total > 0, "progress.total should have been set to number of pending domains");
+    assert_eq!(enqueued, 0, "no domains should have been enqueued after immediate shutdown");
+}
+
+#[tokio::test]
+async fn ext_progress_total_set_by_module() {
+    // Verify: when ext_progress is passed, the module stores pending.len() into progress.total.
+    use std::sync::Arc;
+    use std::sync::atomic::Ordering;
+    use crate::shared::Progress;
+
+    let db_path = std::env::temp_dir().join(format!(
+        "helvetiscan-extprog-test-{}.db",
+        std::process::id()
+    ));
+    crate::schema::cmd_init(crate::InitArgs {
+        input: std::path::PathBuf::from("data/sample_domains.txt"),
+        db: db_path.clone(),
+    })
+    .unwrap();
+
+    let prog = Arc::new(Progress::new(0, "resolved", "errors"));
+    assert_eq!(prog.total.load(Ordering::Relaxed), 0);
+
+    // Pre-fire shutdown so no actual DNS queries are made
+    let (tx, rx) = tokio::sync::watch::channel(false);
+    tx.send(true).unwrap();
+
+    let _ = crate::dns_scan::cmd_dns(
+        crate::DnsArgs {
+            db: db_path.clone(),
+            domain: None,
+            concurrency: 4,
+            no_progress: true,
+            retry_errors: None,
+        },
+        Some(rx),
+        Some(prog.clone()),
+    )
+    .await;
+
+    let _ = std::fs::remove_file(&db_path);
+
+    // Module should have stored the actual pending count into total
+    let total = prog.total.load(Ordering::Relaxed);
+    assert!(total > 0, "module must update progress.total with the number of pending domains (got 0)");
 }

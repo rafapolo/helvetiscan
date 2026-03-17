@@ -264,6 +264,14 @@ pub(crate) struct FullArgs {
     /// Save each fetched HTML body to <path>/<domain>.html.zip
     #[arg(long)]
     pub(crate) save_html: Option<PathBuf>,
+
+    /// Divide each module's default concurrency by this when running in parallel (default: 3).
+    #[arg(long, default_value_t = 3)]
+    pub(crate) parallel_divisor: usize,
+
+    /// Cancel a module when its error rate exceeds this fraction (0.0-1.0, default: 0.5).
+    #[arg(long, default_value_t = 0.5)]
+    pub(crate) error_threshold: f64,
 }
 
 impl Default for WhoisArgs {
@@ -383,12 +391,12 @@ async fn main() -> Result<()> {
         // --domain with a subcommand → inject domain and top-level retry_errors into args
         (Some(domain), _, Some(cmd)) => {
             match cmd {
-                Command::Scan(mut a) => { if a.domain.is_none() { a.domain = Some(domain); } if a.retry_errors.is_none() { a.retry_errors = retry_errors; } http_scan::cmd_scan(a).await }
-                Command::Dns(mut a)  => { if a.domain.is_none() { a.domain = Some(domain); } if a.retry_errors.is_none() { a.retry_errors = retry_errors; } dns_scan::cmd_dns(a).await }
-                Command::Tls(mut a)  => { if a.domain.is_none() { a.domain = Some(domain); } if a.retry_errors.is_none() { a.retry_errors = retry_errors; } tls_scan::cmd_tls(a).await }
-                Command::Ports(mut a) => { if a.domain.is_none() { a.domain = Some(domain); } if a.retry_errors.is_none() { a.retry_errors = retry_errors; } ports_scan::cmd_ports(a).await }
-                Command::Subdomains(mut a) => { if a.domain.is_none() { a.domain = Some(domain); } subdomains::cmd_subdomains(a).await }
-                Command::Whois(mut a) => { if a.domain.is_none() { a.domain = Some(domain); } whois::cmd_whois(a).await }
+                Command::Scan(mut a) => { if a.domain.is_none() { a.domain = Some(domain); } if a.retry_errors.is_none() { a.retry_errors = retry_errors; } http_scan::cmd_scan(a, None, None).await }
+                Command::Dns(mut a)  => { if a.domain.is_none() { a.domain = Some(domain); } if a.retry_errors.is_none() { a.retry_errors = retry_errors; } dns_scan::cmd_dns(a, None, None).await }
+                Command::Tls(mut a)  => { if a.domain.is_none() { a.domain = Some(domain); } if a.retry_errors.is_none() { a.retry_errors = retry_errors; } tls_scan::cmd_tls(a, None, None).await }
+                Command::Ports(mut a) => { if a.domain.is_none() { a.domain = Some(domain); } if a.retry_errors.is_none() { a.retry_errors = retry_errors; } ports_scan::cmd_ports(a, None, None).await }
+                Command::Subdomains(mut a) => { if a.domain.is_none() { a.domain = Some(domain); } subdomains::cmd_subdomains(a, None, None).await }
+                Command::Whois(mut a) => { if a.domain.is_none() { a.domain = Some(domain); } whois::cmd_whois(a, None, None).await }
                 _ => Err(anyhow!("--domain is not supported with this subcommand")),
             }
         }
@@ -396,12 +404,12 @@ async fn main() -> Result<()> {
         (None, db, Some(cmd)) => {
             match cmd {
                 Command::Init(args) => schema::cmd_init(args),
-                Command::Scan(mut a) => { if a.retry_errors.is_none() { a.retry_errors = retry_errors; } http_scan::cmd_scan(a).await }
-                Command::Dns(mut a)  => { if a.retry_errors.is_none() { a.retry_errors = retry_errors; } dns_scan::cmd_dns(a).await }
-                Command::Tls(mut a)  => { if a.retry_errors.is_none() { a.retry_errors = retry_errors; } tls_scan::cmd_tls(a).await }
-                Command::Ports(mut a) => { if a.retry_errors.is_none() { a.retry_errors = retry_errors; } ports_scan::cmd_ports(a).await }
-                Command::Subdomains(a) => subdomains::cmd_subdomains(a).await,
-                Command::Whois(a) => whois::cmd_whois(a).await,
+                Command::Scan(mut a) => { if a.retry_errors.is_none() { a.retry_errors = retry_errors; } http_scan::cmd_scan(a, None, None).await }
+                Command::Dns(mut a)  => { if a.retry_errors.is_none() { a.retry_errors = retry_errors; } dns_scan::cmd_dns(a, None, None).await }
+                Command::Tls(mut a)  => { if a.retry_errors.is_none() { a.retry_errors = retry_errors; } tls_scan::cmd_tls(a, None, None).await }
+                Command::Ports(mut a) => { if a.retry_errors.is_none() { a.retry_errors = retry_errors; } ports_scan::cmd_ports(a, None, None).await }
+                Command::Subdomains(a) => subdomains::cmd_subdomains(a, None, None).await,
+                Command::Whois(a) => whois::cmd_whois(a, None, None).await,
                 Command::UpdateCves => cve::cmd_update_cves(db).await,
                 Command::Classify(a) => classify::cmd_classify(a.db).await,
                 Command::Benchmark(a) => benchmark::cmd_benchmark(a.db).await,
@@ -415,64 +423,279 @@ async fn main() -> Result<()> {
 
 // ---- full pipeline ----
 
+pub(crate) async fn error_rate_supervisor(
+    modules: Vec<(&'static str, std::sync::Arc<crate::shared::Progress>, tokio::sync::watch::Sender<bool>)>,
+    threshold: f64,
+    min_samples: u64,
+) {
+    use std::sync::atomic::Ordering;
+    let mut ticker = tokio::time::interval(std::time::Duration::from_secs(2));
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    loop {
+        ticker.tick().await;
+        let mut all_done = true;
+        for (name, progress, cancel_tx) in &modules {
+            let completed = progress.completed.load(Ordering::Relaxed);
+            let total = progress.total.load(Ordering::Relaxed);
+            let errors = progress.errors.load(Ordering::Relaxed);
+            if total == 0 || completed < total {
+                all_done = false;
+            }
+            if completed >= min_samples && errors > 0 {
+                let rate = errors as f64 / completed as f64;
+                if rate > threshold && !*cancel_tx.borrow() {
+                    eprintln!(
+                        "\n[pipeline] {name}: error rate {:.1}% exceeds {:.0}% threshold — cancelling",
+                        rate * 100.0, threshold * 100.0
+                    );
+                    let _ = cancel_tx.send(true);
+                }
+            }
+        }
+        if all_done { break; }
+    }
+}
+
 async fn cmd_full_pipeline(args: FullArgs) -> Result<()> {
+    use std::sync::Arc;
     use std::io::Write;
+    use tokio::task::JoinSet;
 
     let db = args.db;
-    let concurrency = args.concurrency;
+    let div = args.parallel_divisor.max(1);
+    let error_threshold = args.error_threshold;
 
-    macro_rules! step {
-        ($label:expr, $fut:expr) => {{
-            eprint!("\n=== {} ===\n", $label);
-            let t0 = std::time::Instant::now();
-            let result = $fut;
-            let secs = t0.elapsed().as_secs_f64();
-            match &result {
-                Ok(_) => eprintln!("=== {} done ({:.1}s) ===", $label, secs),
-                Err(e) => eprintln!("=== {} FAILED ({:.1}s): {e} ===", $label, secs),
+    // ── Global shutdown (Ctrl+C / SIGTERM) ──────────────────────────────────
+    let (global_tx, global_rx) = tokio::sync::watch::channel(false);
+    {
+        let tx = global_tx.clone();
+        tokio::spawn(async move {
+            crate::shared::wait_for_shutdown_signal().await;
+            let _ = tx.send(true);
+        });
+    }
+
+    // Helper: broadcast global shutdown to a list of per-module cancel senders
+    let forward_global = |cancel_senders: Vec<tokio::sync::watch::Sender<bool>>| {
+        let mut rx = global_rx.clone();
+        tokio::spawn(async move {
+            if rx.changed().await.is_ok() && *rx.borrow() {
+                for tx in cancel_senders {
+                    let _ = tx.send(true);
+                }
             }
+        });
+    };
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  Phase 1 — Parallel network scans
+    // ═══════════════════════════════════════════════════════════════════════
+    eprintln!("\n=== Phase 1: parallel network scans ===");
+    let phase1_t0 = std::time::Instant::now();
+
+    // Per-module cancel channels
+    let (http_ctx,   http_crx)   = tokio::sync::watch::channel(false);
+    let (dns_ctx,    dns_crx)    = tokio::sync::watch::channel(false);
+    let (tls_ctx,    tls_crx)    = tokio::sync::watch::channel(false);
+    let (ports_ctx,  ports_crx)  = tokio::sync::watch::channel(false);
+    let (sub_ctx,    sub_crx)    = tokio::sync::watch::channel(false);
+    let (whois_ctx,  whois_crx)  = tokio::sync::watch::channel(false);
+
+    forward_global(vec![
+        http_ctx.clone(), dns_ctx.clone(), tls_ctx.clone(),
+        ports_ctx.clone(), sub_ctx.clone(), whois_ctx.clone(),
+    ]);
+
+    // Per-module progress trackers
+    let http_prog  = Arc::new(crate::shared::Progress::new(0, "HTTP 200",   "errors"));
+    let dns_prog   = Arc::new(crate::shared::Progress::new(0, "resolved",   "errors"));
+    let tls_prog   = Arc::new(crate::shared::Progress::new(0, "valid TLS",  "errors"));
+    let ports_prog = Arc::new(crate::shared::Progress::new(0, "open ports", "no resolve"));
+    let sub_prog   = Arc::new(crate::shared::Progress::new(0, "found",      "no result"));
+    let whois_prog = Arc::new(crate::shared::Progress::new(0, "registrar",  "unknown"));
+
+    // Concurrencies (each module's natural default / parallel_divisor)
+    let http_conc  = (500_usize / div).max(1);
+    let dns_conc   = (250_usize / div).max(1);
+    let tls_conc   = (150_usize / div).max(1);
+    let ports_conc = (300_usize / div).max(1);
+    let sub_conc   = (200_usize / div).max(1);
+
+    let mut phase1: JoinSet<(&'static str, Result<()>)> = JoinSet::new();
+
+    phase1.spawn({
+        let prog = http_prog.clone();
+        let crx = http_crx;
+        let db = db.clone();
+        let save_html = args.save_html.clone();
+        let country_mmdb = args.country_mmdb.clone();
+        async move {
+            let r = http_scan::cmd_scan(ScanArgs {
+                db, concurrency: http_conc, save_html, country_mmdb, ..ScanArgs::default()
+            }, Some(crx), Some(prog)).await;
+            ("http", r)
+        }
+    });
+
+    phase1.spawn({
+        let prog = dns_prog.clone();
+        let crx = dns_crx;
+        let db = db.clone();
+        async move {
+            let r = dns_scan::cmd_dns(DnsArgs {
+                db, concurrency: dns_conc, ..DnsArgs::default()
+            }, Some(crx), Some(prog)).await;
+            ("dns", r)
+        }
+    });
+
+    phase1.spawn({
+        let prog = tls_prog.clone();
+        let crx = tls_crx;
+        let db = db.clone();
+        async move {
+            let r = tls_scan::cmd_tls(TlsArgs {
+                db, concurrency: tls_conc, ..TlsArgs::default()
+            }, Some(crx), Some(prog)).await;
+            ("tls", r)
+        }
+    });
+
+    phase1.spawn({
+        let prog = ports_prog.clone();
+        let crx = ports_crx;
+        let db = db.clone();
+        async move {
+            let r = ports_scan::cmd_ports(PortsArgs {
+                db, concurrency: ports_conc, ..PortsArgs::default()
+            }, Some(crx), Some(prog)).await;
+            ("ports", r)
+        }
+    });
+
+    phase1.spawn({
+        let prog = sub_prog.clone();
+        let crx = sub_crx;
+        let db = db.clone();
+        async move {
+            let r = subdomains::cmd_subdomains(SubdomainsArgs {
+                db, concurrency: sub_conc, ..SubdomainsArgs::default()
+            }, Some(crx), Some(prog)).await;
+            ("subdomains", r)
+        }
+    });
+
+    phase1.spawn({
+        let prog = whois_prog.clone();
+        let crx = whois_crx;
+        let db = db.clone();
+        async move {
+            let r = whois::cmd_whois(WhoisArgs {
+                db, ..WhoisArgs::default()
+            }, Some(crx), Some(prog)).await;
+            ("whois", r)
+        }
+    });
+
+    // Multi-line progress reporter for phase 1
+    let (p1_done_tx, p1_done_rx) = tokio::sync::oneshot::channel::<()>();
+    let reporter = tokio::spawn(crate::shared::multi_progress_reporter(
+        vec![
+            ("http",      http_prog.clone()),
+            ("dns",       dns_prog.clone()),
+            ("tls",       tls_prog.clone()),
+            ("ports",     ports_prog.clone()),
+            ("subdomains",sub_prog.clone()),
+            ("whois",     whois_prog.clone()),
+        ],
+        std::time::Duration::from_secs(1),
+        p1_done_rx,
+    ));
+
+    // Error-rate supervisor
+    let supervisor = tokio::spawn(error_rate_supervisor(
+        vec![
+            ("http",      http_prog.clone(),  http_ctx),
+            ("dns",       dns_prog.clone(),   dns_ctx),
+            ("tls",       tls_prog.clone(),   tls_ctx),
+            ("ports",     ports_prog.clone(), ports_ctx),
+            ("subdomains",sub_prog.clone(),   sub_ctx),
+            ("whois",     whois_prog.clone(), whois_ctx),
+        ],
+        error_threshold,
+        100,
+    ));
+
+    // Collect phase 1 results silently — don't print while the reporter is live
+    // (interleaved eprintln! would corrupt the ANSI cursor positioning).
+    let mut phase1_results: Vec<(&str, Result<()>)> = Vec::new();
+    let mut phase1_panics: Vec<String> = Vec::new();
+    while let Some(join_result) = phase1.join_next().await {
+        match join_result {
+            Ok(result) => phase1_results.push(result),
+            Err(e)     => phase1_panics.push(e.to_string()),
+        }
+    }
+
+    // Stop reporter (prints one final frame) before printing any text
+    let _ = p1_done_tx.send(());
+    reporter.abort();
+    supervisor.abort();
+
+    let phase1_secs = phase1_t0.elapsed().as_secs_f64();
+    eprintln!("\n=== Phase 1 done ({phase1_secs:.1}s) ===");
+    for (name, result) in &phase1_results {
+        match result {
+            Ok(_)  => eprintln!("  {name}: ok"),
+            Err(e) => eprintln!("  {name}: FAILED: {e}"),
+        }
+    }
+    for msg in &phase1_panics {
+        eprintln!("  task panicked: {msg}");
+    }
+    let _ = std::io::stderr().flush();
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  Phase 2 — Sequential post-processing (depends on Phase 1 data)
+    // ═══════════════════════════════════════════════════════════════════════
+    eprintln!("\n=== Phase 2: post-processing ===");
+    let phase2_t0 = std::time::Instant::now();
+
+    macro_rules! step2 {
+        ($label:expr, $fut:expr) => {{
+            eprint!("  {:<20} ", concat!($label, "..."));
             let _ = std::io::stderr().flush();
-            result?;
+            let t0 = std::time::Instant::now();
+            match $fut {
+                Ok(_)  => eprintln!("ok ({:.1}s)", t0.elapsed().as_secs_f64()),
+                Err(e) => eprintln!("FAILED ({:.1}s): {e}", t0.elapsed().as_secs_f64()),
+            }
         }};
     }
 
-    step!("scan (HTTP)", http_scan::cmd_scan(ScanArgs {
-        db: db.clone(), concurrency, save_html: args.save_html, ..ScanArgs::default()
-    }).await);
-
-    step!("dns + email security", dns_scan::cmd_dns(DnsArgs {
-        db: db.clone(), concurrency: concurrency.min(250), ..DnsArgs::default()
-    }).await);
-
-    step!("tls", tls_scan::cmd_tls(TlsArgs {
-        db: db.clone(), concurrency: concurrency.min(150), ..TlsArgs::default()
-    }).await);
-
-    step!("ports", ports_scan::cmd_ports(PortsArgs {
-        db: db.clone(), concurrency: concurrency.min(300), ..PortsArgs::default()
-    }).await);
-
-    step!("subdomains", subdomains::cmd_subdomains(SubdomainsArgs {
-        db: db.clone(), concurrency: concurrency.min(200), ..SubdomainsArgs::default()
-    }).await);
-
-    step!("whois", whois::cmd_whois(WhoisArgs {
-        db: db.clone(), ..WhoisArgs::default()
-    }).await);
-
-    step!("update-cves", cve::cmd_update_cves(db.clone()).await);
-
-    step!("classify", classify::cmd_classify(db.clone()).await);
-
-    step!("sovereignty", sovereignty::cmd_sovereignty(SovereigntyArgs {
+    step2!("update-cves", cve::cmd_update_cves(db.clone()).await);
+    step2!("classify",    classify::cmd_classify(db.clone()).await);
+    step2!("sovereignty", sovereignty::cmd_sovereignty(SovereigntyArgs {
         db: db.clone(),
         asn_mmdb: args.asn_mmdb,
         country_mmdb: args.country_mmdb,
     }).await);
 
-    step!("benchmark", benchmark::cmd_benchmark(db.clone()).await);
+    let phase2_secs = phase2_t0.elapsed().as_secs_f64();
+    eprintln!("=== Phase 2 done ({phase2_secs:.1}s) ===");
 
-    eprintln!("\nfull pipeline complete.");
+    // ═══════════════════════════════════════════════════════════════════════
+    //  Phase 3 — Benchmark (reads all tables via risk_score VIEW)
+    // ═══════════════════════════════════════════════════════════════════════
+    eprintln!("\n=== Phase 3: benchmark ===");
+    let phase3_t0 = std::time::Instant::now();
+    match benchmark::cmd_benchmark(db.clone()).await {
+        Ok(_)  => eprintln!("=== Phase 3 done ({:.1}s) ===", phase3_t0.elapsed().as_secs_f64()),
+        Err(e) => eprintln!("=== Phase 3 FAILED ({:.1}s): {e} ===", phase3_t0.elapsed().as_secs_f64()),
+    }
+
+    let total_secs = phase1_t0.elapsed().as_secs_f64();
+    eprintln!("\nfull pipeline complete ({total_secs:.1}s total).");
     Ok(())
 }
 
@@ -498,27 +721,27 @@ async fn cmd_single_all(db: PathBuf, domain: &str, retry_errors: Option<String>)
     step!("http",       http_scan::cmd_scan(ScanArgs {
         db: db.clone(), domain: Some(domain.clone()), no_progress: true,
         retry_errors: retry_errors.clone(), ..ScanArgs::default()
-    }).await);
+    }, None, None).await);
     step!("dns",        dns_scan::cmd_dns(DnsArgs {
         db: db.clone(), domain: Some(domain.clone()), no_progress: true,
         retry_errors: retry_errors.clone(), ..DnsArgs::default()
-    }).await);
+    }, None, None).await);
     step!("tls",        tls_scan::cmd_tls(TlsArgs {
         db: db.clone(), domain: Some(domain.clone()), no_progress: true,
         retry_errors: retry_errors.clone(), ..TlsArgs::default()
-    }).await);
+    }, None, None).await);
     step!("ports",      ports_scan::cmd_ports(PortsArgs {
         db: db.clone(), domain: Some(domain.clone()), no_progress: true,
         retry_errors: retry_errors.clone(), ..PortsArgs::default()
-    }).await);
+    }, None, None).await);
     step!("subdomains", subdomains::cmd_subdomains(SubdomainsArgs {
         db: db.clone(), domain: Some(domain.clone()), no_progress: true,
         ..SubdomainsArgs::default()
-    }).await);
+    }, None, None).await);
     step!("whois",      whois::cmd_whois(WhoisArgs {
         db: db.clone(), domain: Some(domain.clone()), no_progress: true,
         ..WhoisArgs::default()
-    }).await);
+    }, None, None).await);
     print_single_domain_summary(&db, &domain)
 }
 
