@@ -10,19 +10,19 @@ This public visualization exposes the DNS dependency structure as an interactive
 
 </div>
 
- 50k domains shown. Adjust `maxPoints` URL to load more — full dataset (2.5M nodes) requires a good GPU.
+ ##### 50k domains shown in this graph. Adjust `maxPoints` URL to load more — full dataset (2.5M nodes) requires more than 16GB RAM for the webGPU processing.
 
 ---
 
 ## How we use it?
 
 ```
-Swiss Cyberspace scanner - HTTP, DNS, TLS and port intelligence for the .ch namespace
+Swiss Cyberspace scanner - HTTP, DNS, TLS, HTTP, ports, WHOIS, MX and CVEs
 
 Usage: helvetiscan [OPTIONS] [COMMAND]
 
 Commands:
-  init         Populate domains.duckdb from a plain-text domain list (one domain/line). Safe to re-run: skips if the table already has rows
+  init         Populate domains.db from a plain-text domain list (one domain/line)
   scan         HTTP scan: fetch status, title, server headers for all pending domains
   dns          Resolve DNS metadata for all domains missing a dns_info row
   tls          Scan TLS metadata for all domains missing a tls_info row
@@ -36,11 +36,12 @@ Commands:
   help         Print this message or the help of the given subcommand(s)
 
 Options:
-      --domain <DOMAIN>  Scan only this single domain
-      --db <DB>          [default: data/domains.duckdb]
-      --full <FULL>      Full rescan shortcut using default arguments [possible values: domain, dns, tls, ports, subdomains, whois, all]
-  -h, --help             Print help
+      --domain <DOMAIN>              Scan only this single domain
+      --db <DB>                      [default: data/domains.db]
+      --retry-errors <RETRY_ERRORS>  Re-scan domains whose error_kind matches this value (e.g. 'timeout')
 ```
+
+#### The whole HTTP scan runs in less than 4 hours on a 1gbps connection.
 
 ---
 
@@ -87,11 +88,12 @@ The final database can answer questions such as:[^1]
 - **Trend detection** — Is DMARC adoption growing? Is DNSSEC adoption stalling?
 - **Threat prediction** — Can new typosquat registrations signal incoming phishing campaigns?
 
-## Next Features
+#### → Read our [Infrastructure sovereignty](analyses/analyse_domains.md) questions.
+
+## Roadmap
 
 - Generate tags and summaries for all webpages using local Ollama LLM
 - Track changes between scans with changelog table and severity classification
-- Generate PDF/HTML compliance reports using Typst templates  
 - Webhook/email alerting system based on changelog entries
 - Detect typosquat/phishing domains using .ch dataset permutations (ex: m1gros.ch)
 - Analyze DNS provider market share and jurisdiction

@@ -1,5 +1,5 @@
 # Preliminary / Domain Analysis 
-*Dataset: 2,549,282 domains — data/domains.duckdb*
+*Dataset: 2,549,282 domains — data/domains.db*
 
 ---
 
