@@ -58,12 +58,25 @@ pub(crate) async fn cmd_whois(args: WhoisArgs) -> Result<()> {
         move || writer_loop_whois(db_path, result_rx, progress, done_tx, batch_size)
     });
 
+    let (shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);
+    tokio::spawn(async move {
+        crate::shared::wait_for_shutdown_signal().await;
+        eprintln!("\ninterrupt received — flushing batches...");
+        let _ = shutdown_tx.send(true);
+    });
+
     let reader_handle = tokio::spawn({
         let progress = progress.clone();
         async move {
             for domain in pending {
-                if work_tx.send(domain).await.is_err() { break; }
-                progress.enqueued.fetch_add(1, Ordering::Relaxed);
+                tokio::select! {
+                    biased;
+                    _ = shutdown_rx.changed() => break,
+                    result = work_tx.send(domain) => {
+                        if result.is_err() { break; }
+                        progress.enqueued.fetch_add(1, Ordering::Relaxed);
+                    }
+                }
             }
             Ok::<(), anyhow::Error>(())
         }
@@ -294,11 +307,17 @@ fn writer_loop_whois(
         batch.push(row);
         progress.completed.fetch_add(1, Ordering::Relaxed);
         if batch.len() >= batch_size {
-            flush_whois_batch(&conn, &mut batch)?;
+            if let Err(e) = flush_whois_batch(&conn, &mut batch) {
+                crate::shared::append_error_log(&db_path, &format!("whois flush_batch: {e:#}"));
+                return Err(e);
+            }
         }
     }
     if !batch.is_empty() {
-        flush_whois_batch(&conn, &mut batch)?;
+        if let Err(e) = flush_whois_batch(&conn, &mut batch) {
+            crate::shared::append_error_log(&db_path, &format!("whois flush_batch (final): {e:#}"));
+            return Err(e);
+        }
     }
     let _ = done_tx.send(());
     Ok(())
