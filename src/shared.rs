@@ -427,7 +427,7 @@ pub(crate) fn progress_bar(done: u64, total: u64, width: usize) -> String {
     let filled = if total > 0 {
         ((done as f64 / total as f64) * width as f64) as usize
     } else {
-        0
+        width
     }
     .min(width);
     format!("[{}{}]", "█".repeat(filled), "░".repeat(width - filled))
@@ -539,14 +539,12 @@ pub(crate) async fn multi_progress_reporter(
 
                     let eta_str = if avg_rate > 0.0 && total > done {
                         format_eta((total - done) as f64 / avg_rate)
-                    } else if total > 0 && done >= total {
-                        "done".to_string()
                     } else {
-                        "?".to_string()
+                        "done".to_string()
                     };
 
                     let bar = progress_bar(done, total, 24);
-                    let pct = if total > 0 { done as f64 / total as f64 * 100.0 } else { 0.0 };
+                    let pct = if total > 0 { done as f64 / total as f64 * 100.0 } else { 100.0 };
 
                     // \x1B[2K clears the entire line; \r resets to column 0 before writing
                     eprintln!(
@@ -618,10 +616,10 @@ pub(crate) async fn progress_reporter(
                     let remaining_secs = (total - done) as f64 / avg_rate;
                     format_eta(remaining_secs)
                 } else {
-                    "?".to_string()
+                    "done".to_string()
                 };
 
-                let pct = if total > 0 { done as f64 / total as f64 * 100.0 } else { 0.0 };
+                let pct = if total > 0 { done as f64 / total as f64 * 100.0 } else { 100.0 };
                 let bar = progress_bar(done, total, 32);
                 let line1 = format!("{bar} {pct:.2}% · ETA {eta_str}");
                 let line2 = format!(
@@ -647,5 +645,53 @@ pub(crate) async fn progress_reporter(
                 last_t = now;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // progress_bar
+
+    #[test]
+    fn progress_bar_zero_total_returns_full_bar() {
+        let bar = progress_bar(0, 0, 4);
+        assert_eq!(bar, "[████]");
+    }
+
+    #[test]
+    fn progress_bar_half_done() {
+        let bar = progress_bar(1, 2, 4);
+        assert_eq!(bar, "[██░░]");
+    }
+
+    #[test]
+    fn progress_bar_fully_done() {
+        let bar = progress_bar(5, 5, 4);
+        assert_eq!(bar, "[████]");
+    }
+
+    #[test]
+    fn progress_bar_zero_done_nonzero_total() {
+        let bar = progress_bar(0, 10, 4);
+        assert_eq!(bar, "[░░░░]");
+    }
+
+    // format_eta
+
+    #[test]
+    fn format_eta_seconds() {
+        assert_eq!(format_eta(45.0), "45s");
+    }
+
+    #[test]
+    fn format_eta_minutes() {
+        assert_eq!(format_eta(90.0), "1m30s");
+    }
+
+    #[test]
+    fn format_eta_hours() {
+        assert_eq!(format_eta(3661.0), "1h01m");
     }
 }
