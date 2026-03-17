@@ -108,7 +108,7 @@ pub(crate) async fn cmd_tls(
         }
     });
 
-    let progress_handle = if args.no_progress || !own_progress {
+    let progress_handle = if args.quiet || !own_progress {
         drop(done_rx);
         None
     } else {

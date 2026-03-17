@@ -108,8 +108,8 @@ pub(crate) struct ScanArgs {
     #[arg(long, help = "Re-scan domains whose error_kind matches this value (e.g. 'timeout')")]
     pub(crate) retry_errors: Option<String>,
 
-    #[arg(skip)]
-    pub(crate) no_progress: bool,
+    #[arg(long, help = "Suppress progress bar output")]
+    pub(crate) quiet: bool,
 
     /// Save each fetched HTML body to <path>/<domain>.html.zip
     #[arg(long)]
@@ -131,8 +131,8 @@ pub(crate) struct DnsArgs {
     #[arg(long, default_value_t = 250)]
     pub(crate) concurrency: usize,
 
-    #[arg(skip)]
-    pub(crate) no_progress: bool,
+    #[arg(long, help = "Suppress progress bar output")]
+    pub(crate) quiet: bool,
 
     #[arg(long, help = "Re-scan domains whose error_kind matches this value (e.g. 'timeout')")]
     pub(crate) retry_errors: Option<String>,
@@ -155,8 +155,8 @@ pub(crate) struct TlsArgs {
     #[arg(long, default_value = "8s", value_parser = shared::parse_duration)]
     pub(crate) handshake_timeout: Duration,
 
-    #[arg(skip)]
-    pub(crate) no_progress: bool,
+    #[arg(long, help = "Suppress progress bar output")]
+    pub(crate) quiet: bool,
 
     #[arg(long, help = "Re-scan domains whose error_kind matches this value (e.g. 'timeout')")]
     pub(crate) retry_errors: Option<String>,
@@ -176,8 +176,8 @@ pub(crate) struct PortsArgs {
     #[arg(long, default_value = "800ms", value_parser = shared::parse_duration)]
     pub(crate) connect_timeout: Duration,
 
-    #[arg(skip)]
-    pub(crate) no_progress: bool,
+    #[arg(long, help = "Suppress progress bar output")]
+    pub(crate) quiet: bool,
 
     #[arg(long, help = "Re-scan domains whose error_kind matches this value (e.g. 'timeout')")]
     pub(crate) retry_errors: Option<String>,
@@ -194,8 +194,11 @@ pub(crate) struct SubdomainsArgs {
     #[arg(long, default_value_t = 200)]
     pub(crate) concurrency: usize,
 
-    #[arg(skip)]
-    pub(crate) no_progress: bool,
+    #[arg(long, help = "Suppress progress bar output")]
+    pub(crate) quiet: bool,
+
+    #[arg(long, help = "Re-scan domains whose error_kind matches this value (e.g. 'timeout')")]
+    pub(crate) retry_errors: Option<String>,
 }
 
 #[derive(Parser, Debug, Clone)]
@@ -213,8 +216,11 @@ pub(crate) struct WhoisArgs {
     #[arg(long, default_value = "5s", value_parser = shared::parse_duration)]
     pub(crate) connect_timeout: Duration,
 
-    #[arg(skip)]
-    pub(crate) no_progress: bool,
+    #[arg(long, help = "Suppress progress bar output")]
+    pub(crate) quiet: bool,
+
+    #[arg(long, help = "Re-scan domains whose error_kind matches this value (e.g. 'timeout')")]
+    pub(crate) retry_errors: Option<String>,
 }
 
 #[derive(Parser, Debug)]
@@ -281,7 +287,8 @@ impl Default for WhoisArgs {
             domain: None,
             concurrency: 5,
             connect_timeout: Duration::from_secs(5),
-            no_progress: false,
+            quiet: false,
+            retry_errors: None,
         }
     }
 }
@@ -297,7 +304,7 @@ impl Default for ScanArgs {
             max_kbytes: 128,
             max_redirects: 5,
             user_agent: "helvetiscan/1.0".to_string(),
-            no_progress: false,
+            quiet: false,
             retry_errors: None,
             save_html: None,
             country_mmdb: PathBuf::from("data/GeoLite2-Country.mmdb"),
@@ -311,7 +318,7 @@ impl Default for DnsArgs {
             db: PathBuf::from("data/domains.db"),
             domain: None,
             concurrency: 250,
-            no_progress: false,
+            quiet: false,
             retry_errors: None,
         }
     }
@@ -325,7 +332,7 @@ impl Default for TlsArgs {
             concurrency: 150,
             connect_timeout: Duration::from_secs(5),
             handshake_timeout: Duration::from_secs(8),
-            no_progress: false,
+            quiet: false,
             retry_errors: None,
         }
     }
@@ -337,7 +344,8 @@ impl Default for SubdomainsArgs {
             db: PathBuf::from("data/domains.db"),
             domain: None,
             concurrency: 200,
-            no_progress: false,
+            quiet: false,
+            retry_errors: None,
         }
     }
 }
@@ -355,7 +363,7 @@ impl Default for PortsArgs {
             domain: None,
             concurrency: 300,
             connect_timeout: Duration::from_millis(800),
-            no_progress: false,
+            quiet: false,
             retry_errors: None,
         }
     }
@@ -719,28 +727,28 @@ async fn cmd_single_all(db: PathBuf, domain: &str, retry_errors: Option<String>)
     let domain = schema::ensure_domain_exists(&db, domain)?;
     eprintln!("scanning {domain}");
     step!("http",       http_scan::cmd_scan(ScanArgs {
-        db: db.clone(), domain: Some(domain.clone()), no_progress: true,
+        db: db.clone(), domain: Some(domain.clone()), quiet: false,
         retry_errors: retry_errors.clone(), ..ScanArgs::default()
     }, None, None).await);
     step!("dns",        dns_scan::cmd_dns(DnsArgs {
-        db: db.clone(), domain: Some(domain.clone()), no_progress: true,
+        db: db.clone(), domain: Some(domain.clone()), quiet: false,
         retry_errors: retry_errors.clone(), ..DnsArgs::default()
     }, None, None).await);
     step!("tls",        tls_scan::cmd_tls(TlsArgs {
-        db: db.clone(), domain: Some(domain.clone()), no_progress: true,
+        db: db.clone(), domain: Some(domain.clone()), quiet: false,
         retry_errors: retry_errors.clone(), ..TlsArgs::default()
     }, None, None).await);
     step!("ports",      ports_scan::cmd_ports(PortsArgs {
-        db: db.clone(), domain: Some(domain.clone()), no_progress: true,
+        db: db.clone(), domain: Some(domain.clone()), quiet: false,
         retry_errors: retry_errors.clone(), ..PortsArgs::default()
     }, None, None).await);
     step!("subdomains", subdomains::cmd_subdomains(SubdomainsArgs {
-        db: db.clone(), domain: Some(domain.clone()), no_progress: true,
-        ..SubdomainsArgs::default()
+        db: db.clone(), domain: Some(domain.clone()), quiet: false,
+        retry_errors: retry_errors.clone(), ..SubdomainsArgs::default()
     }, None, None).await);
     step!("whois",      whois::cmd_whois(WhoisArgs {
-        db: db.clone(), domain: Some(domain.clone()), no_progress: true,
-        ..WhoisArgs::default()
+        db: db.clone(), domain: Some(domain.clone()), quiet: false,
+        retry_errors: retry_errors.clone(), ..WhoisArgs::default()
     }, None, None).await);
     print_single_domain_summary(&db, &domain)
 }
