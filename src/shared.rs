@@ -255,7 +255,7 @@ pub(crate) fn build_default_resolver() -> TokioResolver {
 // ---- SQL helpers ----
 
 pub(crate) fn sql_string(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "''"))
+    format!("'{}'", value.replace('\0', "").replace('\'', "''"))
 }
 
 pub(crate) fn sql_string_opt(value: Option<&str>) -> String {
