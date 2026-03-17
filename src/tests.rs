@@ -985,45 +985,45 @@ async fn ext_progress_total_set_by_module() {
 
 #[test]
 fn test_cli_scan_quiet_default() {
-    let args = crate::ScanArgs::parse_from(["helvetiscan", "scan"]);
+    let args = crate::ScanArgs::parse_from(["scan"]);
     assert!(!args.quiet, "--quiet should default to false");
 }
 
 #[test]
 fn test_cli_scan_quiet_flag() {
-    let args = crate::ScanArgs::parse_from(["helvetiscan", "scan", "--quiet"]);
+    let args = crate::ScanArgs::parse_from(["scan", "--quiet"]);
     assert!(args.quiet, "--quiet flag should set quiet to true");
 }
 
 #[test]
 fn test_cli_scan_retry_errors_default() {
-    let args = crate::ScanArgs::parse_from(["helvetiscan", "scan"]);
+    let args = crate::ScanArgs::parse_from(["scan"]);
     assert!(args.retry_errors.is_none(), "--retry-errors should default to None");
 }
 
 #[test]
 fn test_cli_scan_retry_errors_value() {
-    let args = crate::ScanArgs::parse_from(["helvetiscan", "scan", "--retry-errors", "timeout"]);
+    let args = crate::ScanArgs::parse_from(["scan", "--retry-errors", "timeout"]);
     assert_eq!(args.retry_errors.as_deref(), Some("timeout"), "--retry-errors should parse the value");
 }
 
 #[test]
 fn test_cli_dns_quiet_and_retry() {
-    let args = crate::DnsArgs::parse_from(["helvetiscan", "dns", "--quiet", "--retry-errors", "io_error"]);
+    let args = crate::DnsArgs::parse_from(["dns", "--quiet", "--retry-errors", "io_error"]);
     assert!(args.quiet, "--quiet should be true");
     assert_eq!(args.retry_errors.as_deref(), Some("io_error"), "--retry-errors should parse");
 }
 
 #[test]
 fn test_cli_subdomains_quiet_and_retry() {
-    let args = crate::SubdomainsArgs::parse_from(["helvetiscan", "subdomains", "--quiet", "--retry-errors", "nxdomain"]);
+    let args = crate::SubdomainsArgs::parse_from(["subdomains", "--quiet", "--retry-errors", "nxdomain"]);
     assert!(args.quiet, "--quiet should be true");
     assert_eq!(args.retry_errors.as_deref(), Some("nxdomain"), "--retry-errors should parse");
 }
 
 #[test]
 fn test_cli_whois_quiet_and_retry() {
-    let args = crate::WhoisArgs::parse_from(["helvetiscan", "whois", "--quiet", "--retry-errors", "throttled"]);
+    let args = crate::WhoisArgs::parse_from(["whois", "--quiet", "--retry-errors", "throttled"]);
     assert!(args.quiet, "--quiet should be true");
     assert_eq!(args.retry_errors.as_deref(), Some("throttled"), "--retry-errors should parse");
 }
