@@ -3,17 +3,13 @@ name = "helvetiscan"
 version = "0.1.0"
 edition = "2021"
 
-[features]
-default = ["bundled-duckdb"]
-bundled-duckdb = ["duckdb/bundled"]
-
 [dependencies]
 anyhow = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 md5 = "0.7"
 libc = "0.2"
 clap = { version = "4", features = ["derive"] }
-duckdb = { version = "1" }
+rusqlite = { version = "0.32", features = ["bundled"] }
 futures-util = "0.3"
 hickory-resolver = "0.25"
 reqwest = { version = "0.12", default-features = false, features = ["brotli", "deflate", "gzip", "hickory-dns", "http2", "rustls-tls", "stream"] }
