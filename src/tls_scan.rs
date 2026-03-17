@@ -71,7 +71,7 @@ pub(crate) async fn cmd_tls(args: TlsArgs) -> Result<()> {
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);
     tokio::spawn(async move {
         crate::shared::wait_for_shutdown_signal().await;
-        eprintln!("\ninterrupt received — flushing batches...");
+
         let _ = shutdown_tx.send(true);
     });
 

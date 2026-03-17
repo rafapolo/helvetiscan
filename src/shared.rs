@@ -461,25 +461,36 @@ pub(crate) fn append_error_log(db_path: &std::path::Path, message: &str) {
 }
 
 pub(crate) async fn wait_for_shutdown_signal() {
+    // On Unix, SIGTERM triggers an immediate soft kill.
+    // SIGINT (Ctrl+C) requires a second press.
     #[cfg(unix)]
     {
         use tokio::signal::unix::{signal, SignalKind};
-        match signal(SignalKind::terminate()) {
+        let sigterm_fired = match signal(SignalKind::terminate()) {
             Ok(mut sigterm) => {
                 tokio::select! {
-                    _ = tokio::signal::ctrl_c() => {},
-                    _ = sigterm.recv() => {},
+                    _ = tokio::signal::ctrl_c() => false,
+                    _ = sigterm.recv() => true,
                 }
             }
             Err(_) => {
                 let _ = tokio::signal::ctrl_c().await;
+                false
             }
+        };
+        if sigterm_fired {
+            return;
         }
     }
     #[cfg(not(unix))]
     {
         let _ = tokio::signal::ctrl_c().await;
     }
+
+    // First Ctrl+C: prompt the user for a second press.
+    eprintln!("\nPress Ctrl+C again to flush and exit...");
+    let _ = tokio::signal::ctrl_c().await;
+    eprintln!("\nflushing batches...");
 }
 
 pub(crate) async fn progress_reporter(
