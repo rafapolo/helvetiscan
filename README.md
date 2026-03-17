@@ -41,7 +41,7 @@ Options:
       --retry-errors <RETRY_ERRORS>  Re-scan domains whose error_kind matches this value (e.g. 'timeout')
 ```
 
-#### The whole HTTP scan runs in less than 4 hours on a 1gbps connection.
+The full HTTP scan completes in under four hours on a 1 Gbps connection.
 
 ---
 
@@ -88,7 +88,7 @@ The final database can answer questions such as:[^1]
 - **Trend detection** — Is DMARC adoption growing? Is DNSSEC adoption stalling?
 - **Threat prediction** — Can new typosquat registrations signal incoming phishing campaigns?
 
-#### → Read our [Infrastructure sovereignty](analyses/analyse_domains.md) questions.
+#### → Read our [Infrastructure sovereignty](RESEARCH.md) questions.
 
 ## Roadmap
 
