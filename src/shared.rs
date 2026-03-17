@@ -522,8 +522,8 @@ pub(crate) async fn multi_progress_reporter(
 
                 // Move cursor up to overwrite previous output
                 if !first {
-                    // Move up n lines
-                    eprint!("\x1B[{}A\r", n);
+                    // Move up n lines (no \r — each line prefix handles its own column reset)
+                    eprint!("\x1B[{}A", n);
                 }
 
                 for (i, (name, progress)) in modules.iter().enumerate() {
@@ -548,8 +548,9 @@ pub(crate) async fn multi_progress_reporter(
                     let bar = progress_bar(done, total, 24);
                     let pct = if total > 0 { done as f64 / total as f64 * 100.0 } else { 0.0 };
 
+                    // \x1B[2K clears the entire line; \r resets to column 0 before writing
                     eprintln!(
-                        "{name:<12} {bar} {:5.1}% ETA {eta_str:<8}  {}={:<8} {}={:<6} {avg_rate:.1}/s",
+                        "\x1B[2K\r{name:<12} {bar} {:5.1}% ETA {eta_str:<8}  {}={:<8} {}={:<6} {avg_rate:.1}/s",
                         pct,
                         progress.ok_label, fmt_num(ok_count),
                         progress.err_label, fmt_num(err_count),

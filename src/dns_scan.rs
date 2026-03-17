@@ -102,6 +102,7 @@ pub(crate) async fn cmd_dns(
         }
     };
 
+    let dispatcher_cancel_rx = shutdown_rx.clone();
     let reader_handle = tokio::spawn({
         let progress = progress.clone();
         async move {
@@ -136,6 +137,7 @@ pub(crate) async fn cmd_dns(
         Semaphore::new(args.concurrency),
         resolver,
         args.concurrency,
+        dispatcher_cancel_rx,
     ));
 
     reader_handle
@@ -165,16 +167,21 @@ pub(crate) async fn dispatcher_loop_dns(
     sem: Semaphore,
     resolver: TokioResolver,
     max_concurrency: usize,
+    mut cancel_rx: tokio::sync::watch::Receiver<bool>,
 ) -> Result<()> {
     let sem = Arc::new(sem);
     let resolver = Arc::new(resolver);
     let mut joinset = JoinSet::<()>::new();
     let mut batch = Vec::with_capacity(DISPATCH_BATCH_SIZE);
+    let mut cancelled = false;
 
-    while let Some(domain) = work_rx.recv().await {
-        if result_tx.is_closed() {
-            break;
-        }
+    loop {
+        let domain = tokio::select! {
+            biased;
+            _ = cancel_rx.changed() => { cancelled = true; break; }
+            maybe = work_rx.recv() => match maybe { Some(d) => d, None => break },
+        };
+        if result_tx.is_closed() { break; }
         batch.push(domain);
         if batch.len() < DISPATCH_BATCH_SIZE {
             continue;
@@ -201,25 +208,28 @@ pub(crate) async fn dispatcher_loop_dns(
         tokio::time::sleep(DISPATCH_BATCH_SLEEP).await;
     }
 
-    for domain in batch.drain(..) {
-        let permit = sem.clone().acquire_owned().await.context("semaphore closed")?;
-        let resolver = resolver.clone();
-        let tx = result_tx.clone();
+    if !cancelled {
+        for domain in batch.drain(..) {
+            let permit = sem.clone().acquire_owned().await.context("semaphore closed")?;
+            let resolver = resolver.clone();
+            let tx = result_tx.clone();
 
-        joinset.spawn(async move {
-            let _permit = permit;
-            let row = fetch_dns_info(&resolver, domain).await;
-            let _ = tx.send(row).await;
-        });
+            joinset.spawn(async move {
+                let _permit = permit;
+                let row = fetch_dns_info(&resolver, domain).await;
+                let _ = tx.send(row).await;
+            });
 
-        while joinset.len() >= max_concurrency {
-            if joinset.join_next().await.is_none() {
-                break;
+            while joinset.len() >= max_concurrency {
+                if joinset.join_next().await.is_none() {
+                    break;
+                }
             }
         }
+
+        while joinset.join_next().await.is_some() {}
     }
 
-    while joinset.join_next().await.is_some() {}
     drop(result_tx);
     Ok(())
 }

@@ -108,6 +108,7 @@ pub(crate) async fn cmd_scan(
         }
     };
 
+    let dispatcher_cancel_rx = shutdown_rx.clone();
     let reader_handle = tokio::spawn({
         let progress = progress.clone();
         async move {
@@ -144,6 +145,7 @@ pub(crate) async fn cmd_scan(
         client,
         resolver,
         args.clone(),
+        dispatcher_cancel_rx,
     ));
 
     reader_handle
@@ -196,6 +198,7 @@ async fn dispatcher_loop(
     client: Client,
     resolver: hickory_resolver::TokioResolver,
     args: ScanArgs,
+    mut cancel_rx: tokio::sync::watch::Receiver<bool>,
 ) -> Result<()> {
     let sem = Arc::new(sem);
     let client = Arc::new(client);
@@ -203,11 +206,15 @@ async fn dispatcher_loop(
     let mut joinset = JoinSet::<()>::new();
     let max_concurrency = args.concurrency;
     let mut batch = Vec::with_capacity(DISPATCH_BATCH_SIZE);
+    let mut cancelled = false;
 
-    while let Some(domain) = work_rx.recv().await {
-        if result_tx.is_closed() {
-            break;
-        }
+    loop {
+        let domain = tokio::select! {
+            biased;
+            _ = cancel_rx.changed() => { cancelled = true; break; }
+            maybe = work_rx.recv() => match maybe { Some(d) => d, None => break },
+        };
+        if result_tx.is_closed() { break; }
         batch.push(domain);
         if batch.len() < DISPATCH_BATCH_SIZE {
             continue;
@@ -244,35 +251,38 @@ async fn dispatcher_loop(
         tokio::time::sleep(DISPATCH_BATCH_SLEEP).await;
     }
 
-    for domain in batch.drain(..) {
-        let permit = sem
-            .clone()
-            .acquire_owned()
-            .await
-            .context("semaphore closed")?;
+    if !cancelled {
+        for domain in batch.drain(..) {
+            let permit = sem
+                .clone()
+                .acquire_owned()
+                .await
+                .context("semaphore closed")?;
 
-        let client = client.clone();
-        let resolver = resolver.clone();
-        let tx = result_tx.clone();
-        let args_task = args.clone();
+            let client = client.clone();
+            let resolver = resolver.clone();
+            let tx = result_tx.clone();
+            let args_task = args.clone();
 
-        joinset.spawn(async move {
-            let _permit = permit;
-            if tx.is_closed() {
-                return;
-            }
-            let result = fetch_domain(&client, &resolver, domain, &args_task).await;
-            let _ = tx.send(result).await;
-        });
+            joinset.spawn(async move {
+                let _permit = permit;
+                if tx.is_closed() {
+                    return;
+                }
+                let result = fetch_domain(&client, &resolver, domain, &args_task).await;
+                let _ = tx.send(result).await;
+            });
 
-        while joinset.len() >= max_concurrency {
-            if joinset.join_next().await.is_none() {
-                break;
+            while joinset.len() >= max_concurrency {
+                if joinset.join_next().await.is_none() {
+                    break;
+                }
             }
         }
+
+        while joinset.join_next().await.is_some() {}
     }
 
-    while joinset.join_next().await.is_some() {}
     drop(result_tx);
     Ok(())
 }

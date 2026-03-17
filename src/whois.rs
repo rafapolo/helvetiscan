@@ -80,6 +80,7 @@ pub(crate) async fn cmd_whois(
         }
     };
 
+    let dispatcher_cancel_rx = shutdown_rx.clone();
     let reader_handle = tokio::spawn({
         let progress = progress.clone();
         async move {
@@ -114,6 +115,7 @@ pub(crate) async fn cmd_whois(
         Semaphore::new(args.concurrency),
         args.connect_timeout,
         args.concurrency,
+        dispatcher_cancel_rx,
     ));
 
     reader_handle.await.context("whois reader task panicked")?.context("whois reader failed")?;
@@ -134,13 +136,20 @@ async fn dispatcher_loop_whois(
     sem: Semaphore,
     connect_timeout: Duration,
     max_concurrency: usize,
+    mut cancel_rx: tokio::sync::watch::Receiver<bool>,
 ) -> Result<()> {
     let sem = Arc::new(sem);
     let consecutive_misses = Arc::new(AtomicU64::new(0));
     let mut joinset = JoinSet::<()>::new();
     let mut batch = Vec::with_capacity(DISPATCH_BATCH_SIZE);
+    let mut cancelled = false;
 
-    while let Some(domain) = work_rx.recv().await {
+    loop {
+        let domain = tokio::select! {
+            biased;
+            _ = cancel_rx.changed() => { cancelled = true; break; }
+            maybe = work_rx.recv() => match maybe { Some(d) => d, None => break },
+        };
         if result_tx.is_closed() { break; }
         batch.push(domain);
         if batch.len() < DISPATCH_BATCH_SIZE { continue; }
@@ -172,32 +181,36 @@ async fn dispatcher_loop_whois(
         tokio::time::sleep(DISPATCH_BATCH_SLEEP).await;
     }
 
-    for domain in batch.drain(..) {
-        let backoff = backoff_duration(&consecutive_misses);
-        if !backoff.is_zero() {
-            tokio::time::sleep(backoff).await;
-        }
-        let permit = sem.clone().acquire_owned().await.context("semaphore closed")?;
-        let tx = result_tx.clone();
-        let misses = consecutive_misses.clone();
-        joinset.spawn(async move {
-            let _permit = permit;
-            let row = fetch_whois(domain, connect_timeout).await;
-            if row.connected {
-                if row.registrar.is_some() {
-                    misses.store(0, Ordering::Relaxed);
-                } else {
-                    misses.fetch_add(1, Ordering::Relaxed);
-                }
-                let _ = tx.send(row).await;
+    if !cancelled {
+        for domain in batch.drain(..) {
+            let backoff = backoff_duration(&consecutive_misses);
+            if !backoff.is_zero() {
+                tokio::time::sleep(backoff).await;
             }
-        });
-        while joinset.len() >= max_concurrency {
-            if joinset.join_next().await.is_none() { break; }
+            let permit = sem.clone().acquire_owned().await.context("semaphore closed")?;
+            let tx = result_tx.clone();
+            let misses = consecutive_misses.clone();
+            joinset.spawn(async move {
+                let _permit = permit;
+                let row = fetch_whois(domain, connect_timeout).await;
+                if row.connected {
+                    if row.registrar.is_some() {
+                        misses.store(0, Ordering::Relaxed);
+                    } else {
+                        misses.fetch_add(1, Ordering::Relaxed);
+                    }
+                    let _ = tx.send(row).await;
+                }
+            });
+            while joinset.len() >= max_concurrency {
+                if joinset.join_next().await.is_none() { break; }
+            }
         }
+
+        while joinset.join_next().await.is_some() {}
     }
 
-    while joinset.join_next().await.is_some() {}
+    drop(result_tx);
     Ok(())
 }
 
