@@ -818,9 +818,7 @@ fn print_single_domain_summary(db: &PathBuf, domain: &str) -> Result<()> {
     rows.push(tls_row);
 
     let ports_row = conn.query_row(
-        "SELECT SUM(CASE WHEN open = 1 THEN 1 ELSE 0 END),
-                GROUP_CONCAT(port ORDER BY port) FILTER (WHERE open = 1)
-         FROM ports_info WHERE domain = ?1",
+        "SELECT COUNT(*), GROUP_CONCAT(port ORDER BY port) FROM ports_info WHERE domain = ?1",
         rusqlite::params![domain],
         |r| {
             let open_count: i64 = r.get::<_, Option<i64>>(0)?.unwrap_or(0);

@@ -616,8 +616,8 @@ fn risk_score_view_flags_and_score() {
 
     // Open port 3306 → exposed_db_port should be true
     conn.execute_batch("
-        INSERT INTO ports_info (domain, port, service, open)
-        VALUES ('probe.ch', 3306, 'mysql', 1);
+        INSERT INTO ports_info (domain, port, service)
+        VALUES ('probe.ch', 3306, 'mysql');
     ").unwrap();
 
     let exposed_db_port: bool = conn

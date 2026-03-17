@@ -26,9 +26,7 @@ pub(crate) fn load_ports_targets(
         return Ok(vec![sanitize_domain(domain).ok_or_else(|| anyhow!("invalid domain: {domain}"))?]);
     }
     let mut stmt = conn.prepare(
-        "SELECT d.domain FROM domains d
-         WHERE NOT EXISTS (SELECT 1 FROM ports_info p WHERE p.domain = d.domain)
-         ORDER BY d.domain"
+        "SELECT domain FROM domains WHERE ports_scanned_at IS NULL ORDER BY domain"
     )?;
     let domains: Vec<String> = stmt
         .query_map([], |row| row.get(0))?
@@ -222,11 +220,28 @@ async fn dispatcher_loop_ports(
     Ok(())
 }
 
+fn is_public_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(a) => {
+            let o = a.octets();
+            !a.is_loopback()
+                && !a.is_private()
+                && !a.is_link_local()
+                && !a.is_broadcast()
+                && o[0] != 0
+        }
+        IpAddr::V6(a) => !a.is_loopback() && !a.is_unspecified(),
+    }
+}
+
 async fn fetch_ports_info(resolver: &TokioResolver, domain: String, args: &PortsArgs) -> PortsRow {
     let ip = match resolve_first_ip(resolver, &domain).await {
         Ok(ip) => ip,
         Err(_) => return PortsRow { domain, ip: None, results: vec![] },
     };
+    if !is_public_ip(ip) {
+        return PortsRow { domain, ip: Some(ip.to_string()), results: vec![] };
+    }
 
     let timeout = args.connect_timeout;
     let probe_results = futures_util::future::join_all(
@@ -258,6 +273,7 @@ async fn fetch_ports_info(resolver: &TokioResolver, domain: String, args: &Ports
         }
     }
 
+    results.retain(|r| r.open);
     PortsRow { domain, ip: Some(ip.to_string()), results }
 }
 
@@ -323,26 +339,28 @@ fn writer_loop_ports(
 fn flush_ports_batch(conn: &rusqlite::Connection, batch: &mut Vec<PortsRow>) -> Result<()> {
     conn.execute_batch("BEGIN")?;
     {
-        let mut stmt = conn.prepare(
-            "INSERT INTO ports_info (domain, port, service, open, banner, ip, scanned_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now'))
+        let mut port_stmt = conn.prepare(
+            "INSERT INTO ports_info (domain, port, service, banner, ip, scanned_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'))
              ON CONFLICT (domain, port) DO UPDATE SET
-                open       = excluded.open,
                 banner     = excluded.banner,
                 ip         = excluded.ip,
                 scanned_at = excluded.scanned_at",
         )?;
+        let mut domain_stmt = conn.prepare(
+            "UPDATE domains SET ports_scanned_at = datetime('now') WHERE domain = ?1",
+        )?;
         for row in batch.iter() {
             for result in row.results.iter() {
-                stmt.execute(rusqlite::params![
+                port_stmt.execute(rusqlite::params![
                     row.domain.as_str(),
                     result.port as i32,
                     result.service,
-                    result.open,
                     result.banner.as_deref(),
                     row.ip.as_deref(),
                 ])?;
             }
+            domain_stmt.execute(rusqlite::params![row.domain.as_str()])?;
         }
     }
     conn.execute_batch("COMMIT")?;

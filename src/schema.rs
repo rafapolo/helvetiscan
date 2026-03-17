@@ -189,6 +189,7 @@ pub(crate) fn ensure_schema(conn: &rusqlite::Connection) -> Result<()> {
     ",
     )?;
     migrate_ports_info(conn)?;
+    migrate_ports_open_only(conn)?;
     migrate_domains_country_code(conn)?;
 
     conn.execute_batch("DROP VIEW IF EXISTS risk_score;")?;
@@ -209,12 +210,12 @@ pub(crate) fn ensure_schema(conn: &rusqlite::Connection) -> Result<()> {
             (w.expires_at < date('now', '+30 days'))                                    AS domain_expiring,
             EXISTS(
                 SELECT 1 FROM ports_info p
-                WHERE p.domain = d.domain AND p.open = 1
+                WHERE p.domain = d.domain
                   AND p.port IN (3306,5432,6379,9200,27017,11211,2375)
             )                                                                            AS exposed_db_port,
             EXISTS(
                 SELECT 1 FROM ports_info p
-                WHERE p.domain = d.domain AND p.open = 1
+                WHERE p.domain = d.domain
                   AND p.port IN (445,23,3389,5900)
             )                                                                            AS exposed_risky_port,
             EXISTS(SELECT 1 FROM cve_matches m WHERE m.domain = d.domain AND m.severity = 'CRITICAL') AS has_critical_cve,
@@ -242,12 +243,12 @@ pub(crate) fn ensure_schema(conn: &rusqlite::Connection) -> Result<()> {
                 - CASE WHEN w.expires_at < date('now', '+30 days')                        THEN  5 ELSE 0 END
                 - CASE WHEN EXISTS(
                       SELECT 1 FROM ports_info p
-                      WHERE p.domain = d.domain AND p.open = 1
+                      WHERE p.domain = d.domain
                         AND p.port IN (3306,5432,6379,9200,27017,11211,2375)
                   )                                                                        THEN 10 ELSE 0 END
                 - CASE WHEN EXISTS(
                       SELECT 1 FROM ports_info p
-                      WHERE p.domain = d.domain AND p.open = 1
+                      WHERE p.domain = d.domain
                         AND p.port IN (445,23,3389,5900)
                   )                                                                        THEN 10 ELSE 0 END
                 - CASE WHEN EXISTS(SELECT 1 FROM cve_matches m WHERE m.domain = d.domain AND m.severity = 'CRITICAL') THEN 15 ELSE 0 END
@@ -348,6 +349,53 @@ pub(crate) fn migrate_ports_info(conn: &rusqlite::Connection) -> Result<()> {
         conn.execute_batch(&backfill)?;
         conn.execute_batch("DROP TABLE IF EXISTS ports_info_legacy;")?;
     }
+    Ok(())
+}
+
+pub(crate) fn migrate_ports_open_only(conn: &rusqlite::Connection) -> Result<()> {
+    // Idempotency check: already migrated if ports_scanned_at exists on domains
+    let already_done: bool = conn.query_row(
+        "SELECT COUNT(*) > 0 FROM pragma_table_info('domains') WHERE name = 'ports_scanned_at'",
+        [],
+        |r| r.get(0),
+    ).unwrap_or(false);
+    if already_done {
+        return Ok(());
+    }
+
+    // Add ports_scanned_at to domains; backfill from existing ports_info rows
+    conn.execute_batch("
+        ALTER TABLE domains ADD COLUMN ports_scanned_at TEXT;
+        UPDATE domains
+           SET ports_scanned_at = (SELECT MAX(scanned_at) FROM ports_info WHERE ports_info.domain = domains.domain)
+         WHERE EXISTS (SELECT 1 FROM ports_info WHERE ports_info.domain = domains.domain);
+    ")?;
+
+    // Drop open column: recreate ports_info keeping only open rows
+    let has_open: bool = conn.query_row(
+        "SELECT COUNT(*) > 0 FROM pragma_table_info('ports_info') WHERE name = 'open'",
+        [],
+        |r| r.get(0),
+    ).unwrap_or(false);
+
+    if has_open {
+        conn.execute_batch("
+            DELETE FROM ports_info WHERE open = 0;
+            CREATE TABLE ports_info_new (
+                domain     TEXT NOT NULL,
+                port       INTEGER NOT NULL,
+                service    TEXT,
+                banner     TEXT,
+                ip         TEXT,
+                scanned_at TEXT,
+                PRIMARY KEY (domain, port)
+            );
+            INSERT INTO ports_info_new SELECT domain, port, service, banner, ip, scanned_at FROM ports_info;
+            DROP TABLE ports_info;
+            ALTER TABLE ports_info_new RENAME TO ports_info;
+        ")?;
+    }
+
     Ok(())
 }
 
