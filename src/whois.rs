@@ -4,8 +4,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
-use tokio::sync::{mpsc, Semaphore};
+use tokio::sync::{mpsc, OnceCell, Semaphore};
 use tokio::task::JoinSet;
+
+static WHOIS_ADDR: OnceCell<std::net::SocketAddr> = OnceCell::const_new();
 
 use crate::shared::{
     progress_reporter, sanitize_domain,
@@ -98,7 +100,7 @@ pub(crate) async fn cmd_whois(
         }
     });
 
-    let progress_handle = if args.no_progress || !own_progress {
+    let progress_handle = if args.quiet || !own_progress {
         drop(done_rx);
         None
     } else {
@@ -154,11 +156,12 @@ async fn dispatcher_loop_whois(
         batch.push(domain);
         if batch.len() < DISPATCH_BATCH_SIZE { continue; }
 
+        let backoff = backoff_duration(&consecutive_misses);
+        if !backoff.is_zero() {
+            tokio::time::sleep(backoff).await;
+        }
+
         for domain in batch.drain(..) {
-            let backoff = backoff_duration(&consecutive_misses);
-            if !backoff.is_zero() {
-                tokio::time::sleep(backoff).await;
-            }
             let permit = sem.clone().acquire_owned().await.context("semaphore closed")?;
             let tx = result_tx.clone();
             let misses = consecutive_misses.clone();
@@ -171,8 +174,10 @@ async fn dispatcher_loop_whois(
                     } else {
                         misses.fetch_add(1, Ordering::Relaxed);
                     }
-                    let _ = tx.send(row).await;
+                } else {
+                    misses.fetch_add(1, Ordering::Relaxed);
                 }
+                let _ = tx.send(row).await;
             });
             while joinset.len() >= max_concurrency {
                 if joinset.join_next().await.is_none() { break; }
@@ -182,11 +187,12 @@ async fn dispatcher_loop_whois(
     }
 
     if !cancelled {
+        let backoff = backoff_duration(&consecutive_misses);
+        if !backoff.is_zero() {
+            tokio::time::sleep(backoff).await;
+        }
+
         for domain in batch.drain(..) {
-            let backoff = backoff_duration(&consecutive_misses);
-            if !backoff.is_zero() {
-                tokio::time::sleep(backoff).await;
-            }
             let permit = sem.clone().acquire_owned().await.context("semaphore closed")?;
             let tx = result_tx.clone();
             let misses = consecutive_misses.clone();
@@ -199,8 +205,10 @@ async fn dispatcher_loop_whois(
                     } else {
                         misses.fetch_add(1, Ordering::Relaxed);
                     }
-                    let _ = tx.send(row).await;
+                } else {
+                    misses.fetch_add(1, Ordering::Relaxed);
                 }
+                let _ = tx.send(row).await;
             });
             while joinset.len() >= max_concurrency {
                 if joinset.join_next().await.is_none() { break; }
@@ -231,15 +239,21 @@ async fn fetch_whois(domain: String, connect_timeout: Duration) -> WhoisRow {
         connected: false,
     };
 
-    // Resolve whois.nic.ch and prefer IPv4 — IPv6 is often unreachable.
-    let addrs: Vec<std::net::SocketAddr> =
-        match tokio::time::timeout(connect_timeout, tokio::net::lookup_host("whois.nic.ch:43")).await {
-            Ok(Ok(iter)) => iter.collect(),
-            _ => return row,
-        };
-    let addr = match addrs.iter().find(|a| a.is_ipv4()).or_else(|| addrs.first()) {
-        Some(a) => *a,
-        None => return row,
+    let addr = match WHOIS_ADDR.get_or_try_init(|| async {
+        let addrs: Vec<std::net::SocketAddr> =
+            tokio::net::lookup_host("whois.nic.ch:43")
+                .await
+                .ok()
+                .ok_or_else(|| anyhow!("DNS lookup failed"))?
+                .collect();
+        addrs.iter()
+            .find(|a| a.is_ipv4())
+            .or_else(|| addrs.first())
+            .copied()
+            .ok_or_else(|| anyhow!("no address found"))
+    }).await {
+        Ok(a) => *a,
+        Err(_) => return row,
     };
     let stream = match tokio::time::timeout(connect_timeout, tokio::net::TcpStream::connect(addr)).await {
         Ok(Ok(s)) => s,
@@ -310,7 +324,12 @@ pub(crate) fn parse_whois_response(row: &mut WhoisRow, lines: &[String]) {
         } else if lc.starts_with("dnssec:") {
             if let Some(val) = next_value(i, "dnssec:".len()) {
                 let lc = val.to_ascii_lowercase();
-                row.dnssec_delegated = Some(lc.starts_with("signed delegation"));
+                row.dnssec_delegated = Some(
+                    lc == "y"
+                        || lc.starts_with("yes")
+                        || lc.starts_with("signed delegation")
+                        || lc.starts_with("signed"),
+                );
             }
         }
     }
@@ -328,13 +347,13 @@ fn writer_loop_whois(
 
     let mut batch = Vec::with_capacity(batch_size);
     while let Some(row) = result_rx.blocking_recv() {
+        progress.completed.fetch_add(1, Ordering::Relaxed);
         if row.registrar.is_some() {
             progress.ok.fetch_add(1, Ordering::Relaxed);
         } else {
             progress.errors.fetch_add(1, Ordering::Relaxed);
         }
         batch.push(row);
-        progress.completed.fetch_add(1, Ordering::Relaxed);
         if batch.len() >= batch_size {
             if let Err(e) = flush_whois_batch(&conn, &mut batch) {
                 crate::shared::append_error_log(&db_path, &format!("whois flush_batch: {e:#}"));
@@ -460,6 +479,15 @@ mod tests {
     }
 
     #[test]
+    fn parse_dnssec_y_n_nic_ch_format() {
+        // nic.ch uses bare "Y" / "N" with no space
+        let row_y = parse(&["DNSSEC:Y"]);
+        assert_eq!(row_y.dnssec_delegated, Some(true));
+        let row_n = parse(&["DNSSEC:N"]);
+        assert_eq!(row_n.dnssec_delegated, Some(false));
+    }
+
+    #[test]
     fn parse_empty_response_leaves_all_none() {
         let row = parse(&[]);
         assert!(row.registrar.is_none());
@@ -472,6 +500,87 @@ mod tests {
     #[test]
     fn connected_flag_false_by_default() {
         assert!(!make_row("example.ch").connected);
+    }
+
+    #[tokio::test]
+    async fn test_fetch_whois_migros_live() {
+        let timeout = std::time::Duration::from_secs(10);
+        let row = fetch_whois("migros.ch".into(), timeout).await;
+        println!("connected:        {}", row.connected);
+        println!("registrar:        {:?}", row.registrar);
+        println!("whois_created:    {:?}", row.whois_created);
+        println!("expires_at:       {:?}", row.expires_at);
+        println!("status:           {:?}", row.status);
+        println!("dnssec_delegated: {:?}", row.dnssec_delegated);
+        assert!(row.connected, "failed to connect to whois.nic.ch");
+        assert!(row.registrar.is_some(), "registrar missing — parser broken for multi-line format");
+    }
+
+    fn make_progress() -> Arc<crate::shared::Progress> {
+        Arc::new(crate::shared::Progress::new(0, "ok", "err"))
+    }
+
+    /// Sets up a file-backed SQLite db in the system temp dir with the given domains pre-inserted,
+    /// returning its path. The file is named after the test using `label` for uniqueness.
+    fn tmp_db(label: &str, domains: &[&str]) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!("helvetiscan_test_{label}.db"));
+        let _ = std::fs::remove_file(&path);
+        let c = crate::shared::open_db(&path).unwrap();
+        crate::schema::ensure_schema(&c).unwrap();
+        for d in domains {
+            c.execute("INSERT OR IGNORE INTO domains (domain) VALUES (?1)", [d]).unwrap();
+        }
+        path
+    }
+
+    #[test]
+    fn progress_ok_incremented_for_rows_with_registrar() {
+        let path = tmp_db("progress_ok", &["a.ch", "b.ch", "c.ch"]);
+        let (tx, rx) = tokio::sync::mpsc::channel::<WhoisRow>(16);
+        let (done_tx, _done_rx) = tokio::sync::oneshot::channel();
+        let progress = make_progress();
+        let p = Arc::clone(&progress);
+
+        for (domain, registrar) in [("a.ch", Some("Reg A")), ("b.ch", None), ("c.ch", Some("Reg C"))] {
+            tx.blocking_send(WhoisRow {
+                domain: domain.into(),
+                registrar: registrar.map(|s| s.to_string()),
+                whois_created: None, expires_at: None, status: None, dnssec_delegated: None, connected: registrar.is_some(),
+            }).unwrap();
+        }
+        drop(tx);
+
+        writer_loop_whois(path, rx, p, done_tx, 100).unwrap();
+
+        assert_eq!(progress.completed.load(Ordering::Relaxed), 3);
+        assert_eq!(progress.ok.load(Ordering::Relaxed), 2, "two rows have a registrar");
+        assert_eq!(progress.errors.load(Ordering::Relaxed), 1, "one row has no registrar");
+    }
+
+    #[test]
+    fn progress_counters_updated_across_full_batch_boundary() {
+        // batch_size=2 forces a mid-stream flush before the final row arrives;
+        // counters must reflect all rows, not just the final partial batch.
+        let path = tmp_db("progress_batch", &["d1.ch", "d2.ch", "d3.ch"]);
+        let (tx, rx) = tokio::sync::mpsc::channel::<WhoisRow>(16);
+        let (done_tx, _done_rx) = tokio::sync::oneshot::channel();
+        let progress = make_progress();
+        let p = Arc::clone(&progress);
+
+        for (domain, registrar) in [("d1.ch", Some("R1")), ("d2.ch", Some("R2")), ("d3.ch", None)] {
+            tx.blocking_send(WhoisRow {
+                domain: domain.into(),
+                registrar: registrar.map(|s| s.to_string()),
+                whois_created: None, expires_at: None, status: None, dnssec_delegated: None, connected: registrar.is_some(),
+            }).unwrap();
+        }
+        drop(tx);
+
+        writer_loop_whois(path, rx, p, done_tx, 2).unwrap();
+
+        assert_eq!(progress.completed.load(Ordering::Relaxed), 3);
+        assert_eq!(progress.ok.load(Ordering::Relaxed), 2);
+        assert_eq!(progress.errors.load(Ordering::Relaxed), 1);
     }
 
     #[test]
