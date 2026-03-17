@@ -5,220 +5,221 @@ use anyhow::{anyhow, Context, Result};
 use crate::shared::sanitize_domain;
 use crate::InitArgs;
 
-pub(crate) fn ensure_schema(conn: &duckdb::Connection) -> Result<()> {
+pub(crate) fn ensure_schema(conn: &rusqlite::Connection) -> Result<()> {
     conn.execute_batch(
         "
         CREATE TABLE IF NOT EXISTS domains (
-            domain      VARCHAR PRIMARY KEY,
-            status      VARCHAR,
-            final_url   VARCHAR,
-            status_code INTEGER,
-            title       VARCHAR,
-            body_hash   VARCHAR,
-            error_kind  VARCHAR,
-            elapsed_ms  BIGINT,
-            ip          VARCHAR,
-            updated_at  TIMESTAMP
+            domain           TEXT PRIMARY KEY,
+            status           TEXT,
+            final_url        TEXT,
+            status_code      INTEGER,
+            title            TEXT,
+            body_hash        TEXT,
+            error_kind       TEXT,
+            elapsed_ms       INTEGER,
+            ip               TEXT,
+            updated_at       TEXT,
+            server           TEXT,
+            powered_by       TEXT,
+            whois_registrar  TEXT,
+            whois_created    TEXT,
+            redirect_chain   TEXT,
+            cms              TEXT,
+            sovereignty_score INTEGER,
+            country_code     TEXT
         );
-        ALTER TABLE domains ADD COLUMN IF NOT EXISTS status             VARCHAR;
-        ALTER TABLE domains ADD COLUMN IF NOT EXISTS server             VARCHAR;
-        ALTER TABLE domains ADD COLUMN IF NOT EXISTS powered_by         VARCHAR;
-        ALTER TABLE domains ADD COLUMN IF NOT EXISTS whois_registrar    VARCHAR;
-        ALTER TABLE domains ADD COLUMN IF NOT EXISTS whois_created      DATE;
-        ALTER TABLE domains ADD COLUMN IF NOT EXISTS redirect_chain     VARCHAR[];
-        ALTER TABLE domains ADD COLUMN IF NOT EXISTS cms                VARCHAR;
-        ALTER TABLE domains ADD COLUMN IF NOT EXISTS sovereignty_score  INTEGER;
 
         CREATE TABLE IF NOT EXISTS dns_info (
-            domain      VARCHAR PRIMARY KEY,
-            status      VARCHAR,
-            error_kind  VARCHAR,
-            ns          VARCHAR[],
-            mx          VARCHAR[],
-            cname       VARCHAR,
-            a           VARCHAR[],
-            aaaa        VARCHAR[],
-            txt_spf     VARCHAR,
-            txt_dmarc   VARCHAR,
-            ttl         INTEGER,
-            ptr         VARCHAR,
-            dnssec      BOOLEAN,
-            resolved_at TIMESTAMP
+            domain        TEXT PRIMARY KEY,
+            status        TEXT,
+            error_kind    TEXT,
+            ns            TEXT,
+            mx            TEXT,
+            cname         TEXT,
+            a             TEXT,
+            aaaa          TEXT,
+            txt_spf       TEXT,
+            txt_dmarc     TEXT,
+            ttl           INTEGER,
+            ptr           TEXT,
+            dnssec        INTEGER,
+            dnssec_signed INTEGER,
+            dnssec_valid  INTEGER,
+            caa           TEXT,
+            wildcard      INTEGER,
+            txt_all       TEXT,
+            resolved_at   TEXT
         );
-
-        ALTER TABLE dns_info ADD COLUMN IF NOT EXISTS dnssec_signed BOOLEAN;
-        ALTER TABLE dns_info ADD COLUMN IF NOT EXISTS dnssec_valid  BOOLEAN;
-        ALTER TABLE dns_info ADD COLUMN IF NOT EXISTS caa           VARCHAR[];
-        ALTER TABLE dns_info ADD COLUMN IF NOT EXISTS wildcard      BOOLEAN;
-        ALTER TABLE dns_info ADD COLUMN IF NOT EXISTS txt_all       VARCHAR[];
 
         CREATE TABLE IF NOT EXISTS tls_info (
-            domain         VARCHAR PRIMARY KEY,
-            status         VARCHAR,
-            error_kind     VARCHAR,
-            cert_issuer    VARCHAR,
-            cert_subject   VARCHAR,
-            valid_from     DATE,
-            valid_to       DATE,
-            days_remaining INTEGER,
-            expired        BOOLEAN,
-            self_signed    BOOLEAN,
-            tls_version    VARCHAR,
-            cipher         VARCHAR,
-            scanned_at     TIMESTAMP
+            domain              TEXT PRIMARY KEY,
+            status              TEXT,
+            error_kind          TEXT,
+            cert_issuer         TEXT,
+            cert_subject        TEXT,
+            valid_from          TEXT,
+            valid_to            TEXT,
+            days_remaining      INTEGER,
+            expired             INTEGER,
+            self_signed         INTEGER,
+            tls_version         TEXT,
+            cipher              TEXT,
+            san                 TEXT,
+            key_algorithm       TEXT,
+            key_size            INTEGER,
+            signature_algorithm TEXT,
+            cert_fingerprint    TEXT,
+            ct_logged           INTEGER,
+            ocsp_must_staple    INTEGER,
+            scanned_at          TEXT
         );
 
-        ALTER TABLE tls_info ADD COLUMN IF NOT EXISTS san                  VARCHAR[];
-        ALTER TABLE tls_info ADD COLUMN IF NOT EXISTS key_algorithm        VARCHAR;
-        ALTER TABLE tls_info ADD COLUMN IF NOT EXISTS key_size             INTEGER;
-        ALTER TABLE tls_info ADD COLUMN IF NOT EXISTS signature_algorithm  VARCHAR;
-        ALTER TABLE tls_info ADD COLUMN IF NOT EXISTS cert_fingerprint     VARCHAR;
-        ALTER TABLE tls_info ADD COLUMN IF NOT EXISTS ct_logged            BOOLEAN;
-        ALTER TABLE tls_info ADD COLUMN IF NOT EXISTS ocsp_must_staple     BOOLEAN;
-
         CREATE TABLE IF NOT EXISTS subdomains (
-            domain        VARCHAR,
-            subdomain     VARCHAR,
-            source        VARCHAR,
-            discovered_at TIMESTAMP,
+            domain        TEXT,
+            subdomain     TEXT,
+            source        TEXT,
+            discovered_at TEXT,
             PRIMARY KEY (domain, subdomain)
         );
 
         CREATE TABLE IF NOT EXISTS whois_info (
-            domain           VARCHAR PRIMARY KEY,
-            registrar        VARCHAR,
-            whois_created    DATE,
-            expires_at       DATE,
-            status           VARCHAR,
-            dnssec_delegated BOOLEAN,
-            queried_at       TIMESTAMP
+            domain           TEXT PRIMARY KEY,
+            registrar        TEXT,
+            whois_created    TEXT,
+            expires_at       TEXT,
+            status           TEXT,
+            dnssec_delegated INTEGER,
+            queried_at       TEXT
         );
 
         CREATE TABLE IF NOT EXISTS http_headers (
-            domain                 VARCHAR PRIMARY KEY,
-            hsts                   VARCHAR,
-            csp                    VARCHAR,
-            x_frame_options        VARCHAR,
-            x_content_type_options VARCHAR,
-            cors_origin            VARCHAR,
-            referrer_policy        VARCHAR,
-            permissions_policy     VARCHAR,
-            scanned_at             TIMESTAMP
+            domain                 TEXT PRIMARY KEY,
+            hsts                   TEXT,
+            csp                    TEXT,
+            x_frame_options        TEXT,
+            x_content_type_options TEXT,
+            cors_origin            TEXT,
+            referrer_policy        TEXT,
+            permissions_policy     TEXT,
+            scanned_at             TEXT
         );
 
         CREATE TABLE IF NOT EXISTS cve_catalog (
-            cve_id        VARCHAR PRIMARY KEY,
-            technology    VARCHAR NOT NULL,
-            affected_from VARCHAR,
-            affected_to   VARCHAR,
-            severity      VARCHAR,
-            cvss_score    DOUBLE,
-            in_kev        BOOLEAN DEFAULT FALSE,
-            summary       VARCHAR,
-            published_at  DATE
+            cve_id        TEXT PRIMARY KEY,
+            technology    TEXT NOT NULL,
+            affected_from TEXT,
+            affected_to   TEXT,
+            severity      TEXT,
+            cvss_score    REAL,
+            in_kev        INTEGER DEFAULT 0,
+            summary       TEXT,
+            published_at  TEXT
         );
 
         CREATE TABLE IF NOT EXISTS cve_matches (
-            domain        VARCHAR NOT NULL,
-            technology    VARCHAR NOT NULL,
-            version       VARCHAR,
-            cve_id        VARCHAR NOT NULL,
-            severity      VARCHAR,
-            cvss_score    DOUBLE,
-            in_kev        BOOLEAN,
-            published_at  DATE,
-            matched_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            domain        TEXT NOT NULL,
+            technology    TEXT NOT NULL,
+            version       TEXT,
+            cve_id        TEXT NOT NULL,
+            severity      TEXT,
+            cvss_score    REAL,
+            in_kev        INTEGER,
+            published_at  TEXT,
+            matched_at    TEXT DEFAULT (datetime('now')),
             PRIMARY KEY (domain, cve_id)
         );
 
         CREATE TABLE IF NOT EXISTS email_security (
-            domain                 VARCHAR PRIMARY KEY,
-            spf_present            BOOLEAN,
-            spf_policy             VARCHAR,
-            spf_too_permissive     BOOLEAN,
+            domain                 TEXT PRIMARY KEY,
+            spf_present            INTEGER,
+            spf_policy             TEXT,
+            spf_too_permissive     INTEGER,
             spf_dns_lookups        INTEGER,
-            spf_over_limit         BOOLEAN,
-            dmarc_present          BOOLEAN,
-            dmarc_policy           VARCHAR,
-            dmarc_subdomain_policy VARCHAR,
-            dmarc_has_reporting    BOOLEAN,
+            spf_over_limit         INTEGER,
+            dmarc_present          INTEGER,
+            dmarc_policy           TEXT,
+            dmarc_subdomain_policy TEXT,
+            dmarc_has_reporting    INTEGER,
             dmarc_pct              INTEGER,
-            dkim_default           BOOLEAN,
-            dkim_google            BOOLEAN,
-            dkim_found             BOOLEAN,
-            scanned_at             TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            dkim_default           INTEGER,
+            dkim_google            INTEGER,
+            dkim_found             INTEGER,
+            scanned_at             TEXT DEFAULT (datetime('now'))
         );
 
         CREATE TABLE IF NOT EXISTS domain_classification (
-            domain        VARCHAR PRIMARY KEY,
-            sector        VARCHAR,
-            subsector     VARCHAR,
-            source        VARCHAR,
-            confidence    DOUBLE,
-            classified_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            domain        TEXT PRIMARY KEY,
+            sector        TEXT,
+            subsector     TEXT,
+            source        TEXT,
+            confidence    REAL,
+            classified_at TEXT DEFAULT (datetime('now'))
         );
 
         CREATE TABLE IF NOT EXISTS sector_benchmarks (
-            sector        VARCHAR NOT NULL,
-            metric        VARCHAR NOT NULL,
+            sector        TEXT NOT NULL,
+            metric        TEXT NOT NULL,
             domain_count  INTEGER,
-            mean_value    DOUBLE,
-            median_value  DOUBLE,
-            p25_value     DOUBLE,
-            p75_value     DOUBLE,
-            min_value     DOUBLE,
-            max_value     DOUBLE,
-            computed_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            mean_value    REAL,
+            median_value  REAL,
+            p25_value     REAL,
+            p75_value     REAL,
+            min_value     REAL,
+            max_value     REAL,
+            computed_at   TEXT DEFAULT (datetime('now')),
             PRIMARY KEY (sector, metric)
         );
 
         CREATE TABLE IF NOT EXISTS ns_staging (
-            domain   VARCHAR NOT NULL,
-            operator VARCHAR NOT NULL,
+            domain   TEXT NOT NULL,
+            operator TEXT NOT NULL,
             PRIMARY KEY (domain, operator)
         );
 
         CREATE TABLE IF NOT EXISTS ns_operators (
-            operator     VARCHAR NOT NULL PRIMARY KEY,
-            sample_ns    VARCHAR,
-            resolved_ip  VARCHAR,
-            asn          VARCHAR,
-            asn_org      VARCHAR,
-            country_code VARCHAR,
-            jurisdiction VARCHAR NOT NULL DEFAULT 'OTHER',
-            updated_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            operator     TEXT NOT NULL PRIMARY KEY,
+            sample_ns    TEXT,
+            resolved_ip  TEXT,
+            asn          TEXT,
+            asn_org      TEXT,
+            country_code TEXT,
+            jurisdiction TEXT NOT NULL DEFAULT 'OTHER',
+            updated_at   TEXT DEFAULT (datetime('now'))
         );
     ",
     )?;
     migrate_ports_info(conn)?;
+    migrate_domains_country_code(conn)?;
+
+    conn.execute_batch("DROP VIEW IF EXISTS risk_score;")?;
     conn.execute_batch("
-        CREATE OR REPLACE VIEW risk_score AS
+        CREATE VIEW risk_score AS
         SELECT
             d.domain,
             (h.hsts IS NULL AND d.status_code = 200)                                    AS missing_hsts,
             (h.csp  IS NULL AND d.status_code = 200)                                    AS missing_csp,
-            (dns.caa IS NULL OR len(dns.caa) = 0)                                       AS missing_caa,
-            (t.tls_version IN ('TLSv1.0','TLSv1.1') OR t.expired = true)               AS weak_tls,
-            (t.expired = true)                                                           AS cert_expired,
+            (dns.caa IS NULL OR json_array_length(dns.caa) = 0)                         AS missing_caa,
+            (t.tls_version IN ('TLSv1.0','TLSv1.1') OR t.expired = 1)                  AS weak_tls,
+            (t.expired = 1)                                                              AS cert_expired,
             (t.days_remaining BETWEEN 0 AND 29)                                         AS cert_expiring,
-            (NOT coalesce(dns.dnssec_signed, false))                                    AS no_dnssec,
+            (NOT COALESCE(dns.dnssec_signed, 0))                                        AS no_dnssec,
             (CASE WHEN es.domain IS NOT NULL
-                  THEN (coalesce(es.dmarc_policy,'') = 'none' OR NOT coalesce(es.dmarc_present, false))
+                  THEN (COALESCE(es.dmarc_policy,'') = 'none' OR NOT COALESCE(es.dmarc_present, 0))
                   ELSE (dns.txt_dmarc IS NULL) END)                                     AS dmarc_weak,
-            (w.expires_at::TIMESTAMP < (current_timestamp::TIMESTAMP + INTERVAL '30 days'))                           AS domain_expiring,
+            (w.expires_at < date('now', '+30 days'))                                    AS domain_expiring,
             EXISTS(
                 SELECT 1 FROM ports_info p
-                WHERE p.domain = d.domain AND p.open = true
+                WHERE p.domain = d.domain AND p.open = 1
                   AND p.port IN (3306,5432,6379,9200,27017,11211,2375)
             )                                                                            AS exposed_db_port,
             EXISTS(
                 SELECT 1 FROM ports_info p
-                WHERE p.domain = d.domain AND p.open = true
+                WHERE p.domain = d.domain AND p.open = 1
                   AND p.port IN (445,23,3389,5900)
             )                                                                            AS exposed_risky_port,
             EXISTS(SELECT 1 FROM cve_matches m WHERE m.domain = d.domain AND m.severity = 'CRITICAL') AS has_critical_cve,
-            (coalesce(es.spf_too_permissive, false))                                    AS spf_permissive,
-            (NOT coalesce(es.dkim_found, false))                                        AS no_dkim,
+            (COALESCE(es.spf_too_permissive, 0))                                        AS spf_permissive,
+            (NOT COALESCE(es.dkim_found, 0))                                            AS no_dkim,
             d.sovereignty_score,
             CASE COALESCE(d.sovereignty_score, 0)
                 WHEN 3 THEN -5
@@ -226,32 +227,32 @@ pub(crate) fn ensure_schema(conn: &duckdb::Connection) -> Result<()> {
                 WHEN 1 THEN -1
                 ELSE 0
             END                                                                          AS sovereignty_penalty,
-            GREATEST(0,
+            MAX(0,
                 100
                 - CASE WHEN h.hsts IS NULL AND d.status_code = 200                        THEN 10 ELSE 0 END
                 - CASE WHEN h.csp  IS NULL AND d.status_code = 200                        THEN 10 ELSE 0 END
-                - CASE WHEN dns.caa IS NULL OR len(dns.caa) = 0                           THEN  8 ELSE 0 END
-                - CASE WHEN t.tls_version IN ('TLSv1.0','TLSv1.1') OR t.expired = true   THEN 10 ELSE 0 END
-                - CASE WHEN t.expired = true                                               THEN 20 ELSE 0 END
+                - CASE WHEN dns.caa IS NULL OR json_array_length(dns.caa) = 0             THEN  8 ELSE 0 END
+                - CASE WHEN t.tls_version IN ('TLSv1.0','TLSv1.1') OR t.expired = 1      THEN 10 ELSE 0 END
+                - CASE WHEN t.expired = 1                                                  THEN 20 ELSE 0 END
                 - CASE WHEN t.days_remaining BETWEEN 0 AND 29                             THEN 15 ELSE 0 END
-                - CASE WHEN NOT coalesce(dns.dnssec_signed, false)                        THEN  5 ELSE 0 END
+                - CASE WHEN NOT COALESCE(dns.dnssec_signed, 0)                            THEN  5 ELSE 0 END
                 - CASE WHEN (CASE WHEN es.domain IS NOT NULL
-                                  THEN (coalesce(es.dmarc_policy,'') = 'none' OR NOT coalesce(es.dmarc_present, false))
+                                  THEN (COALESCE(es.dmarc_policy,'') = 'none' OR NOT COALESCE(es.dmarc_present, 0))
                                   ELSE (dns.txt_dmarc IS NULL) END)                       THEN  7 ELSE 0 END
-                - CASE WHEN w.expires_at::TIMESTAMP < (current_timestamp::TIMESTAMP + INTERVAL '30 days')               THEN  5 ELSE 0 END
+                - CASE WHEN w.expires_at < date('now', '+30 days')                        THEN  5 ELSE 0 END
                 - CASE WHEN EXISTS(
                       SELECT 1 FROM ports_info p
-                      WHERE p.domain = d.domain AND p.open = true
+                      WHERE p.domain = d.domain AND p.open = 1
                         AND p.port IN (3306,5432,6379,9200,27017,11211,2375)
                   )                                                                        THEN 10 ELSE 0 END
                 - CASE WHEN EXISTS(
                       SELECT 1 FROM ports_info p
-                      WHERE p.domain = d.domain AND p.open = true
+                      WHERE p.domain = d.domain AND p.open = 1
                         AND p.port IN (445,23,3389,5900)
                   )                                                                        THEN 10 ELSE 0 END
                 - CASE WHEN EXISTS(SELECT 1 FROM cve_matches m WHERE m.domain = d.domain AND m.severity = 'CRITICAL') THEN 15 ELSE 0 END
-                - CASE WHEN coalesce(es.spf_too_permissive, false)                        THEN  7 ELSE 0 END
-                - CASE WHEN NOT coalesce(es.dkim_found, false)                            THEN  5 ELSE 0 END
+                - CASE WHEN COALESCE(es.spf_too_permissive, 0)                            THEN  7 ELSE 0 END
+                - CASE WHEN NOT COALESCE(es.dkim_found, 0)                                THEN  5 ELSE 0 END
                 - CASE COALESCE(d.sovereignty_score, 0)
                       WHEN 3 THEN 5
                       WHEN 2 THEN 3
@@ -266,8 +267,10 @@ pub(crate) fn ensure_schema(conn: &duckdb::Connection) -> Result<()> {
         LEFT JOIN whois_info    w   ON w.domain    = d.domain
         LEFT JOIN email_security es ON es.domain   = d.domain;
     ")?;
+
+    conn.execute_batch("DROP VIEW IF EXISTS domain_percentile;")?;
     conn.execute_batch("
-        CREATE OR REPLACE VIEW domain_percentile AS
+        CREATE VIEW domain_percentile AS
         SELECT
             rs.domain,
             rs.score,
@@ -281,11 +284,22 @@ pub(crate) fn ensure_schema(conn: &duckdb::Connection) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn migrate_ports_info(conn: &duckdb::Connection) -> Result<()> {
+pub(crate) fn migrate_domains_country_code(conn: &rusqlite::Connection) -> Result<()> {
+    let has_col: bool = conn.query_row(
+        "SELECT COUNT(*) > 0 FROM pragma_table_info('domains') WHERE name = 'country_code'",
+        [],
+        |r| r.get(0),
+    ).unwrap_or(false);
+    if !has_col {
+        conn.execute_batch("ALTER TABLE domains ADD COLUMN country_code TEXT;")?;
+    }
+    Ok(())
+}
+
+pub(crate) fn migrate_ports_info(conn: &rusqlite::Connection) -> Result<()> {
     // Check if the old wide-boolean table still exists (presence of 'p80' column)
     let has_legacy: bool = conn.query_row(
-        "SELECT COUNT(*) > 0 FROM information_schema.columns
-         WHERE table_name = 'ports_info' AND column_name = 'p80'",
+        "SELECT COUNT(*) > 0 FROM pragma_table_info('ports_info') WHERE name = 'p80'",
         [],
         |r| r.get(0),
     ).unwrap_or(false);
@@ -296,19 +310,18 @@ pub(crate) fn migrate_ports_info(conn: &duckdb::Connection) -> Result<()> {
 
     conn.execute_batch("
         CREATE TABLE IF NOT EXISTS ports_info (
-            domain     VARCHAR   NOT NULL,
-            port       INTEGER   NOT NULL,
-            service    VARCHAR,
-            open       BOOLEAN   NOT NULL DEFAULT false,
-            banner     VARCHAR,
-            ip         VARCHAR,
-            scanned_at TIMESTAMP,
+            domain     TEXT    NOT NULL,
+            port       INTEGER NOT NULL,
+            service    TEXT,
+            open       INTEGER NOT NULL DEFAULT 0,
+            banner     TEXT,
+            ip         TEXT,
+            scanned_at TEXT,
             PRIMARY KEY (domain, port)
         );
     ")?;
 
     if has_legacy {
-        // Backfill one row per true boolean per domain
         let pairs: &[(i32, &str, &str)] = &[
             (80,    "http",         "p80"),
             (443,   "https",        "p443"),
@@ -326,8 +339,8 @@ pub(crate) fn migrate_ports_info(conn: &duckdb::Connection) -> Result<()> {
         for (port, service, col) in pairs {
             backfill.push_str(&format!(
                 "INSERT INTO ports_info (domain, port, service, open, ip, scanned_at)
-                 SELECT domain, {port}, '{service}', true, ip, scanned_at
-                 FROM ports_info_legacy WHERE {col} = true
+                 SELECT domain, {port}, '{service}', 1, ip, scanned_at
+                 FROM ports_info_legacy WHERE {col} = 1
                  ON CONFLICT (domain, port) DO NOTHING;\n"
             ));
         }
@@ -338,32 +351,9 @@ pub(crate) fn migrate_ports_info(conn: &duckdb::Connection) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn append_empty_domain_row(appender: &mut duckdb::Appender<'_>, domain: &str) -> Result<()> {
-    appender.append_row(duckdb::params![
-        domain,
-        Option::<&str>::None,  // status
-        Option::<&str>::None,  // final_url
-        Option::<i32>::None,   // status_code
-        Option::<&str>::None,  // title
-        Option::<&str>::None,  // body_hash
-        Option::<&str>::None,  // error_kind
-        Option::<i64>::None,   // elapsed_ms
-        Option::<&str>::None,  // ip
-        Option::<&str>::None,  // updated_at
-        Option::<&str>::None,  // server
-        Option::<&str>::None,  // powered_by
-        Option::<&str>::None,  // whois_registrar
-        Option::<&str>::None,  // whois_created
-        duckdb::types::Value::Null,    // redirect_chain
-        Option::<&str>::None,  // cms
-        Option::<i32>::None,   // sovereignty_score
-    ])?;
-    Ok(())
-}
-
 pub(crate) fn ensure_domain_exists(db: &PathBuf, domain: &str) -> Result<String> {
     let domain = sanitize_domain(domain).ok_or_else(|| anyhow!("invalid domain: {domain}"))?;
-    let conn = duckdb::Connection::open(db).with_context(|| format!("open duckdb {:?}", db))?;
+    let conn = crate::shared::open_db(db).with_context(|| format!("open db {:?}", db))?;
     ensure_schema(&conn)?;
     conn.execute(
         "INSERT INTO domains (
@@ -371,14 +361,14 @@ pub(crate) fn ensure_domain_exists(db: &PathBuf, domain: &str) -> Result<String>
             elapsed_ms, ip, updated_at, server, powered_by
          ) VALUES (?1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL)
          ON CONFLICT(domain) DO NOTHING",
-        duckdb::params![domain.as_str()],
+        rusqlite::params![domain.as_str()],
     )?;
     Ok(domain)
 }
 
 pub(crate) fn cmd_init(args: InitArgs) -> Result<()> {
     let conn =
-        duckdb::Connection::open(&args.db).with_context(|| format!("open duckdb {:?}", args.db))?;
+        crate::shared::open_db(&args.db).with_context(|| format!("open db {:?}", args.db))?;
 
     ensure_schema(&conn)?;
 
@@ -392,22 +382,39 @@ pub(crate) fn cmd_init(args: InitArgs) -> Result<()> {
         std::fs::File::open(&args.input).with_context(|| format!("open {:?}", args.input))?;
     let reader = std::io::BufReader::new(file);
 
-    let mut appender = conn.appender("domains")?;
-    let mut count: u64 = 0;
-
     use std::io::BufRead;
+    let mut count: u64 = 0;
+    let mut buf: Vec<String> = Vec::with_capacity(100_000);
+
     for line in reader.lines() {
         let line = line?;
         if let Some(domain) = sanitize_domain(&line) {
-            append_empty_domain_row(&mut appender, &domain)?;
-            count += 1;
-            if count % 100_000 == 0 {
+            buf.push(domain);
+            if buf.len() >= 100_000 {
+                flush_domain_init_batch(&conn, &buf)?;
+                count += buf.len() as u64;
                 eprintln!("init: {count} domains loaded...");
+                buf.clear();
             }
         }
     }
+    if !buf.is_empty() {
+        flush_domain_init_batch(&conn, &buf)?;
+        count += buf.len() as u64;
+    }
 
-    appender.flush()?;
     eprintln!("init: done - {count} domains inserted.");
+    Ok(())
+}
+
+fn flush_domain_init_batch(conn: &rusqlite::Connection, domains: &[String]) -> Result<()> {
+    conn.execute_batch("BEGIN")?;
+    {
+        let mut stmt = conn.prepare("INSERT OR IGNORE INTO domains (domain) VALUES (?1)")?;
+        for domain in domains {
+            stmt.execute(rusqlite::params![domain.as_str()])?;
+        }
+    }
+    conn.execute_batch("COMMIT")?;
     Ok(())
 }

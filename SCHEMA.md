@@ -1,6 +1,6 @@
 # Database Schema
 
-`helvetiscan` writes into twelve DuckDB tables and exposes one computed view.
+`helvetiscan` writes into twelve SQLite tables and exposes one computed view.
 
 ## ER Diagram
 
@@ -23,6 +23,7 @@ erDiagram
         VARCHAR[] redirect_chain
         VARCHAR   cms
         INTEGER   sovereignty_score
+        VARCHAR   country_code
         TIMESTAMP updated_at
     }
     dns_info {
@@ -201,6 +202,7 @@ Populated by `helvetiscan scan`. One row per input domain.
 | `redirect_chain` | VARCHAR[] | Starting URL(s) when a redirect occurred |
 | `cms` | VARCHAR | Detected CMS (WordPress, Drupal, Joomla, TYPO3, Wix) |
 | `sovereignty_score` | INTEGER | DNS sovereignty tier: 0=CH, 1=EU, 2=non-EU foreign, 3=US |
+| `country_code` | VARCHAR | ISO 3166-1 alpha-2 hosting country from GeoLite2 (e.g. `CH`, `US`, `DE`) |
 | `updated_at` | TIMESTAMP | Last scan time |
 
 ### `dns_info`
@@ -458,37 +460,6 @@ SELECT * FROM risk_score LIMIT 10;
 
 Score deductions: missing_hsts −10, missing_csp −10, missing_caa −8, weak_tls −10, cert_expired −20, cert_expiring −15, no_dnssec −5, no_dmarc −7, domain_expiring −5, exposed_db_port −10, exposed_risky_port −10, has_critical_cve −15, spf_permissive −7, dmarc_weak −7 (replaces no_dmarc when email_security exists), no_dkim −5, sovereignty EU −1 / non-EU −3 / US −5.
 
-### Example queries
-
-```sql
--- Worst-scoring domains
-SELECT domain, score FROM risk_score ORDER BY score ASC LIMIT 20;
-
--- Domains with exposed database ports
-SELECT domain, score FROM risk_score WHERE exposed_db_port = true ORDER BY domain;
-
--- Missing both HSTS and CSP
-SELECT domain FROM risk_score WHERE missing_hsts AND missing_csp;
-
--- Certs expiring in 7 days
-SELECT t.domain, t.days_remaining, t.cert_issuer
-FROM tls_info t
-WHERE t.days_remaining BETWEEN 0 AND 7
-ORDER BY t.days_remaining;
-
--- Domains with open Redis or MySQL
-SELECT domain, port, service
-FROM ports_info
-WHERE open = true AND port IN (3306, 6379)
-ORDER BY domain;
-
--- Registrar breakdown
-SELECT registrar, COUNT(*) AS domains
-FROM whois_info
-WHERE registrar IS NOT NULL
-GROUP BY registrar
-ORDER BY domains DESC;
-```
 
 ## `domain_percentile` View
 
@@ -561,24 +532,3 @@ GROUP BY jurisdiction ORDER BY domains DESC;
 | `parse_failed` | Could not parse response |
 | `http_status` | Unexpected HTTP status |
 | `other` | Uncategorised error |
-
-## CLI Subcommands & `--full` Shortcuts
-
-| Subcommand | `--full` target | Description |
-|---|---|---|
-| `init` | — | Load domain list into DuckDB |
-| `scan` | `--full domain` | HTTP fetch + security headers + CMS/version detection + CVE matching |
-| `dns` | `--full dns` | DNS metadata (A/AAAA/NS/MX/TXT/CAA/DNSSEC/wildcard) + SPF/DMARC/DKIM analysis → `email_security` |
-| `tls` | `--full tls` | TLS cert + version + key info + fingerprint |
-| `ports` | `--full ports` | TCP port probes + banner grabbing (20 ports) |
-| `subdomains` | `--full subdomains` | CT logs + AXFR + NS/MX subdomain harvest |
-| `whois` | `--full whois` | WHOIS query to whois.nic.ch (rate-limited, run separately) |
-| `update-cves` | — | Download CISA KEV feed, populate `cve_catalog`, match against `domains` |
-| `classify` | — | Classify domains by sector using keyword heuristics → `domain_classification` |
-| `benchmark` | — | Compute sector-level risk benchmarks → `sector_benchmarks` |
-| `sovereignty` | — | Map NS operators to jurisdictions via GeoLite2 → `ns_staging`, `ns_operators`, `domains.sovereignty_score` |
-| — | `--full all` | Run scan → dns → tls → ports → subdomains in sequence |
-
-`--full all` intentionally excludes `whois`, `update-cves`, `classify`, and `benchmark` — these are slower or post-processing steps. Run them separately.
-
-Single-domain shortcut: `helvetiscan --domain example.ch --all`
