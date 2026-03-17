@@ -78,9 +78,9 @@ The full HTTP scan completes in under four hours on a 1 Gbps connection.
 -  71.7% end on HTTPS; 28.3% still serve over plain HTTP
 -  40.6% of .ch domains hosted abroad; Germany leads at 17.3%, US at 11.6%
 -  49.1% send zero security headers; only 30.2% use HSTS despite 71.7% serving HTTPS
--  TLS 1.3 at 92.9%; Let's Encrypt issues 83.1% of certs; 60,171 expire within 30 days [59.5% scanned]
--  43.3% of scanned domains fully spoofable; DKIM only 6.8%; 24.7% of DMARC adopters on p=none [36.2% scanned]
--  313,472 domains (16% of live) expose MySQL; 87,292 expose SMB; 1,742 expose Docker API [83.9% scanned]
+-  TLS 1.3 at 92.9%; Let's Encrypt issues 83.1% of certs; 60,171 expire within 30 days
+-  43.3% of scanned domains fully spoofable; DKIM only 6.8%; 24.7% of DMARC adopters on p=none
+-  313,472 domains (16% of live) expose MySQL; 87,292 expose SMB; 1,742 expose Docker API
 -  86.7% of .ch hosting stays within Europe; North America (US cloud) accounts for 13.0%
 -  Largest foreign IP concentrations (Wix 77K, Register.it 35K, Shopify 15K)
 -  Domains in weak-jurisdiction countries (501 in RU/BY/IR/CN/SY)
@@ -91,8 +91,6 @@ The full HTTP scan completes in under four hours on a 1 Gbps connection.
 -  Most common ports beyond 80/443 (FTP open on 688K = 42% of scanned)
 
 → [See more](docs/FINDINGS.md)[^1]
-
----
 
 [^1]: Raw datasets are not published. Consider only processed edges.arrow and nodes.arrow for dataviz.
 [^2]: Full dataset visualiaztion requires more than 16GB RAM for a proper WebGPU processing.
