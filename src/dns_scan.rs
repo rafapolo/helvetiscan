@@ -75,7 +75,7 @@ pub(crate) async fn cmd_dns(args: DnsArgs) -> Result<()> {
 
     let writer_handle = tokio::task::spawn_blocking({
         let db_path = args.db.clone();
-        let batch_size = args.write_batch_size;
+        let batch_size = 500_usize;
         let progress = progress.clone();
         move || writer_loop_dns(db_path, result_rx, progress, done_tx, batch_size)
     });
@@ -98,7 +98,7 @@ pub(crate) async fn cmd_dns(args: DnsArgs) -> Result<()> {
     } else {
         Some(tokio::spawn(progress_reporter(
             progress.clone(),
-            args.progress_interval,
+            std::time::Duration::from_secs(1),
             done_rx,
         )))
     };
@@ -409,12 +409,11 @@ fn writer_loop_dns(
     if !batch.is_empty() {
         flush_dns_and_email_batch(&conn, &mut batch)?;
     }
-    conn.execute_batch("CHECKPOINT")?;
     let _ = done_tx.send(());
     Ok(())
 }
 
-fn flush_dns_and_email_batch(conn: &duckdb::Connection, batch: &mut Vec<DnsRow>) -> Result<()> {
+fn flush_dns_and_email_batch(conn: &rusqlite::Connection, batch: &mut Vec<DnsRow>) -> Result<()> {
     // Extract email security rows before mutating batch
     let mut es_batch: Vec<EmailSecurityRow> = batch
         .iter()
@@ -427,7 +426,7 @@ fn flush_dns_and_email_batch(conn: &duckdb::Connection, batch: &mut Vec<DnsRow>)
     Ok(())
 }
 
-fn flush_dns_batch(conn: &duckdb::Connection, batch: &mut Vec<DnsRow>) -> Result<()> {
+fn flush_dns_batch(conn: &rusqlite::Connection, batch: &mut Vec<DnsRow>) -> Result<()> {
     let mut sql = String::from("BEGIN;\n");
     for row in batch.iter() {
         sql.push_str(&format!(
@@ -438,7 +437,7 @@ fn flush_dns_batch(conn: &duckdb::Connection, batch: &mut Vec<DnsRow>) -> Result
                 resolved_at
              ) VALUES ({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {},
                        {}, {}, {}, {}, {}, {},
-                       NOW())
+                       datetime('now'))
              ON CONFLICT(domain) DO UPDATE SET
                 status        = excluded.status,
                 error_kind    = excluded.error_kind,
@@ -457,7 +456,7 @@ fn flush_dns_batch(conn: &duckdb::Connection, batch: &mut Vec<DnsRow>) -> Result
                 caa           = excluded.caa,
                 wildcard      = excluded.wildcard,
                 txt_all       = excluded.txt_all,
-                resolved_at   = NOW();\n",
+                resolved_at   = datetime('now');\n",
             sql_string(row.domain.as_str()),
             sql_string(row.status.as_str()),
             sql_string_opt(row.error_kind.map(|v| v.as_str())),

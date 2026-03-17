@@ -104,6 +104,7 @@ pub(crate) struct Row {
     pub(crate) elapsed_ms: u64,
     pub(crate) redirect_chain: Vec<String>,
     pub(crate) cms: Option<String>,
+    pub(crate) country_code: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -262,30 +263,33 @@ pub(crate) fn sql_string_opt(value: Option<&str>) -> String {
 }
 
 pub(crate) fn sql_string_list(values: &[String]) -> String {
-    if values.is_empty() {
-        "[]".to_string()
-    } else {
-        format!(
-            "[{}]",
-            values
-                .iter()
-                .map(|value| sql_string(value))
-                .collect::<Vec<_>>()
-                .join(", ")
-        )
-    }
+    let json = serde_json::to_string(values).unwrap_or_else(|_| "[]".to_string());
+    format!("'{}'", json.replace('\'', "''"))
 }
 
 pub(crate) fn sql_bool(value: bool) -> &'static str {
-    if value { "TRUE" } else { "FALSE" }
+    if value { "1" } else { "0" }
 }
 
 pub(crate) fn sql_bool_opt(value: Option<bool>) -> &'static str {
     match value {
-        Some(true) => "TRUE",
-        Some(false) => "FALSE",
+        Some(true) => "1",
+        Some(false) => "0",
         None => "NULL",
     }
+}
+
+// ---- DB helpers ----
+
+pub(crate) fn open_db(path: &std::path::Path) -> rusqlite::Result<rusqlite::Connection> {
+    let conn = rusqlite::Connection::open(path)?;
+    conn.execute_batch("
+        PRAGMA journal_mode=WAL;
+        PRAGMA busy_timeout=10000;
+        PRAGMA synchronous=NORMAL;
+        PRAGMA cache_size=-32768;
+    ")?;
+    Ok(conn)
 }
 
 pub(crate) fn sql_int_opt(value: Option<i32>) -> String {

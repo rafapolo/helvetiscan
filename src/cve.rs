@@ -73,8 +73,8 @@ const SEED_CVES: &[(&str, &str, &str, f64, &str, &str, &str)] = &[
 // ---- CISA KEV fetcher ----
 
 pub(crate) async fn cmd_update_cves(db: PathBuf) -> Result<()> {
-    let conn = duckdb::Connection::open(&db)
-        .with_context(|| format!("open duckdb {:?}", db))?;
+    let conn = crate::shared::open_db(&db)
+        .with_context(|| format!("open db {:?}", db))?;
 
     crate::schema::ensure_schema(&conn)?;
 
@@ -120,14 +120,14 @@ pub(crate) async fn cmd_update_cves(db: PathBuf) -> Result<()> {
 
         conn.execute(
             "INSERT INTO cve_catalog (cve_id, technology, severity, in_kev, summary, published_at)
-             VALUES (?1, ?2, 'CRITICAL', true, ?3, ?4::DATE)
+             VALUES (?1, ?2, 'CRITICAL', 1, ?3, ?4)
              ON CONFLICT(cve_id) DO UPDATE SET
                 technology   = excluded.technology,
                 severity     = excluded.severity,
                 in_kev       = excluded.in_kev,
                 summary      = excluded.summary,
                 published_at = excluded.published_at",
-            duckdb::params![
+            rusqlite::params![
                 cve_id.as_str(),
                 technology,
                 summary.as_deref(),
@@ -145,12 +145,12 @@ pub(crate) async fn cmd_update_cves(db: PathBuf) -> Result<()> {
     Ok(())
 }
 
-fn seed_hardcoded_cves(conn: &duckdb::Connection) -> Result<usize> {
+fn seed_hardcoded_cves(conn: &rusqlite::Connection) -> Result<usize> {
     let mut count = 0usize;
     for &(technology, cve_id, severity, cvss_score, affected_from, affected_to, summary) in SEED_CVES {
         conn.execute(
             "INSERT INTO cve_catalog (cve_id, technology, affected_from, affected_to, severity, cvss_score, in_kev, summary)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, false, ?7)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, ?7)
              ON CONFLICT(cve_id) DO UPDATE SET
                 technology    = excluded.technology,
                 affected_from = excluded.affected_from,
@@ -158,7 +158,7 @@ fn seed_hardcoded_cves(conn: &duckdb::Connection) -> Result<usize> {
                 severity      = excluded.severity,
                 cvss_score    = excluded.cvss_score,
                 summary       = excluded.summary",
-            duckdb::params![
+            rusqlite::params![
                 cve_id,
                 technology,
                 affected_from,
@@ -173,7 +173,7 @@ fn seed_hardcoded_cves(conn: &duckdb::Connection) -> Result<usize> {
     Ok(count)
 }
 
-pub(crate) fn run_cve_matching(conn: &duckdb::Connection) -> Result<usize> {
+pub(crate) fn run_cve_matching(conn: &rusqlite::Connection) -> Result<usize> {
     conn.execute_batch(
         "INSERT INTO cve_matches (domain, technology, version, cve_id, severity, cvss_score, in_kev, published_at)
          SELECT d.domain, c.technology, NULL, c.cve_id, c.severity, c.cvss_score, c.in_kev, c.published_at
@@ -182,7 +182,7 @@ pub(crate) fn run_cve_matching(conn: &duckdb::Connection) -> Result<usize> {
                             OR lower(coalesce(d.server, '')) LIKE '%' || c.technology || '%'
                             OR lower(coalesce(d.powered_by, '')) LIKE '%' || c.technology || '%'
          WHERE d.cms IS NOT NULL OR d.server IS NOT NULL OR d.powered_by IS NOT NULL
-         ON CONFLICT (domain, cve_id) DO UPDATE SET matched_at = NOW()",
+         ON CONFLICT (domain, cve_id) DO UPDATE SET matched_at = datetime('now')",
     )?;
 
     let count: i64 = conn.query_row(
@@ -198,8 +198,8 @@ pub(crate) fn run_cve_matching(conn: &duckdb::Connection) -> Result<usize> {
 mod tests {
     use super::*;
 
-    fn in_memory_db() -> duckdb::Connection {
-        let conn = duckdb::Connection::open_in_memory().unwrap();
+    fn in_memory_db() -> rusqlite::Connection {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
         crate::schema::ensure_schema(&conn).unwrap();
         conn
     }

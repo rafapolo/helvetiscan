@@ -61,7 +61,7 @@ pub(crate) async fn cmd_ports(args: PortsArgs) -> Result<()> {
 
     let writer_handle = tokio::task::spawn_blocking({
         let db_path = args.db.clone();
-        let batch_size = args.write_batch_size;
+        let batch_size = 500_usize;
         let progress = progress.clone();
         move || writer_loop_ports(db_path, result_rx, progress, done_tx, batch_size)
     });
@@ -84,7 +84,7 @@ pub(crate) async fn cmd_ports(args: PortsArgs) -> Result<()> {
     } else {
         Some(tokio::spawn(progress_reporter(
             progress.clone(),
-            args.progress_interval,
+            Duration::from_secs(1),
             done_rx,
         )))
     };
@@ -273,17 +273,16 @@ fn writer_loop_ports(
     if !batch.is_empty() {
         flush_ports_batch(&conn, &mut batch)?;
     }
-    conn.execute_batch("CHECKPOINT")?;
     let _ = done_tx.send(());
     Ok(())
 }
 
-fn flush_ports_batch(conn: &duckdb::Connection, batch: &mut Vec<PortsRow>) -> Result<()> {
+fn flush_ports_batch(conn: &rusqlite::Connection, batch: &mut Vec<PortsRow>) -> Result<()> {
     conn.execute_batch("BEGIN")?;
     {
         let mut stmt = conn.prepare(
             "INSERT INTO ports_info (domain, port, service, open, banner, ip, scanned_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, NOW())
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now'))
              ON CONFLICT (domain, port) DO UPDATE SET
                 open       = excluded.open,
                 banner     = excluded.banner,
@@ -292,7 +291,7 @@ fn flush_ports_batch(conn: &duckdb::Connection, batch: &mut Vec<PortsRow>) -> Re
         )?;
         for row in batch.iter() {
             for result in row.results.iter() {
-                stmt.execute(duckdb::params![
+                stmt.execute(rusqlite::params![
                     row.domain.as_str(),
                     result.port as i32,
                     result.service,

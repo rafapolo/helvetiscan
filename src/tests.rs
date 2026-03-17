@@ -4,12 +4,12 @@ use std::time::Duration;
 
 use chrono::Utc;
 
-use crate::schema::{ensure_schema, cmd_init};
+use crate::schema::{ensure_schema, cmd_init, migrate_domains_country_code};
 use crate::shared::{
     dedupe_sorted, sanitize_domain, Row, HttpHeadersRow, WhoisRow, ScanStatus,
 };
 use crate::http_scan::{
-    flush_batch, flush_http_headers_batch, detect_cms, pending_domains_sql,
+    flush_batch, flush_http_headers_batch, detect_cms,
     load_pending_domains, candidate_urls, should_try_www, cmd_scan,
 };
 use crate::dns_scan::{load_scan_targets, cmd_dns};
@@ -18,7 +18,7 @@ use crate::classify::classify_by_keywords;
 use crate::tls_scan::cmd_tls;
 use crate::ports_scan::{grab_banner, cmd_ports};
 use crate::whois::parse_whois_response;
-use crate::{BackfillMode, InitArgs, ScanArgs, DnsArgs, TlsArgs, PortsArgs};
+use crate::{InitArgs, ScanArgs, DnsArgs, TlsArgs, PortsArgs};
 
 #[test]
 fn sanitize_domain_basic() {
@@ -60,43 +60,33 @@ fn dedupe_sorted_strips_empty_and_trailing_dot() {
 }
 
 #[test]
-fn pending_domains_sql_matches_backfill_modes() {
-    assert!(pending_domains_sql(None).contains("updated_at IS NULL"));
-    assert!(pending_domains_sql(Some(BackfillMode::Ip)).contains("ip IS NULL"));
-    assert!(pending_domains_sql(Some(BackfillMode::Server)).contains("server IS NULL"));
-    assert_eq!(
-        pending_domains_sql(Some(BackfillMode::Full)),
-        "SELECT domain FROM domains ORDER BY domain"
-    );
-}
-
-#[test]
 fn single_domain_bypasses_batch_queries() {
-    let conn = duckdb::Connection::open_in_memory().unwrap();
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
     assert_eq!(
-        load_pending_domains(&conn, Some("example.ch"), None, None).unwrap(),
+        load_pending_domains(&conn, Some("example.ch"), None).unwrap(),
         vec!["example.ch".to_string()]
     );
     assert_eq!(
-        load_scan_targets(&conn, Some("example.ch"), "dns_info", "resolved_at", false, None).unwrap(),
+        load_scan_targets(&conn, Some("example.ch"), "dns_info", "resolved_at", None).unwrap(),
         vec!["example.ch".to_string()]
     );
 }
 
 #[test]
 fn flush_batch_roundtrip() {
-    let conn = duckdb::Connection::open_in_memory().unwrap();
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
     conn.execute_batch("
         CREATE TABLE domains (
-            domain VARCHAR PRIMARY KEY,
-            status VARCHAR,
-            final_url VARCHAR, status_code INTEGER,
-            title VARCHAR, body_hash VARCHAR, error_kind VARCHAR,
-            elapsed_ms BIGINT, ip VARCHAR, updated_at TIMESTAMP,
-            server VARCHAR, powered_by VARCHAR,
-            redirect_chain VARCHAR[], cms VARCHAR
+            domain TEXT PRIMARY KEY,
+            status TEXT,
+            final_url TEXT, status_code INTEGER,
+            title TEXT, body_hash TEXT, error_kind TEXT,
+            elapsed_ms INTEGER, ip TEXT, updated_at TEXT,
+            server TEXT, powered_by TEXT,
+            redirect_chain TEXT, cms TEXT,
+            country_code TEXT
         );
-        INSERT INTO domains VALUES ('test.ch', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+        INSERT INTO domains VALUES ('test.ch', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
     ").unwrap();
 
     let mut batch = vec![Row {
@@ -113,9 +103,10 @@ fn flush_batch_roundtrip() {
         elapsed_ms: 123,
         redirect_chain: vec![],
         cms: None,
+        country_code: None,
     }];
 
-    flush_batch(&conn, &mut batch).unwrap();
+    flush_batch(&conn, &mut batch, None).unwrap();
     assert!(batch.is_empty());
 
     let url: String = conn
@@ -133,13 +124,184 @@ fn flush_batch_roundtrip() {
     assert!(updated_at_is_set);
 }
 
+#[test]
+fn flush_batch_persists_preset_country_code() {
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    conn.execute_batch("
+        CREATE TABLE domains (
+            domain TEXT PRIMARY KEY,
+            status TEXT,
+            final_url TEXT, status_code INTEGER,
+            title TEXT, body_hash TEXT, error_kind TEXT,
+            elapsed_ms INTEGER, ip TEXT, updated_at TEXT,
+            server TEXT, powered_by TEXT,
+            redirect_chain TEXT, cms TEXT,
+            country_code TEXT
+        );
+        INSERT INTO domains VALUES ('test.ch', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+    ").unwrap();
+
+    let mut batch = vec![Row {
+        domain: "test.ch".into(),
+        status: ScanStatus::Ok,
+        ip: Some("1.2.3.4".into()),
+        final_url: Some("https://test.ch/".into()),
+        status_code: Some(200),
+        title: None,
+        body_hash: None,
+        server: None,
+        powered_by: None,
+        error_kind: None,
+        elapsed_ms: 10,
+        redirect_chain: vec![],
+        cms: None,
+        country_code: Some("CH".into()),
+    }];
+
+    flush_batch(&conn, &mut batch, None).unwrap();
+    assert!(batch.is_empty());
+
+    let cc: Option<String> = conn
+        .query_row("SELECT country_code FROM domains WHERE domain='test.ch'", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(cc.as_deref(), Some("CH"));
+}
+
+#[test]
+fn flush_batch_enriches_country_from_mmdb() {
+    let mmdb_path = Path::new("data/GeoLite2-Country.mmdb");
+    if !mmdb_path.exists() {
+        return;
+    }
+
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    conn.execute_batch("
+        CREATE TABLE domains (
+            domain TEXT PRIMARY KEY,
+            status TEXT,
+            final_url TEXT, status_code INTEGER,
+            title TEXT, body_hash TEXT, error_kind TEXT,
+            elapsed_ms INTEGER, ip TEXT, updated_at TEXT,
+            server TEXT, powered_by TEXT,
+            redirect_chain TEXT, cms TEXT,
+            country_code TEXT
+        );
+        INSERT INTO domains VALUES ('test.ch', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+    ").unwrap();
+
+    let reader = maxminddb::Reader::open_readfile(mmdb_path).unwrap();
+    let mut batch = vec![Row {
+        domain: "test.ch".into(),
+        status: ScanStatus::Ok,
+        ip: Some("8.8.8.8".into()),
+        final_url: Some("https://test.ch/".into()),
+        status_code: Some(200),
+        title: None,
+        body_hash: None,
+        server: None,
+        powered_by: None,
+        error_kind: None,
+        elapsed_ms: 10,
+        redirect_chain: vec![],
+        cms: None,
+        country_code: None,
+    }];
+
+    flush_batch(&conn, &mut batch, Some(&reader)).unwrap();
+
+    let cc: Option<String> = conn
+        .query_row("SELECT country_code FROM domains WHERE domain='test.ch'", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(cc.as_deref(), Some("US"));
+}
+
+#[test]
+fn flush_batch_invalid_ip_leaves_country_none() {
+    let mmdb_path = Path::new("data/GeoLite2-Country.mmdb");
+    if !mmdb_path.exists() {
+        return;
+    }
+
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    conn.execute_batch("
+        CREATE TABLE domains (
+            domain TEXT PRIMARY KEY,
+            status TEXT,
+            final_url TEXT, status_code INTEGER,
+            title TEXT, body_hash TEXT, error_kind TEXT,
+            elapsed_ms INTEGER, ip TEXT, updated_at TEXT,
+            server TEXT, powered_by TEXT,
+            redirect_chain TEXT, cms TEXT,
+            country_code TEXT
+        );
+        INSERT INTO domains VALUES ('test.ch', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+    ").unwrap();
+
+    let reader = maxminddb::Reader::open_readfile(mmdb_path).unwrap();
+    let mut batch = vec![Row {
+        domain: "test.ch".into(),
+        status: ScanStatus::Ok,
+        ip: Some("not-an-ip".into()),
+        final_url: Some("https://test.ch/".into()),
+        status_code: Some(200),
+        title: None,
+        body_hash: None,
+        server: None,
+        powered_by: None,
+        error_kind: None,
+        elapsed_ms: 10,
+        redirect_chain: vec![],
+        cms: None,
+        country_code: None,
+    }];
+
+    flush_batch(&conn, &mut batch, Some(&reader)).unwrap();
+
+    let cc: Option<String> = conn
+        .query_row("SELECT country_code FROM domains WHERE domain='test.ch'", [], |r| r.get(0))
+        .unwrap();
+    assert!(cc.is_none());
+}
+
+#[test]
+fn migrate_domains_country_code_idempotent() {
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    conn.execute_batch("
+        CREATE TABLE domains (
+            domain TEXT PRIMARY KEY,
+            status TEXT
+        );
+    ").unwrap();
+
+    // Column should not exist yet
+    let has_col_before: bool = conn.query_row(
+        "SELECT COUNT(*) > 0 FROM pragma_table_info('domains') WHERE name = 'country_code'",
+        [],
+        |r| r.get(0),
+    ).unwrap();
+    assert!(!has_col_before);
+
+    // First run: adds the column
+    migrate_domains_country_code(&conn).unwrap();
+
+    let has_col_after: bool = conn.query_row(
+        "SELECT COUNT(*) > 0 FROM pragma_table_info('domains') WHERE name = 'country_code'",
+        [],
+        |r| r.get(0),
+    ).unwrap();
+    assert!(has_col_after);
+
+    // Second run: no error (idempotent)
+    migrate_domains_country_code(&conn).unwrap();
+}
+
 #[tokio::test]
 #[ignore = "network-dependent end-to-end scan over sample_domains.txt"]
 async fn sample_domains_e2e_scan() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let sample_input = manifest_dir.join("data/sample_domains.txt");
     let db_path = std::env::temp_dir().join(format!(
-        "helvetiscan-sample-{}-{}.duckdb",
+        "helvetiscan-sample-{}-{}.db",
         std::process::id(),
         Utc::now().timestamp_nanos_opt().unwrap_or_default()
     ));
@@ -153,19 +315,16 @@ async fn sample_domains_e2e_scan() {
     cmd_scan(ScanArgs {
         db: db_path.clone(),
         domain: None,
-        write_batch_size: 25,
         concurrency: 10,
         connect_timeout: Duration::from_secs(5),
         request_timeout: Duration::from_secs(10),
         max_kbytes: 64,
         max_redirects: 5,
         user_agent: "helvetiscan/test".into(),
-        progress_interval: Duration::from_secs(5),
         no_progress: true,
-        limit_success: None,
-        backfill: None,
         retry_errors: None,
         save_html: None,
+        country_mmdb: std::path::PathBuf::from("data/GeoLite2-Country.mmdb"),
     })
     .await
     .unwrap();
@@ -173,11 +332,8 @@ async fn sample_domains_e2e_scan() {
     cmd_dns(DnsArgs {
         db: db_path.clone(),
         domain: None,
-        write_batch_size: 25,
         concurrency: 10,
-        progress_interval: Duration::from_secs(5),
         no_progress: true,
-        rescan: false,
         retry_errors: None,
     })
     .await
@@ -186,13 +342,10 @@ async fn sample_domains_e2e_scan() {
     cmd_tls(TlsArgs {
         db: db_path.clone(),
         domain: None,
-        write_batch_size: 25,
         concurrency: 10,
         connect_timeout: Duration::from_secs(5),
         handshake_timeout: Duration::from_secs(8),
-        progress_interval: Duration::from_secs(5),
         no_progress: true,
-        rescan: false,
         retry_errors: None,
     })
     .await
@@ -201,18 +354,15 @@ async fn sample_domains_e2e_scan() {
     cmd_ports(PortsArgs {
         db: db_path.clone(),
         domain: None,
-        write_batch_size: 25,
         concurrency: 10,
         connect_timeout: Duration::from_millis(800),
-        progress_interval: Duration::from_secs(5),
         no_progress: true,
-        rescan: false,
         retry_errors: None,
     })
     .await
     .unwrap();
 
-    let conn = duckdb::Connection::open(&db_path).unwrap();
+    let conn = crate::shared::open_db(&db_path).unwrap();
     let domains_count: i64 = conn
         .query_row("SELECT COUNT(*) FROM domains", [], |r| r.get(0))
         .unwrap();
@@ -304,18 +454,18 @@ fn powered_by_php_version() {
 
 #[test]
 fn flush_http_headers_roundtrip() {
-    let conn = duckdb::Connection::open_in_memory().unwrap();
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
     conn.execute_batch("
         CREATE TABLE http_headers (
-            domain                 VARCHAR PRIMARY KEY,
-            hsts                   VARCHAR,
-            csp                    VARCHAR,
-            x_frame_options        VARCHAR,
-            x_content_type_options VARCHAR,
-            cors_origin            VARCHAR,
-            referrer_policy        VARCHAR,
-            permissions_policy     VARCHAR,
-            scanned_at             TIMESTAMP
+            domain                 TEXT PRIMARY KEY,
+            hsts                   TEXT,
+            csp                    TEXT,
+            x_frame_options        TEXT,
+            x_content_type_options TEXT,
+            cors_origin            TEXT,
+            referrer_policy        TEXT,
+            permissions_policy     TEXT,
+            scanned_at             TEXT
         );
     ").unwrap();
 
@@ -450,7 +600,7 @@ async fn grab_banner_no_listener_returns_none() {
 
 #[test]
 fn risk_score_view_flags_and_score() {
-    let conn = duckdb::Connection::open_in_memory().unwrap();
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
     ensure_schema(&conn).unwrap();
 
     // Insert a domain with status_code=200 — no http_headers row → missing_hsts should be true
@@ -467,7 +617,7 @@ fn risk_score_view_flags_and_score() {
     // Open port 3306 → exposed_db_port should be true
     conn.execute_batch("
         INSERT INTO ports_info (domain, port, service, open)
-        VALUES ('probe.ch', 3306, 'mysql', true);
+        VALUES ('probe.ch', 3306, 'mysql', 1);
     ").unwrap();
 
     let exposed_db_port: bool = conn

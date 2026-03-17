@@ -88,35 +88,16 @@ fn normalize_ns_to_operator(ns: &str) -> String {
     }
 }
 
-fn parse_duckdb_varchar_array(s: &str) -> Vec<String> {
-    let s = s.trim();
-    if s == "[]" || s.is_empty() {
-        return vec![];
-    }
-    let inner = s
-        .strip_prefix('[')
-        .and_then(|s| s.strip_suffix(']'))
-        .unwrap_or(s);
-    inner
-        .split(',')
-        .map(|item| {
-            let item = item.trim();
-            if item.len() >= 2 && item.starts_with('\'') && item.ends_with('\'') {
-                item[1..item.len() - 1].to_string()
-            } else {
-                item.to_string()
-            }
-        })
-        .filter(|s| !s.is_empty())
-        .collect()
+fn parse_json_array(s: &str) -> Vec<String> {
+    serde_json::from_str(s).unwrap_or_default()
 }
 
 /// Rebuild ns_staging from dns_info and return a map of operator → sample NS hostname.
-fn rebuild_ns_staging(conn: &duckdb::Connection) -> Result<HashMap<String, String>> {
+fn rebuild_ns_staging(conn: &rusqlite::Connection) -> Result<HashMap<String, String>> {
     conn.execute_batch("DELETE FROM ns_staging;")?;
 
     let mut stmt = conn.prepare(
-        "SELECT domain, CAST(ns AS VARCHAR) FROM dns_info WHERE ns IS NOT NULL AND len(ns) > 0",
+        "SELECT domain, ns FROM dns_info WHERE ns IS NOT NULL AND ns != '[]'",
     )?;
     let rows: Vec<(String, String)> = stmt
         .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
@@ -126,7 +107,7 @@ fn rebuild_ns_staging(conn: &duckdb::Connection) -> Result<HashMap<String, Strin
     let mut operator_sample: HashMap<String, String> = HashMap::new();
 
     for (domain, ns_str) in &rows {
-        for ns_host in parse_duckdb_varchar_array(ns_str) {
+        for ns_host in parse_json_array(ns_str) {
             let operator = normalize_ns_to_operator(&ns_host);
             pairs.push((domain.clone(), operator.clone()));
             operator_sample.entry(operator).or_insert_with(|| ns_host.clone());
@@ -169,8 +150,8 @@ async fn resolve_first_a(resolver: &TokioResolver, hostname: &str) -> Option<IpA
 pub(crate) async fn cmd_sovereignty(args: SovereigntyArgs) -> Result<()> {
     // Phase 1: sync — schema + rebuild ns_staging
     let to_resolve: Vec<(String, String)> = {
-        let conn = duckdb::Connection::open(&args.db)
-            .with_context(|| format!("open duckdb {:?}", args.db))?;
+        let conn = crate::shared::open_db(&args.db)
+            .with_context(|| format!("open db {:?}", args.db))?;
         crate::schema::ensure_schema(&conn)?;
 
         eprintln!("sovereignty: rebuilding ns_staging from dns_info...");
@@ -180,18 +161,14 @@ pub(crate) async fn cmd_sovereignty(args: SovereigntyArgs) -> Result<()> {
             operator_samples.len()
         );
 
-        if args.rescan {
-            operator_samples.into_iter().collect()
-        } else {
-            let mut stmt = conn.prepare("SELECT operator FROM ns_operators")?;
-            let existing: std::collections::HashSet<String> = stmt
-                .query_map([], |r| r.get(0))?
-                .collect::<Result<_, _>>()?;
-            operator_samples
-                .into_iter()
-                .filter(|(op, _)| !existing.contains(op))
-                .collect()
-        }
+        let mut stmt = conn.prepare("SELECT operator FROM ns_operators")?;
+        let existing: std::collections::HashSet<String> = stmt
+            .query_map([], |r| r.get(0))?
+            .collect::<Result<_, _>>()?;
+        operator_samples
+            .into_iter()
+            .filter(|(op, _)| !existing.contains(op))
+            .collect()
     }; // conn dropped here
 
     // Phase 2: async DNS + mmdb resolution
@@ -267,8 +244,8 @@ pub(crate) async fn cmd_sovereignty(args: SovereigntyArgs) -> Result<()> {
 
     // Phase 3: sync — write ns_operators, update sovereignty_score, print summary
     {
-        let conn = duckdb::Connection::open(&args.db)
-            .with_context(|| format!("open duckdb {:?}", args.db))?;
+        let conn = crate::shared::open_db(&args.db)
+            .with_context(|| format!("open db {:?}", args.db))?;
 
         for (operator, sample_ns, resolved_ip, asn_num, asn_org, country_code, jurisdiction) in
             &resolved
@@ -319,7 +296,7 @@ pub(crate) async fn cmd_sovereignty(args: SovereigntyArgs) -> Result<()> {
     Ok(())
 }
 
-fn print_summary(conn: &duckdb::Connection) -> Result<()> {
+fn print_summary(conn: &rusqlite::Connection) -> Result<()> {
     let total: i64 = conn.query_row("SELECT COUNT(*) FROM domains", [], |r| r.get(0))?;
 
     println!();
@@ -489,29 +466,29 @@ mod tests {
         assert_eq!(normalize_ns_to_operator("localhost"), "localhost");
     }
 
-    // ---- parse_duckdb_varchar_array ----
+    // ---- parse_json_array ----
 
     #[test]
     fn parse_array_empty() {
-        assert!(parse_duckdb_varchar_array("[]").is_empty());
-        assert!(parse_duckdb_varchar_array("").is_empty());
+        assert!(parse_json_array("[]").is_empty());
+        assert!(parse_json_array("").is_empty());
     }
 
     #[test]
-    fn parse_array_single_quoted() {
-        let result = parse_duckdb_varchar_array("['ns1.example.com']");
+    fn parse_array_single_element() {
+        let result = parse_json_array(r#"["ns1.example.com"]"#);
         assert_eq!(result, vec!["ns1.example.com"]);
     }
 
     #[test]
-    fn parse_array_multiple_quoted() {
-        let result = parse_duckdb_varchar_array("['ns1.example.com', 'ns2.example.com']");
+    fn parse_array_multiple_elements() {
+        let result = parse_json_array(r#"["ns1.example.com","ns2.example.com"]"#);
         assert_eq!(result, vec!["ns1.example.com", "ns2.example.com"]);
     }
 
     #[test]
-    fn parse_array_trims_whitespace() {
-        let result = parse_duckdb_varchar_array("[ 'a.com' , 'b.com' ]");
+    fn parse_array_with_spaces() {
+        let result = parse_json_array(r#"["a.com", "b.com"]"#);
         assert_eq!(result, vec!["a.com", "b.com"]);
     }
 }

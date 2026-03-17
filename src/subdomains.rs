@@ -25,21 +25,19 @@ pub(crate) async fn cmd_subdomains(args: SubdomainsArgs) -> Result<()> {
     }
 
     let conn =
-        duckdb::Connection::open(&args.db).with_context(|| format!("open duckdb {:?}", args.db))?;
+        crate::shared::open_db(&args.db).with_context(|| format!("open db {:?}", args.db))?;
     crate::schema::ensure_schema(&conn)?;
 
     let pending: Vec<String> = if let Some(domain) = args.domain.as_deref() {
         vec![sanitize_domain(domain).ok_or_else(|| anyhow!("invalid domain: {domain}"))?]
     } else {
-        let sql = if args.rescan {
-            "SELECT domain FROM domains ORDER BY domain".to_string()
-        } else {
+        let mut stmt = conn.prepare(
             "SELECT d.domain FROM domains d WHERE NOT EXISTS \
-             (SELECT 1 FROM subdomains s WHERE s.domain = d.domain) ORDER BY d.domain".to_string()
-        };
-        let mut stmt = conn.prepare(&sql)?;
-        stmt.query_map([], |row| row.get(0))?
-            .collect::<std::result::Result<_, _>>()?
+             (SELECT 1 FROM subdomains s WHERE s.domain = d.domain) ORDER BY d.domain"
+        )?;
+        let rows: Vec<String> = stmt.query_map([], |row| row.get(0))?
+            .collect::<std::result::Result<_, _>>()?;
+        rows
     };
     drop(conn);
 
@@ -59,7 +57,7 @@ pub(crate) async fn cmd_subdomains(args: SubdomainsArgs) -> Result<()> {
 
     let writer_handle = tokio::task::spawn_blocking({
         let db_path = args.db.clone();
-        let batch_size = args.write_batch_size;
+        let batch_size = 500_usize;
         let progress = progress.clone();
         move || writer_loop_subdomains(db_path, result_rx, progress, done_tx, batch_size)
     });
@@ -80,7 +78,7 @@ pub(crate) async fn cmd_subdomains(args: SubdomainsArgs) -> Result<()> {
     } else {
         Some(tokio::spawn(progress_reporter(
             progress.clone(),
-            args.progress_interval,
+            Duration::from_secs(1),
             done_rx,
         )))
     };
@@ -376,12 +374,11 @@ fn writer_loop_subdomains(
     if !batch.is_empty() {
         flush_subdomains_batch(&conn, &mut batch)?;
     }
-    conn.execute_batch("CHECKPOINT")?;
     let _ = done_tx.send(());
     Ok(())
 }
 
-fn flush_subdomains_batch(conn: &duckdb::Connection, batch: &mut Vec<SubdomainRow>) -> Result<()> {
+fn flush_subdomains_batch(conn: &rusqlite::Connection, batch: &mut Vec<SubdomainRow>) -> Result<()> {
     if batch.iter().all(|r| r.found.is_empty()) {
         batch.clear();
         return Ok(());
@@ -390,12 +387,12 @@ fn flush_subdomains_batch(conn: &duckdb::Connection, batch: &mut Vec<SubdomainRo
     {
         let mut stmt = conn.prepare(
             "INSERT INTO subdomains (domain, subdomain, source, discovered_at)
-             VALUES (?1, ?2, ?3, NOW())
+             VALUES (?1, ?2, ?3, datetime('now'))
              ON CONFLICT DO NOTHING",
         )?;
         for row in batch.iter() {
             for (sub, source) in &row.found {
-                stmt.execute(duckdb::params![
+                stmt.execute(rusqlite::params![
                     row.domain.as_str(),
                     sub.as_str(),
                     source,
@@ -413,8 +410,8 @@ mod tests {
     use super::*;
     use crate::shared::SubdomainRow;
 
-    fn in_memory_db() -> duckdb::Connection {
-        let conn = duckdb::Connection::open_in_memory().unwrap();
+    fn in_memory_db() -> rusqlite::Connection {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
         crate::schema::ensure_schema(&conn).unwrap();
         conn
     }

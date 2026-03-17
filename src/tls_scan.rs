@@ -1,6 +1,7 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 use std::sync::atomic::Ordering;
 
 use anyhow::{anyhow, Context, Result};
@@ -62,7 +63,7 @@ pub(crate) async fn cmd_tls(args: TlsArgs) -> Result<()> {
 
     let writer_handle = tokio::task::spawn_blocking({
         let db_path = args.db.clone();
-        let batch_size = args.write_batch_size;
+        let batch_size = 500_usize;
         let progress = progress.clone();
         move || writer_loop_tls(db_path, result_rx, progress, done_tx, batch_size)
     });
@@ -85,7 +86,7 @@ pub(crate) async fn cmd_tls(args: TlsArgs) -> Result<()> {
     } else {
         Some(tokio::spawn(progress_reporter(
             progress.clone(),
-            args.progress_interval,
+            Duration::from_secs(1),
             done_rx,
         )))
     };
@@ -405,12 +406,11 @@ fn writer_loop_tls(
     if !batch.is_empty() {
         flush_tls_batch(&conn, &mut batch)?;
     }
-    conn.execute_batch("CHECKPOINT")?;
     let _ = done_tx.send(());
     Ok(())
 }
 
-fn flush_tls_batch(conn: &duckdb::Connection, batch: &mut Vec<TlsRow>) -> Result<()> {
+fn flush_tls_batch(conn: &rusqlite::Connection, batch: &mut Vec<TlsRow>) -> Result<()> {
     let mut sql = String::from("BEGIN;\n");
     for row in batch.iter() {
         sql.push_str(&format!(
@@ -426,7 +426,7 @@ fn flush_tls_batch(conn: &duckdb::Connection, batch: &mut Vec<TlsRow>) -> Result
                        {}, {}, {}, {}, {},
                        {}, {}, {}, {},
                        {}, {}, {},
-                       NOW())
+                       datetime('now'))
              ON CONFLICT(domain) DO UPDATE SET
                 status              = excluded.status,
                 error_kind          = excluded.error_kind,
@@ -446,7 +446,7 @@ fn flush_tls_batch(conn: &duckdb::Connection, batch: &mut Vec<TlsRow>) -> Result
                 cert_fingerprint    = excluded.cert_fingerprint,
                 ct_logged           = excluded.ct_logged,
                 ocsp_must_staple    = excluded.ocsp_must_staple,
-                scanned_at          = NOW();\n",
+                scanned_at          = datetime('now');\n",
             sql_string(row.domain.as_str()),
             sql_string(row.status.as_str()),
             sql_string_opt(row.error_kind.map(|v| v.as_str())),
@@ -499,7 +499,7 @@ mod tests {
 
     #[test]
     fn flush_tls_batch_roundtrip() {
-        let conn = duckdb::Connection::open_in_memory().unwrap();
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
         crate::schema::ensure_schema(&conn).unwrap();
 
         let mut batch = vec![TlsRow {
@@ -534,14 +534,14 @@ mod tests {
         assert_eq!(issuer.as_deref(), Some("Let's Encrypt"));
 
         let san_len: i64 = conn
-            .query_row("SELECT len(san) FROM tls_info WHERE domain='test.ch'", [], |r| r.get(0))
+            .query_row("SELECT json_array_length(san) FROM tls_info WHERE domain='test.ch'", [], |r| r.get(0))
             .unwrap();
         assert_eq!(san_len, 2);
     }
 
     #[test]
     fn flush_tls_batch_upserts() {
-        let conn = duckdb::Connection::open_in_memory().unwrap();
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
         crate::schema::ensure_schema(&conn).unwrap();
 
         let make_row = |issuer: &str| TlsRow {

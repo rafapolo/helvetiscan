@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
@@ -20,23 +20,21 @@ pub(crate) async fn cmd_whois(args: WhoisArgs) -> Result<()> {
     }
 
     let conn =
-        duckdb::Connection::open(&args.db).with_context(|| format!("open duckdb {:?}", args.db))?;
+        crate::shared::open_db(&args.db).with_context(|| format!("open db {:?}", args.db))?;
     crate::schema::ensure_schema(&conn)?;
 
     let pending: Vec<String> = if let Some(domain) = args.domain.as_deref() {
         vec![sanitize_domain(domain).ok_or_else(|| anyhow!("invalid domain: {domain}"))?]
     } else {
-        let sql = if args.rescan {
-            "SELECT domain FROM domains ORDER BY domain".to_string()
-        } else {
+        let mut stmt = conn.prepare(
             "SELECT d.domain FROM domains d
              LEFT JOIN whois_info w ON w.domain = d.domain
              WHERE w.domain IS NULL
-             ORDER BY d.domain".to_string()
-        };
-        let mut stmt = conn.prepare(&sql)?;
-        stmt.query_map([], |row| row.get(0))?
-            .collect::<std::result::Result<_, _>>()?
+             ORDER BY d.domain"
+        )?;
+        let rows: Vec<String> = stmt.query_map([], |row| row.get(0))?
+            .collect::<std::result::Result<_, _>>()?;
+        rows
     };
     drop(conn);
 
@@ -55,7 +53,7 @@ pub(crate) async fn cmd_whois(args: WhoisArgs) -> Result<()> {
 
     let writer_handle = tokio::task::spawn_blocking({
         let db_path = args.db.clone();
-        let batch_size = args.write_batch_size;
+        let batch_size = 500_usize;
         let progress = progress.clone();
         move || writer_loop_whois(db_path, result_rx, progress, done_tx, batch_size)
     });
@@ -76,7 +74,7 @@ pub(crate) async fn cmd_whois(args: WhoisArgs) -> Result<()> {
     } else {
         Some(tokio::spawn(progress_reporter(
             progress.clone(),
-            args.progress_interval,
+            Duration::from_secs(1),
             done_rx,
         )))
     };
@@ -109,6 +107,7 @@ async fn dispatcher_loop_whois(
     max_concurrency: usize,
 ) -> Result<()> {
     let sem = Arc::new(sem);
+    let consecutive_misses = Arc::new(AtomicU64::new(0));
     let mut joinset = JoinSet::<()>::new();
     let mut batch = Vec::with_capacity(DISPATCH_BATCH_SIZE);
 
@@ -118,12 +117,24 @@ async fn dispatcher_loop_whois(
         if batch.len() < DISPATCH_BATCH_SIZE { continue; }
 
         for domain in batch.drain(..) {
+            let backoff = backoff_duration(&consecutive_misses);
+            if !backoff.is_zero() {
+                tokio::time::sleep(backoff).await;
+            }
             let permit = sem.clone().acquire_owned().await.context("semaphore closed")?;
             let tx = result_tx.clone();
+            let misses = consecutive_misses.clone();
             joinset.spawn(async move {
                 let _permit = permit;
                 let row = fetch_whois(domain, connect_timeout).await;
-                if row.connected { let _ = tx.send(row).await; }
+                if row.connected {
+                    if row.registrar.is_some() {
+                        misses.store(0, Ordering::Relaxed);
+                    } else {
+                        misses.fetch_add(1, Ordering::Relaxed);
+                    }
+                    let _ = tx.send(row).await;
+                }
             });
             while joinset.len() >= max_concurrency {
                 if joinset.join_next().await.is_none() { break; }
@@ -133,12 +144,24 @@ async fn dispatcher_loop_whois(
     }
 
     for domain in batch.drain(..) {
+        let backoff = backoff_duration(&consecutive_misses);
+        if !backoff.is_zero() {
+            tokio::time::sleep(backoff).await;
+        }
         let permit = sem.clone().acquire_owned().await.context("semaphore closed")?;
         let tx = result_tx.clone();
+        let misses = consecutive_misses.clone();
         joinset.spawn(async move {
             let _permit = permit;
             let row = fetch_whois(domain, connect_timeout).await;
-            if row.connected { let _ = tx.send(row).await; }
+            if row.connected {
+                if row.registrar.is_some() {
+                    misses.store(0, Ordering::Relaxed);
+                } else {
+                    misses.fetch_add(1, Ordering::Relaxed);
+                }
+                let _ = tx.send(row).await;
+            }
         });
         while joinset.len() >= max_concurrency {
             if joinset.join_next().await.is_none() { break; }
@@ -147,6 +170,12 @@ async fn dispatcher_loop_whois(
 
     while joinset.join_next().await.is_some() {}
     Ok(())
+}
+
+fn backoff_duration(consecutive_misses: &AtomicU64) -> Duration {
+    let misses = consecutive_misses.load(Ordering::Relaxed);
+    if misses < 3 { return Duration::ZERO; }
+    Duration::from_millis((misses * 200).min(5_000))
 }
 
 async fn fetch_whois(domain: String, connect_timeout: Duration) -> WhoisRow {
@@ -271,18 +300,17 @@ fn writer_loop_whois(
     if !batch.is_empty() {
         flush_whois_batch(&conn, &mut batch)?;
     }
-    conn.execute_batch("CHECKPOINT")?;
     let _ = done_tx.send(());
     Ok(())
 }
 
-fn flush_whois_batch(conn: &duckdb::Connection, batch: &mut Vec<WhoisRow>) -> Result<()> {
+fn flush_whois_batch(conn: &rusqlite::Connection, batch: &mut Vec<WhoisRow>) -> Result<()> {
     conn.execute_batch("BEGIN")?;
     {
         let mut stmt = conn.prepare(
             "INSERT INTO whois_info
                 (domain, registrar, whois_created, expires_at, status, dnssec_delegated, queried_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, NOW())
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now'))
              ON CONFLICT(domain) DO UPDATE SET
                 registrar        = excluded.registrar,
                 whois_created    = excluded.whois_created,
@@ -298,7 +326,7 @@ fn flush_whois_batch(conn: &duckdb::Connection, batch: &mut Vec<WhoisRow>) -> Re
              WHERE domain = ?1",
         )?;
         for row in batch.iter() {
-            stmt.execute(duckdb::params![
+            stmt.execute(rusqlite::params![
                 row.domain.as_str(),
                 row.registrar.as_deref(),
                 row.whois_created.map(|d| d.to_string()),
@@ -306,7 +334,7 @@ fn flush_whois_batch(conn: &duckdb::Connection, batch: &mut Vec<WhoisRow>) -> Re
                 row.status.as_deref(),
                 row.dnssec_delegated,
             ])?;
-            upd.execute(duckdb::params![
+            upd.execute(rusqlite::params![
                 row.domain.as_str(),
                 row.registrar.as_deref(),
                 row.whois_created.map(|d| d.to_string()),
@@ -400,7 +428,7 @@ mod tests {
 
     #[test]
     fn flush_writes_whois_info_and_denormalises_domains() {
-        let conn = duckdb::Connection::open_in_memory().unwrap();
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
         crate::schema::ensure_schema(&conn).unwrap();
 
         // Insert a domain row first so the UPDATE has a target
@@ -431,7 +459,7 @@ mod tests {
         // domains denormalised columns populated (Bug 1)
         let (wr, wc): (Option<String>, Option<String>) = conn
             .query_row(
-                "SELECT whois_registrar, whois_created::VARCHAR FROM domains WHERE domain = 'example.ch'",
+                "SELECT whois_registrar, whois_created FROM domains WHERE domain = 'example.ch'",
                 [],
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )

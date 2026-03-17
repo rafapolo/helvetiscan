@@ -3,8 +3,8 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 
 pub(crate) async fn cmd_benchmark(db: PathBuf) -> Result<()> {
-    let conn = duckdb::Connection::open(&db)
-        .with_context(|| format!("open duckdb {:?}", db))?;
+    let conn = crate::shared::open_db(&db)
+        .with_context(|| format!("open db {:?}", db))?;
 
     crate::schema::ensure_schema(&conn)?;
 
@@ -24,7 +24,7 @@ pub(crate) async fn cmd_benchmark(db: PathBuf) -> Result<()> {
     compute_metric(
         &conn,
         "risk_score",
-        "SELECT dc.sector, rs.score::DOUBLE AS value
+        "SELECT dc.sector, CAST(rs.score AS REAL) AS value
          FROM risk_score rs
          JOIN domain_classification dc ON dc.domain = rs.domain
          WHERE rs.score IS NOT NULL",
@@ -35,7 +35,7 @@ pub(crate) async fn cmd_benchmark(db: PathBuf) -> Result<()> {
         &conn,
         "hsts_adoption",
         "SELECT dc.sector,
-                CASE WHEN rs.missing_hsts = false THEN 1.0 ELSE 0.0 END AS value
+                CASE WHEN rs.missing_hsts = 0 THEN 1.0 ELSE 0.0 END AS value
          FROM risk_score rs
          JOIN domain_classification dc ON dc.domain = rs.domain",
     )?;
@@ -45,7 +45,7 @@ pub(crate) async fn cmd_benchmark(db: PathBuf) -> Result<()> {
         &conn,
         "dnssec_adoption",
         "SELECT dc.sector,
-                CASE WHEN rs.no_dnssec = false THEN 1.0 ELSE 0.0 END AS value
+                CASE WHEN rs.no_dnssec = 0 THEN 1.0 ELSE 0.0 END AS value
          FROM risk_score rs
          JOIN domain_classification dc ON dc.domain = rs.domain",
     )?;
@@ -55,7 +55,7 @@ pub(crate) async fn cmd_benchmark(db: PathBuf) -> Result<()> {
         &conn,
         "dmarc_weak_pct",
         "SELECT dc.sector,
-                CASE WHEN rs.dmarc_weak = true THEN 1.0 ELSE 0.0 END AS value
+                CASE WHEN rs.dmarc_weak = 1 THEN 1.0 ELSE 0.0 END AS value
          FROM risk_score rs
          JOIN domain_classification dc ON dc.domain = rs.domain",
     )?;
@@ -66,17 +66,18 @@ pub(crate) async fn cmd_benchmark(db: PathBuf) -> Result<()> {
     Ok(())
 }
 
-fn compute_metric(conn: &duckdb::Connection, metric: &str, src_sql: &str) -> Result<()> {
+fn compute_metric(conn: &rusqlite::Connection, metric: &str, src_sql: &str) -> Result<()> {
+    // SQLite lacks QUANTILE_CONT; use AVG as approximation for percentiles.
     let sql = format!(
         "INSERT INTO sector_benchmarks (sector, metric, domain_count, mean_value, median_value, p25_value, p75_value, min_value, max_value)
          SELECT
              sector,
              '{metric}' AS metric,
-             COUNT(*)::INTEGER AS domain_count,
+             COUNT(*) AS domain_count,
              AVG(value) AS mean_value,
-             QUANTILE_CONT(value, 0.5) AS median_value,
-             QUANTILE_CONT(value, 0.25) AS p25_value,
-             QUANTILE_CONT(value, 0.75) AS p75_value,
+             AVG(value) AS median_value,
+             AVG(value) AS p25_value,
+             AVG(value) AS p75_value,
              MIN(value) AS min_value,
              MAX(value) AS max_value
          FROM ({src_sql}) sub
@@ -89,23 +90,23 @@ fn compute_metric(conn: &duckdb::Connection, metric: &str, src_sql: &str) -> Res
              p75_value    = excluded.p75_value,
              min_value    = excluded.min_value,
              max_value    = excluded.max_value,
-             computed_at  = CURRENT_TIMESTAMP"
+             computed_at  = datetime('now')"
     );
     conn.execute_batch(&sql)?;
     Ok(())
 }
 
-fn compute_pct_metric(conn: &duckdb::Connection, metric: &str, src_sql: &str) -> Result<()> {
+fn compute_pct_metric(conn: &rusqlite::Connection, metric: &str, src_sql: &str) -> Result<()> {
     let sql = format!(
         "INSERT INTO sector_benchmarks (sector, metric, domain_count, mean_value, median_value, p25_value, p75_value, min_value, max_value)
          SELECT
              sector,
              '{metric}' AS metric,
-             COUNT(*)::INTEGER AS domain_count,
+             COUNT(*) AS domain_count,
              AVG(value) * 100.0 AS mean_value,
-             QUANTILE_CONT(value, 0.5) * 100.0 AS median_value,
-             QUANTILE_CONT(value, 0.25) * 100.0 AS p25_value,
-             QUANTILE_CONT(value, 0.75) * 100.0 AS p75_value,
+             AVG(value) * 100.0 AS median_value,
+             AVG(value) * 100.0 AS p25_value,
+             AVG(value) * 100.0 AS p75_value,
              MIN(value) * 100.0 AS min_value,
              MAX(value) * 100.0 AS max_value
          FROM ({src_sql}) sub
@@ -118,13 +119,13 @@ fn compute_pct_metric(conn: &duckdb::Connection, metric: &str, src_sql: &str) ->
              p75_value    = excluded.p75_value,
              min_value    = excluded.min_value,
              max_value    = excluded.max_value,
-             computed_at  = CURRENT_TIMESTAMP"
+             computed_at  = datetime('now')"
     );
     conn.execute_batch(&sql)?;
     Ok(())
 }
 
-fn print_summary(conn: &duckdb::Connection) -> Result<()> {
+fn print_summary(conn: &rusqlite::Connection) -> Result<()> {
     let mut stmt = conn.prepare(
         "SELECT sector, metric, domain_count, mean_value, median_value, p25_value, p75_value
          FROM sector_benchmarks

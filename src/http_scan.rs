@@ -18,12 +18,11 @@ use crate::shared::{
     ErrorKind, HttpHeadersRow, Progress, ReqwestHickoryResolver, Row, ScanStatus,
     DISPATCH_BATCH_SIZE, DISPATCH_BATCH_SLEEP,
 };
-use crate::{BackfillMode, ScanArgs};
+use crate::ScanArgs;
 
 pub(crate) fn load_pending_domains(
-    conn: &duckdb::Connection,
+    conn: &rusqlite::Connection,
     domain: Option<&str>,
-    backfill: Option<BackfillMode>,
     retry_errors: Option<&str>,
 ) -> Result<Vec<String>> {
     if let Some(domain) = domain {
@@ -38,25 +37,11 @@ pub(crate) fn load_pending_domains(
             .collect::<std::result::Result<_, _>>()?;
         return Ok(domains);
     }
-    let sql = pending_domains_sql(backfill);
-    let mut stmt = conn.prepare(sql)?;
+    let mut stmt = conn.prepare("SELECT domain FROM domains WHERE updated_at IS NULL ORDER BY domain")?;
     let domains: Vec<String> = stmt
         .query_map([], |row| row.get(0))?
         .collect::<std::result::Result<_, _>>()?;
     Ok(domains)
-}
-
-pub(crate) fn pending_domains_sql(backfill: Option<BackfillMode>) -> &'static str {
-    match backfill {
-        Some(BackfillMode::Ip) => {
-            "SELECT domain FROM domains WHERE updated_at IS NOT NULL AND ip IS NULL ORDER BY domain"
-        }
-        Some(BackfillMode::Server) => {
-            "SELECT domain FROM domains WHERE updated_at IS NOT NULL AND server IS NULL ORDER BY domain"
-        }
-        Some(BackfillMode::Full) => "SELECT domain FROM domains ORDER BY domain",
-        None => "SELECT domain FROM domains WHERE updated_at IS NULL ORDER BY domain",
-    }
 }
 
 pub(crate) async fn cmd_scan(args: ScanArgs) -> Result<()> {
@@ -74,8 +59,8 @@ pub(crate) async fn cmd_scan(args: ScanArgs) -> Result<()> {
     }
 
     let conn =
-        duckdb::Connection::open(&args.db).with_context(|| format!("open duckdb {:?}", args.db))?;
-    let pending = load_pending_domains(&conn, args.domain.as_deref(), args.backfill, args.retry_errors.as_deref())?;
+        crate::shared::open_db(&args.db).with_context(|| format!("open db {:?}", args.db))?;
+    let pending = load_pending_domains(&conn, args.domain.as_deref(), args.retry_errors.as_deref())?;
     drop(conn);
 
     if pending.is_empty() {
@@ -119,7 +104,7 @@ pub(crate) async fn cmd_scan(args: ScanArgs) -> Result<()> {
     } else {
         Some(tokio::spawn(progress_reporter(
             progress.clone(),
-            args.progress_interval,
+            Duration::from_secs(1),
             done_rx,
         )))
     };
@@ -272,7 +257,7 @@ fn writer_loop_db(
     done_tx: tokio::sync::oneshot::Sender<()>,
     country_mmdb: PathBuf,
 ) -> Result<()> {
-    const BATCH_SIZE: usize = 1_000;
+    const BATCH_SIZE: usize = 500;
     let conn = crate::shared::open_db(&db_path)
         .with_context(|| format!("writer: open db {:?}", db_path))?;
 
@@ -294,28 +279,44 @@ fn writer_loop_db(
         }
         batch.push(row);
         progress.completed.fetch_add(1, Ordering::Relaxed);
-        if batch.len() >= batch_size {
-            flush_batch(&conn, &mut batch)?;
+        if batch.len() >= BATCH_SIZE {
+            flush_batch(&conn, &mut batch, country_reader.as_ref())?;
             flush_http_headers_batch(&conn, &mut headers_batch)?;
-        }
-        if limit.is_some_and(|l| progress.ok.load(Ordering::Relaxed) as usize >= l) {
-            break;
         }
     }
 
     if !batch.is_empty() {
-        flush_batch(&conn, &mut batch)?;
+        flush_batch(&conn, &mut batch, country_reader.as_ref())?;
     }
     if !headers_batch.is_empty() {
         flush_http_headers_batch(&conn, &mut headers_batch)?;
     }
 
-    conn.execute_batch("CHECKPOINT")?;
     let _ = done_tx.send(());
     Ok(())
 }
 
-pub(crate) fn flush_batch(conn: &duckdb::Connection, batch: &mut Vec<Row>) -> Result<()> {
+pub(crate) fn flush_batch(
+    conn: &rusqlite::Connection,
+    batch: &mut Vec<Row>,
+    country_reader: Option<&maxminddb::Reader<Vec<u8>>>,
+) -> Result<()> {
+    use std::net::IpAddr;
+    use std::str::FromStr;
+
+    // Enrich rows with country_code if reader is available
+    if let Some(reader) = country_reader {
+        for row in batch.iter_mut() {
+            if let Some(ip_str) = row.ip.as_deref() {
+                if let Ok(ip) = IpAddr::from_str(ip_str) {
+                    if let Ok(c) = reader.lookup::<maxminddb::geoip2::Country>(ip) {
+                        row.country_code = c.country.and_then(|c| c.iso_code).map(str::to_owned);
+                    }
+                }
+            }
+        }
+    }
+
     let mut sql = String::from("BEGIN;\n");
     for row in batch.iter() {
         sql.push_str(&format!(
@@ -332,7 +333,8 @@ pub(crate) fn flush_batch(conn: &duckdb::Connection, batch: &mut Vec<Row>) -> Re
                 powered_by     = {},
                 redirect_chain = {},
                 cms            = {},
-                updated_at     = NOW()
+                country_code   = {},
+                updated_at     = datetime('now')
              WHERE domain = {};\n",
             sql_string(row.status.as_str()),
             sql_string_opt(row.final_url.as_deref()),
@@ -346,6 +348,7 @@ pub(crate) fn flush_batch(conn: &duckdb::Connection, batch: &mut Vec<Row>) -> Re
             sql_string_opt(row.powered_by.as_deref()),
             sql_string_list(&row.redirect_chain),
             sql_string_opt(row.cms.as_deref()),
+            sql_string_opt(row.country_code.as_deref()),
             sql_string(row.domain.as_str()),
         ));
     }
@@ -355,14 +358,14 @@ pub(crate) fn flush_batch(conn: &duckdb::Connection, batch: &mut Vec<Row>) -> Re
     Ok(())
 }
 
-pub(crate) fn flush_http_headers_batch(conn: &duckdb::Connection, batch: &mut Vec<HttpHeadersRow>) -> Result<()> {
+pub(crate) fn flush_http_headers_batch(conn: &rusqlite::Connection, batch: &mut Vec<HttpHeadersRow>) -> Result<()> {
     conn.execute_batch("BEGIN")?;
     {
         let mut stmt = conn.prepare(
             "INSERT INTO http_headers (
                 domain, hsts, csp, x_frame_options, x_content_type_options,
                 cors_origin, referrer_policy, permissions_policy, scanned_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NOW())
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, datetime('now'))
              ON CONFLICT(domain) DO UPDATE SET
                 hsts                   = excluded.hsts,
                 csp                    = excluded.csp,
@@ -374,7 +377,7 @@ pub(crate) fn flush_http_headers_batch(conn: &duckdb::Connection, batch: &mut Ve
                 scanned_at             = excluded.scanned_at",
         )?;
         for row in batch.iter() {
-            stmt.execute(duckdb::params![
+            stmt.execute(rusqlite::params![
                 row.domain.as_str(),
                 row.hsts.as_deref(),
                 row.csp.as_deref(),
@@ -444,6 +447,7 @@ pub(crate) async fn fetch_domain(
         elapsed_ms: start.elapsed().as_millis() as u64,
         redirect_chain: vec![],
         cms: None,
+        country_code: None,
     }, None)
 }
 
@@ -635,6 +639,7 @@ async fn fetch_url_inner(
         elapsed_ms: 0,
         redirect_chain: vec![],
         cms,
+        country_code: None,
     };
 
     let headers = HttpHeadersRow {

@@ -231,7 +231,7 @@ pub(crate) async fn analyze_email_security(
 // ---- DB flush ----
 
 pub(crate) fn flush_email_security_batch(
-    conn: &duckdb::Connection,
+    conn: &rusqlite::Connection,
     batch: &mut Vec<EmailSecurityRow>,
 ) -> Result<()> {
     if batch.is_empty() {
@@ -245,7 +245,7 @@ pub(crate) fn flush_email_security_batch(
                 spf_over_limit, dmarc_present, dmarc_policy, dmarc_subdomain_policy,
                 dmarc_has_reporting, dmarc_pct, dkim_default, dkim_google, dkim_found,
                 scanned_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, NOW())
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, datetime('now'))
              ON CONFLICT(domain) DO UPDATE SET
                 spf_present            = excluded.spf_present,
                 spf_policy             = excluded.spf_policy,
@@ -263,7 +263,7 @@ pub(crate) fn flush_email_security_batch(
                 scanned_at             = excluded.scanned_at",
         )?;
         for row in batch.iter() {
-            stmt.execute(duckdb::params![
+            stmt.execute(rusqlite::params![
                 row.domain.as_str(),
                 row.spf_present,
                 row.spf_policy.as_deref(),

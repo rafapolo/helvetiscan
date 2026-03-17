@@ -72,8 +72,8 @@ pub(crate) fn classify_by_keywords(
 }
 
 pub(crate) async fn cmd_classify(db: PathBuf) -> Result<()> {
-    let conn = duckdb::Connection::open(&db)
-        .with_context(|| format!("open duckdb {:?}", db))?;
+    let conn = crate::shared::open_db(&db)
+        .with_context(|| format!("open db {:?}", db))?;
 
     crate::schema::ensure_schema(&conn)?;
 
@@ -122,7 +122,7 @@ pub(crate) async fn cmd_classify(db: PathBuf) -> Result<()> {
 
         for row in &rows {
             if let Some((sector, subsector, confidence)) = classify_by_keywords(&row.domain, row.title.as_deref()) {
-                stmt.execute(duckdb::params![
+                stmt.execute(rusqlite::params![
                     row.domain.as_str(),
                     sector,
                     subsector,
