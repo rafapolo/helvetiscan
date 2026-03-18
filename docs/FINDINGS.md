@@ -651,7 +651,7 @@ Government and education are the most domestically hosted sectors. **Pharma has 
 
 *Open database ports (MySQL 3306, PostgreSQL 5432, Redis 6379, Elasticsearch 9200, MongoDB 27017) per classified sector.*
 
-| Sector | MySQL | PostgreSQL | Redis | Elasticsearch | MongoDB | Total |
+| Sector | MySQL | PostgreSQL | Redis | Elasticsearch | MongoDB | Total domains |
 |---|---|---|---|---|---|---|
 | Retail | 5,102 | 427 | 34 | 35 | 23 | 38,230 |
 | Education | 2,967 | 97 | 5 | 14 | 6 | 16,110 |
