@@ -9,9 +9,7 @@ Scan, map and visualize the entire Swiss `.ch` namespace — over 2.5 million do
 
 </div>
 
-This public visualization exposes the DNS dependency structure as an interactive force graph. See it online [here](https://xn--2dk.xyz/dataviz/swiss/?maxPoints=50000&sim=1).
-
-50 thousand domains shown in this graph, just 2%. Adjust `maxPoints` in the URL to load more.[^2]
+This public visualization exposes the DNS dependency structure as an interactive force graph. 50 thousand domains shown in this graph, just 2%. Adjust `maxPoints` in the URL to load more. See it online [here](https://xn--2dk.xyz/dataviz/swiss/?maxPoints=50000&sim=1).[^2]
  
  
 
@@ -43,7 +41,7 @@ Options:
       --retry-errors <RETRY_ERRORS>  Re-scan domains whose error_kind matches this value (e.g. 'timeout')
 ```
 
-The full HTTP scan completes in under four hours on a 1 Gbps connection.
+The full HTTP scan completes in under 2 hours with high parallelization on a single machine with a 1 Gbps connection.
 
 ---
 
@@ -93,4 +91,4 @@ The full HTTP scan completes in under four hours on a 1 Gbps connection.
 → [See more](docs/FINDINGS.md)[^1]
 
 [^1]: Raw datasets are not published. Consider only processed edges.arrow and nodes.arrow for dataviz.
-[^2]: Full dataset visualiaztion requires more than 16GB RAM for a proper WebGPU processing.
+[^2]: Full dataset visualization requires more than 16GB RAM for a proper WebGPU processing.

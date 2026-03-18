@@ -17,6 +17,7 @@ mod cve;
 mod classify;
 mod benchmark;
 mod sovereignty;
+mod processing;
 #[cfg(test)]
 mod tests;
 
@@ -68,6 +69,10 @@ enum Command {
     Sovereignty(SovereigntyArgs),
     /// Run the full pipeline: scan → dns → tls → ports → subdomains → whois → cves → classify → sovereignty → benchmark.
     Full(FullArgs),
+    /// Export all (or selected) tables from the SQLite database to Parquet files.
+    ExportParquet(ExportParquetArgs),
+    /// Import Parquet files from a directory back into the SQLite database.
+    ImportParquet(ImportParquetArgs),
 }
 
 #[derive(Parser, Debug)]
@@ -251,6 +256,38 @@ pub(crate) struct SovereigntyArgs {
 }
 
 #[derive(Parser, Debug)]
+pub(crate) struct ExportParquetArgs {
+    #[arg(long, default_value = "data/domains.db")]
+    pub(crate) db: PathBuf,
+
+    /// Directory where .parquet files will be written.
+    #[arg(long, default_value = "data/export")]
+    pub(crate) output_dir: PathBuf,
+
+    /// Tables to skip (can be repeated: --exclude foo --exclude bar).
+    #[arg(long)]
+    pub(crate) exclude: Vec<String>,
+}
+
+#[derive(Parser, Debug)]
+pub(crate) struct ImportParquetArgs {
+    #[arg(long, default_value = "data/domains.db")]
+    pub(crate) db: PathBuf,
+
+    /// Directory containing .parquet files to import.
+    #[arg(long, default_value = "data/export")]
+    pub(crate) input_dir: PathBuf,
+
+    /// Tables to skip (can be repeated: --exclude foo --exclude bar).
+    #[arg(long)]
+    pub(crate) exclude: Vec<String>,
+
+    /// How to handle conflicts: replace (default), ignore, or abort.
+    #[arg(long, default_value = "replace")]
+    pub(crate) on_conflict: String,
+}
+
+#[derive(Parser, Debug)]
 pub(crate) struct FullArgs {
     #[arg(long, default_value = "data/domains.db")]
     pub(crate) db: PathBuf,
@@ -423,6 +460,12 @@ async fn main() -> Result<()> {
                 Command::Benchmark(a) => benchmark::cmd_benchmark(a.db).await,
                 Command::Sovereignty(a) => sovereignty::cmd_sovereignty(a).await,
                 Command::Full(a) => cmd_full_pipeline(a).await,
+                Command::ExportParquet(a) => {
+                    processing::export_as_parquet::cmd_export_parquet(a)
+                }
+                Command::ImportParquet(a) => {
+                    processing::import_from_parquet::cmd_import_parquet(a)
+                }
             }
         }
         (None, _, None) => unreachable!("clap ensures at least one argument is provided"),
