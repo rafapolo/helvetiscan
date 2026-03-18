@@ -52,7 +52,7 @@ flowchart TD
 
 ---
 
-### [01_TLS_Certificates.md](01_TLS_Certificates.md)
+### [01_TLS_Certificates.md](modules/01_TLS_Certificates.md)
 **Criticality:** HIGH | **Risk Contribution:** 15–20%
 
 TLS certificate validity, strength, and cryptographic assurance.
@@ -69,7 +69,7 @@ TLS certificate validity, strength, and cryptographic assurance.
 
 ---
 
-### [02_DNS_DNSSEC.md](02_DNS_DNSSEC.md)
+### [02_DNS_DNSSEC.md](modules/02_DNS_DNSSEC.md)
 **Criticality:** HIGH | **Risk Contribution:** 12–18%
 
 DNS configuration, DNSSEC enablement, and subdomain hygiene.
@@ -86,7 +86,7 @@ DNS configuration, DNSSEC enablement, and subdomain hygiene.
 
 ---
 
-### [03_HTTP_Security_Headers.md](03_HTTP_Security_Headers.md)
+### [03_HTTP_Security_Headers.md](modules/03_HTTP_Security_Headers.md)
 **Criticality:** MEDIUM-HIGH | **Risk Contribution:** 10–15%
 
 HTTP security headers (HSTS, CSP, X-Frame-Options, Referrer-Policy, etc.)
@@ -103,7 +103,7 @@ HTTP security headers (HSTS, CSP, X-Frame-Options, Referrer-Policy, etc.)
 
 ---
 
-### [04_Open_Ports.md](04_Open_Ports.md)
+### [04_Open_Ports.md](modules/04_Open_Ports.md)
 **Criticality:** CRITICAL | **Risk Contribution:** 20–25%
 
 Network exposure assessment — which services are Internet-facing.
@@ -120,7 +120,7 @@ Network exposure assessment — which services are Internet-facing.
 
 ---
 
-### [05_Email_Security.md](05_Email_Security.md)
+### [05_Email_Security.md](modules/05_Email_Security.md)
 **Criticality:** CRITICAL (for SMEs) | **Risk Contribution:** 18–25%
 
 Email authentication (SPF, DKIM, DMARC) and anti-spoofing controls.
@@ -137,7 +137,7 @@ Email authentication (SPF, DKIM, DMARC) and anti-spoofing controls.
 
 ---
 
-### [06_Technology_Fingerprinting.md](06_Technology_Fingerprinting.md)
+### [06_Technology_Fingerprinting.md](modules/06_Technology_Fingerprinting.md)
 **Criticality:** MEDIUM-HIGH | **Risk Contribution:** 10–15%
 
 Software inventory and CVE correlation.
@@ -154,7 +154,7 @@ Software inventory and CVE correlation.
 
 ---
 
-### [07_Domain_Protection.md](07_Domain_Protection.md)
+### [07_Domain_Protection.md](modules/07_Domain_Protection.md)
 **Criticality:** MEDIUM-HIGH | **Risk Contribution:** 12–18%
 
 Domain lifecycle, typosquatting, and subdomain takeover risks.
