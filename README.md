@@ -74,7 +74,7 @@ Options:
 -  TLS key sizes: no RSA <2048 found; ECDSA at 15.4%; 1,091 certs expiring within 7 days
 -  Most common ports beyond 80/443 (FTP open on 688K = 42% of scanned)
 
-→ Read the [KEY FINDINGS](docs/FINDINGS.md)
+→ Read the [KEY FINDINGS](docs/FINDINGS.md) / [PDF REPORT](docs/helvetiscan-findings.pdf)
 
 ---
 
