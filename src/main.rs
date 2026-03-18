@@ -17,6 +17,7 @@ mod cve;
 mod classify;
 mod benchmark;
 mod sovereignty;
+mod geocode;
 mod processing;
 #[cfg(test)]
 mod tests;
@@ -69,6 +70,8 @@ enum Command {
     Sovereignty(SovereigntyArgs),
     /// Run the full pipeline: scan → dns → tls → ports → subdomains → whois → cves → classify → sovereignty → benchmark.
     Full(FullArgs),
+    /// Enrich domains with hosting country code from GeoLite2-Country.mmdb.
+    Geocode(GeocodeArgs),
     /// Export all (or selected) tables from the SQLite database to Parquet files.
     ExportParquet(ExportParquetArgs),
     /// Import Parquet files from a directory back into the SQLite database.
@@ -253,6 +256,16 @@ pub(crate) struct SovereigntyArgs {
     #[arg(long, default_value = "data/GeoLite2-Country.mmdb")]
     pub(crate) country_mmdb: PathBuf,
 
+}
+
+#[derive(Parser, Debug)]
+pub(crate) struct GeocodeArgs {
+    #[arg(long, default_value = "data/domains.db")]
+    pub(crate) db: PathBuf,
+
+    /// Path to GeoLite2-Country.mmdb (offline country lookup).
+    #[arg(long, default_value = "data/GeoLite2-Country.mmdb")]
+    pub(crate) country_mmdb: PathBuf,
 }
 
 #[derive(Parser, Debug)]
@@ -460,6 +473,10 @@ async fn main() -> Result<()> {
                 Command::Benchmark(a) => benchmark::cmd_benchmark(a.db).await,
                 Command::Sovereignty(a) => sovereignty::cmd_sovereignty(a).await,
                 Command::Full(a) => cmd_full_pipeline(a).await,
+                Command::Geocode(a) => geocode::cmd_geocode(geocode::GeoCodeArgs {
+                    db: a.db,
+                    country_mmdb: a.country_mmdb,
+                }),
                 Command::ExportParquet(a) => {
                     processing::export_as_parquet::cmd_export_parquet(a)
                 }

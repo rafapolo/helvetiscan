@@ -1136,11 +1136,11 @@
             </p>
 
             <div class="hero-actions">
-                <a href="#contact" class="btn btn-primary"
-                    >Request Investor Brief</a
+                <a href="#findings" class="btn btn-primary"
+                    >Full Findings Report</a
                 >
-                <a href="#product" class="btn btn-outline"
-                    >See the Platform →</a
+                <a href="#contact" class="btn btn-outline"
+                    >Request Investor Brief →</a
                 >
             </div>
 
@@ -1392,7 +1392,8 @@
                             (~19% of all live .ch)
                         </li>
                         <li>
-                            43,473 active sites run end-of-life PHP versions
+                            Top 3 NS providers control 29.3% of namespace — one
+                            outage is a national DNS event
                         </li>
                     </ul>
                 </div>
@@ -1408,26 +1409,30 @@
                     <ul class="service-features">
                         <li>TLS 1.3 adoption: 92.9% of HTTPS sites</li>
                         <li>Let's Encrypt issues 83.1% of certificates</li>
-                        <li>60,171 certificates expire within 30 days</li>
+                        <li>71,767 certificates expire within 30 days</li>
+                        <li>
+                            1,137,037 TLS sites have no CAA record — any CA can
+                            issue their certificate
+                        </li>
                     </ul>
                 </div>
 
                 <div class="service-card">
                     <span class="tag">Email Security</span>
-                    <h3>43.3% of domains fully spoofable</h3>
+                    <h3>45.0% of domains fully spoofable</h3>
                     <p>
-                        Nearly half of scanned .ch domains can be impersonated
-                        in a phishing attack today — SPF absent or permissive,
-                        DMARC missing or on p=none.
+                        1,146,818 .ch domains can be impersonated in a phishing
+                        attack today — SPF absent or permissive, DMARC missing
+                        or on p=none.
                     </p>
                     <ul class="service-features">
                         <li>DKIM adoption: only 6.8%</li>
                         <li>
-                            24.7% of DMARC adopters use p=none (no enforcement)
+                            25.5% of DMARC adopters use p=none (no enforcement)
                         </li>
                         <li>
-                            Only 30.2% implement HSTS despite 71.7% serving
-                            HTTPS
+                            Finance and pharma worst sectors: 48.5% of
+                            classified domains fully spoofable
                         </li>
                     </ul>
                 </div>
@@ -1444,25 +1449,30 @@
                         <li>SMB (file sharing) exposed: 87,292 domains</li>
                         <li>Docker API exposed: 1,742 domains</li>
                         <li>FTP open: 688k domains — 42% of all scanned</li>
+                        <li>
+                            Finance sector: 37 Elasticsearch + 34 Redis
+                            instances exposed — often unauthenticated
+                        </li>
                     </ul>
                 </div>
 
                 <div class="service-card">
-                    <span class="tag">Hosting</span>
+                    <span class="tag">Hosting &amp; Sovereignty</span>
                     <h3>40.6% hosted outside Switzerland</h3>
                     <p>
-                        Data sovereignty is a live compliance issue. A large
-                        share of Swiss domains are physically hosted abroad —
-                        often under foreign jurisdiction.
+                        Data sovereignty is a live compliance issue. 207,977
+                        domains have both foreign DNS control and foreign
+                        hosting — fully outside Swiss jurisdiction.
                     </p>
                     <ul class="service-features">
                         <li>Germany: 17.3% · United States: 11.6%</li>
                         <li>
-                            Single Hostpoint IP hosts 133,425 domains (6.9% of
-                            live .ch)
+                            Pharma lowest Swiss-hosting rate (49.9%); government
+                            highest (75.1%)
                         </li>
                         <li>
-                            Top 10 IPs collectively serve ~21% of the namespace
+                            944 finance + 601 healthcare domains route through
+                            Cloudflare (US jurisdiction)
                         </li>
                     </ul>
                 </div>
@@ -1476,14 +1486,41 @@
                         the norm in every other developed market.
                     </p>
                     <ul class="service-features">
-                        <li>40.6% of sites expose server version strings</li>
+                        <li>
+                            Legal sector worst: 61.6% of legal domains have no
+                            security headers at all
+                        </li>
+                        <li>
+                            Government leads on HSTS (38%) but only 9.3% deploy
+                            CSP
+                        </li>
                         <li>
                             Domains in high-risk jurisdictions: 501 in
                             RU/BY/IR/CN/SY
                         </li>
+                    </ul>
+                </div>
+
+                <div class="service-card">
+                    <span class="tag">CVE Risk</span>
+                    <h3>38% domains match CISA KEV entries</h3>
+                    <p>
+                        Over 977,666 domains of the Swiss namespace runs
+                        software with actively exploited vulnerabilities
+                        confirmed by the US CISA Known Exploited Vulnerabilities
+                        catalog.
+                    </p>
+                    <ul class="service-features">
                         <li>
-                            Wix: 77k · Register.it: 35k · Shopify: 15k Swiss
-                            domains
+                            Apache alone: 682,438 domains · 40 distinct CVEs
+                        </li>
+                        <li>
+                            Finance: 3,945 domains with Apache CRITICAL CVE
+                            matches · Healthcare: 2,954
+                        </li>
+                        <li>
+                            Max exposure: 61 distinct CVEs on a single domain
+                            (Apache + PHP + OpenSSL + WordPress stack)
                         </li>
                     </ul>
                 </div>
@@ -1522,7 +1559,7 @@
                     href="https://github.com/rafapolo/helvetiscan/blob/main/docs/FINDINGS.md"
                     target="_blank"
                     rel="noopener"
-                    class="btn btn-outline"
+                    class="btn btn btn-secondary"
                     style="
                         background: rgba(15, 31, 54, 0.07);
                         color: var(--navy);
@@ -1703,69 +1740,6 @@
             </div>
         </section>
 
-        <!-- ── METRICS ── -->
-        <div class="metrics-band">
-            <div class="metric-item">
-                <h3>600<span>k</span></h3>
-                <p>Total Swiss SMEs</p>
-            </div>
-            <div class="metric-item">
-                <h3>75<span>k</span></h3>
-                <p>Serviceable addressable market</p>
-            </div>
-            <div class="metric-item">
-                <h3>CHF <span>800</span></h3>
-                <p>Entry price per year</p>
-            </div>
-            <div class="metric-item">
-                <h3>85<span>%+</span></h3>
-                <p>Gross margin at 1,000 subscribers</p>
-            </div>
-            <div class="metric-item">
-                <h3>300<span>–400</span></h3>
-                <p>Subscribers to break-even</p>
-            </div>
-        </div>
-
-        <!-- ── PROJECTIONS ── -->
-        <section class="projections">
-            <div class="section-label">Financial Projections</div>
-            <h2>Profitable at Year 3. High margin from Year 2.</h2>
-            <p class="section-intro">
-                Infrastructure costs do not scale linearly with subscribers —
-                enabling rapid margin expansion as the base grows.
-            </p>
-
-            <div class="proj-grid">
-                <div class="proj-card">
-                    <div class="year">Year 1</div>
-                    <div class="revenue">CHF 40–120k</div>
-                    <div class="subs">50–150 subscribers</div>
-                </div>
-                <div class="proj-card">
-                    <div class="year">Year 2</div>
-                    <div class="revenue">CHF 240–480k</div>
-                    <div class="subs">300–600 subscribers · Break-even</div>
-                </div>
-                <div class="proj-card">
-                    <div class="year">Year 3</div>
-                    <div class="revenue">CHF 800k–1.6M</div>
-                    <div class="subs">1,000–2,000 subscribers</div>
-                </div>
-                <div class="proj-card">
-                    <div class="year">Year 4–5</div>
-                    <div class="revenue">CHF 4–6M</div>
-                    <div class="subs">5,000–7,500 subscribers</div>
-                </div>
-            </div>
-
-            <p style="font-size: 0.84rem; color: var(--gray); max-width: 620px">
-                Unit economics: CAC CHF 150–400 via LinkedIn outbound + content.
-                LTV CHF 2,400 at 3-year retention. LTV:CAC ratio 6:1–16:1.
-                Marginal cost of new subscriber near zero.
-            </p>
-        </section>
-
         <!-- ── TRACTION / MILESTONES ── -->
         <section id="traction" class="milestones">
             <div class="section-label">Traction &amp; Milestones</div>
@@ -1773,62 +1747,6 @@
             <p class="section-intro">
                 Built by a technical founder. Every core module is operational.
             </p>
-
-            <div class="timeline">
-                <div class="tl-item">
-                    <div class="tl-dot done"></div>
-                    <div class="tl-content">
-                        <h3>Q1 2026 ✓</h3>
-                        <p>
-                            Complete .ch namespace enumeration (2.5M+ domains).
-                            Scan engine in Rust — HTTP, DNS, TLS, ports, WHOIS,
-                            subdomains. Risk scoring model v1. Swiss Innovation
-                            Challenge application submitted.
-                        </p>
-                    </div>
-                </div>
-                <div class="tl-item">
-                    <div class="tl-dot active"></div>
-                    <div class="tl-content">
-                        <h3>Q2 2026</h3>
-                        <p>
-                            GmbH incorporation (Basel-Stadt). Compliance report
-                            generator. REST API &amp; web dashboard. First 10
-                            paying pilot clients.
-                        </p>
-                    </div>
-                </div>
-                <div class="tl-item">
-                    <div class="tl-dot"></div>
-                    <div class="tl-content">
-                        <h3>Q3 2026</h3>
-                        <p>
-                            Seed round close (CHF 300k). 50 subscribers. First
-                            Treuhandpartner partnership signed.
-                        </p>
-                    </div>
-                </div>
-                <div class="tl-item">
-                    <div class="tl-dot"></div>
-                    <div class="tl-content">
-                        <h3>Q4 2026</h3>
-                        <p>
-                            100 subscribers. ISACA Switzerland community launch.
-                            First pharma enterprise pilot.
-                        </p>
-                    </div>
-                </div>
-                <div class="tl-item">
-                    <div class="tl-dot"></div>
-                    <div class="tl-content">
-                        <h3>Q2 2027</h3>
-                        <p>
-                            200 subscribers. Break-even approaching. Series A
-                            preparation.
-                        </p>
-                    </div>
-                </div>
-            </div>
         </section>
 
         <!-- ── CONTACT ── -->

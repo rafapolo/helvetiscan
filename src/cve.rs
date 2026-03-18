@@ -68,6 +68,23 @@ const SEED_CVES: &[(&str, &str, &str, f64, &str, &str, &str)] = &[
     ("openssl", "CVE-2022-0778", "HIGH", 7.5, "1.0.2", "3.0.1", "OpenSSL BN_mod_sqrt infinite loop DoS"),
     ("openssl", "CVE-2022-3602", "HIGH", 7.5, "3.0.0", "3.0.6", "OpenSSL X.509 punycode buffer overflow"),
     ("openssl", "CVE-2014-0160", "HIGH", 7.5, "1.0.1", "1.0.1f", "Heartbleed — OpenSSL memory disclosure"),
+    // Craft CMS
+    ("craft cms", "CVE-2024-56145", "CRITICAL", 9.8, "3.0.0", "5.5.2", "Craft CMS code injection via template rendering"),
+    ("craft cms", "CVE-2025-23209", "HIGH", 8.8, "4.0.0", "5.5.5", "Craft CMS code injection via improper input validation"),
+    ("craft cms", "CVE-2025-35939", "HIGH", 8.0, "3.0.0", "5.6.2", "Craft CMS external control of assumed-immutable web parameter"),
+    // LiteSpeed
+    ("litespeed", "CVE-2022-0073", "HIGH", 8.8, "5.0", "6.0.12", "LiteSpeed Web Server privilege escalation via dashboard"),
+    ("litespeed", "CVE-2022-0074", "HIGH", 8.8, "5.0", "6.0.12", "LiteSpeed Web Server RCE via log injection"),
+    ("litespeed", "CVE-2020-36641", "CRITICAL", 9.8, "5.0", "5.4.12", "LiteSpeed Cache Plugin path traversal"),
+    // Microsoft IIS
+    ("microsoft-iis", "CVE-2017-7269", "CRITICAL", 9.8, "6.0", "6.0", "Microsoft IIS 6.0 WebDAV buffer overflow RCE"),
+    ("microsoft-iis", "CVE-2015-1635", "CRITICAL", 9.8, "7.5", "8.5", "Microsoft IIS HTTP.sys remote code execution"),
+    ("microsoft-iis", "CVE-2021-31166", "CRITICAL", 9.8, "10.0", "10.0", "Microsoft IIS HTTP Protocol Stack RCE"),
+    // Tomcat
+    ("tomcat", "CVE-2025-24813", "CRITICAL", 9.8, "9.0.0", "11.0.2", "Apache Tomcat path equivalence RCE"),
+    ("tomcat", "CVE-2020-1938", "CRITICAL", 9.8, "7.0.0", "9.0.30", "Apache Tomcat AJP Ghostcat file read/inclusion"),
+    ("tomcat", "CVE-2017-12617", "HIGH", 8.1, "7.0.0", "9.0.1", "Apache Tomcat JSP upload via HTTP PUT"),
+    ("tomcat", "CVE-2016-8735", "CRITICAL", 9.8, "6.0.0", "9.0.0", "Apache Tomcat RCE via JMX listener"),
 ];
 
 // ---- CISA KEV fetcher ----
@@ -101,7 +118,7 @@ pub(crate) async fn cmd_update_cves(db: PathBuf) -> Result<()> {
         .as_array()
         .context("missing vulnerabilities array")?;
 
-    let relevant_vendors = &["wordpress", "drupal", "joomla", "apache", "nginx", "openssl", "php", "typo3"];
+    let relevant_vendors = &["wordpress", "drupal", "joomla", "apache", "nginx", "openssl", "php", "typo3", "craft cms", "tomcat", "litespeed"];
 
     let mut inserted = 0usize;
     for entry in vulnerabilities {

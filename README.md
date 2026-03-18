@@ -59,17 +59,19 @@ Options:
 -  147,983 share a single Hostpoint parking page
 -  71.7% end on HTTPS; 28.3% still serve over plain HTTP
 -  40.6% of .ch domains hosted abroad; Germany leads at 17.3%, US at 11.6%
+-  207,977 domains fully offshored — foreign NS operator jurisdiction AND foreign hosting combined
 -  49.1% send zero security headers; only 30.2% use HSTS despite 71.7% serving HTTPS
--  TLS 1.3 at 92.9%; Let's Encrypt issues 83.1% of certs; 60,171 expire within 30 days
--  43.3% of scanned domains fully spoofable; DKIM only 6.8%; 24.7% of DMARC adopters on p=none
--  313,472 domains (16% of live) expose MySQL; 87,292 expose SMB; 1,742 expose Docker API
--  86.7% of .ch hosting stays within Europe; North America (US cloud) accounts for 13.0%
+-  Legal sector worst: 61.6% of legal domains have zero security headers
+-  TLS 1.3 at 92.9%; Let's Encrypt issues 83.1% of certs; 71,767 expire within 30 days
+-  45.0% fully spoofable; DKIM only 6.8%; 25.5% of DMARC adopters on p=none
+-  16% of live) expose MySQL; 87,292 expose SMB; 1,742 expose Docker API
+-  38.4% match at least one CISA Known Exploited Vulnerability entry
+-  86.7% of .ch hosting stays within Europe; US cloud accounts for 13.0%
+-  Pharma lowest Swiss-hosting rate at 49.9%; government highest at 75.1%
 -  Largest foreign IP concentrations (Wix 77K, Register.it 35K, Shopify 15K)
 -  Domains served in weak-jurisdiction countries (501 in RU/BY/IR/CN/SY)
 -  US cloud exposure via server header (Cloudflare 181K, Vercel 10K, AWS 6K = 10.1%)
--  TLS key sizes (no RSA <2048; ECDSA at 15.4%; 1,091 certs expiring in 7 days)
--  Email spoofing exposure (305K domains = 43.3% fully spoofable)
--  AXFR zone transfer leaks (2,300 parent domains, 27K subdomains exposed)
+-  TLS key sizes: no RSA <2048 found; ECDSA at 15.4%; 1,091 certs expiring within 7 days
 -  Most common ports beyond 80/443 (FTP open on 688K = 42% of scanned)
 
 → Read the [KEY FINDINGS](docs/FINDINGS.md)
