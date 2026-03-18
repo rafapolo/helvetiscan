@@ -41,6 +41,18 @@ flowchart TD
 
 ## Scan Modules
 
+| Module | What it checks |
+|---|---|
+| **TLS & Certificates** | Expiration, chain validity, key strength, TLS version, CT logs |
+| **DNS & DNSSEC** | DNSSEC adoption, CAA records, zone transfers, open resolvers |
+| **HTTP Security Headers** | HSTS, CSP, X-Frame-Options, Referrer-Policy, Permissions-Policy |
+| **Open Ports** | Exposed databases, RDP, SMB, FTP, management interfaces |
+| **Email Security** | SPF, DKIM, DMARC — spoofing readiness across the namespace |
+| **Technology Fingerprinting** | CMS/framework detection, version extraction, CVE correlation |
+| **Domain Protection** | WHOIS expiry, typosquats, homoglyphs, orphaned subdomains |
+
+---
+
 ### [01_TLS_Certificates.md](01_TLS_Certificates.md)
 **Criticality:** HIGH | **Risk Contribution:** 15–20%
 
@@ -213,106 +225,3 @@ Domain lifecycle, typosquatting, and subdomain takeover risks.
    - Compliance-specific output (ISG §4, DORA, NIS2)
    - Remediation guidance
    - Timeline estimates
-
----
-
-## Regulatory Alignment
-
-### ISG §4 (Information Security Act, Switzerland)
-
-**Mandatory Controls:**
-- ✓ TLS certificates valid & strong (TLS & Certificates module)
-- ✓ DNSSEC enabled (DNS module)
-- ✓ HTTP security headers (HTTP Headers module)
-- ✓ No exposed databases (Open Ports module)
-- ✓ Email spoofing prevention (Email Security module)
-- ✓ Software patching (Technology Fingerprinting module)
-
-### DORA 16 (Digital Operational Resilience Act, EU)
-
-**Requirements:**
-- ✓ Software asset inventory (Technology module)
-- ✓ Vulnerability tracking (Technology module)
-- ✓ Certificate lifecycle management (TLS module)
-- ✓ Network security (Open Ports module)
-
-### NIS2 (Network & Information Security Directive 2, EU)
-
-**Supply Chain Requirements:**
-- ✓ Network segmentation assessment (Open Ports)
-- ✓ Email authentication (Email Security)
-- ✓ Vulnerability tracking (Technology)
-- ✓ Domain ownership proof (Domain Protection)
-
----
-
-## Usage Examples
-
-### For a Healthcare Provider (GDPR-sensitive)
-
-```
-helvetiscan scan: hospital.ch
-
-Results:
-  1. Email Security: DMARC p=none (HIGH RISK)
-     → Patient data vulnerable to spoofing
-     → Recommendation: Implement DMARC p=reject within 30 days
-
-  2. Open Ports: 3306 exposed (MySQL)
-     → Patient database visible on Internet
-     → Recommendation: URGENT — restrict to VPN within 1 hour
-
-  3. TLS: Certificate expires in 60 days
-     → Recommendation: Schedule renewal 30 days before
-
-Compliance Status: FAILING
-Timeline to ISG Compliance: 30 days (if recommendations followed)
-```
-
-### For a Fintech Company (DORA-regulated)
-
-```
-helvetiscan scan: paymentbank.ch
-
-Results:
-  1. Technology: WordPress 5.0.0 (35 months behind, 25+ CVEs)
-     → Critical unpatched software
-     → DORA Finding: Remediate within 30 days
-
-  2. Domain: Typosquats registered (paymentbnk.ch)
-     → Brand impersonation detected
-     → Recommendation: Monitor and register variants
-
-  3. Ports: SSH open, TLS 1.1 enabled
-     → Legacy encryption, DORA requires TLS 1.2+
-     → Recommendation: Upgrade TLS baseline
-
-DORA Compliance: PARTIALLY COMPLIANT
-Actions Required: 3 (all with clear timelines)
-```
-
-### For an SME (General Security)
-
-```
-helvetiscan scan: startup.ch
-
-Results:
-  1. Email Security: SPF present, DKIM weak (1024-bit), DMARC missing
-     → Email spoofing risk: MEDIUM
-     → Quick fix: Add DMARC p=reject (5 minutes)
-
-  2. Domain: Auto-renewal disabled, expires in 90 days
-     → Risk: Domain loss if renewal notification missed
-     → Quick fix: Enable auto-renewal (2 minutes)
-
-  3. Ports: No databases exposed (good!)
-     → No critical findings
-
-  4. HTTP Headers: CSP missing, HSTS present
-     → XSS risk: MEDIUM
-     → Recommendation: Add CSP rule
-
-Overall Risk: MEDIUM
-Quick Wins (Today): Email (DMARC), Domain (auto-renewal)
-Medium-term: HTTP headers CSP
-```

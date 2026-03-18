@@ -1,0 +1,1972 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>HELVETISCAN — Investor Brief</title>
+
+        <!-- Open Graph -->
+        <meta property="og:type" content="website" />
+        <meta property="og:url" content="https://helvetiscan.ch/" />
+        <meta
+            property="og:title"
+            content="HELVETISCAN — Switzerland's Cybersecurity Intelligence Platform"
+        />
+        <meta
+            property="og:description"
+            content="We hold the only complete map of the Swiss digital attack surface. Switzerland's new laws just made our product mandatory."
+        />
+        <meta property="og:locale" content="en_US" />
+
+        <style>
+            *,
+            *::before,
+            *::after {
+                box-sizing: border-box;
+                margin: 0;
+                padding: 0;
+            }
+
+            :root {
+                --red: #d52b1e;
+                --navy: #0f1f36;
+                --blue: #1a3a5c;
+                --mid: #2a5298;
+                --light: #e8f0fa;
+                --gray: #5a6a7a;
+                --white: #ffffff;
+                --off: #f5f7fa;
+                --border: #dce4ef;
+            }
+
+            html {
+                scroll-behavior: smooth;
+            }
+
+            body {
+                font-family:
+                    "Segoe UI",
+                    system-ui,
+                    -apple-system,
+                    sans-serif;
+                color: var(--navy);
+                background: var(--white);
+                line-height: 1.7;
+            }
+
+            /* ─────────────────── NAV ─────────────────── */
+            nav {
+                position: fixed;
+                top: 0;
+                left: 0;
+                right: 0;
+                z-index: 200;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                padding: 0 5vw;
+                height: 60px;
+                background: rgba(10, 18, 32, 0.97);
+                backdrop-filter: blur(10px);
+                border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+            }
+
+            .logo {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                text-decoration: none;
+                color: var(--white);
+                font-weight: 800;
+                font-size: 1.1rem;
+                letter-spacing: -0.5px;
+                z-index: 210;
+            }
+
+            .logo-icon {
+                width: 32px;
+                height: 32px;
+                background: var(--red);
+                border-radius: 7px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                flex-shrink: 0;
+                font-size: 0.85rem;
+                color: white;
+                font-weight: 800;
+                letter-spacing: -1px;
+            }
+
+            .nav-links {
+                list-style: none;
+                display: flex;
+                gap: 2rem;
+                align-items: center;
+            }
+
+            .nav-links a {
+                text-decoration: none;
+                color: rgba(255, 255, 255, 0.72);
+                font-size: 0.88rem;
+                font-weight: 500;
+                transition: color 0.2s;
+                white-space: nowrap;
+            }
+
+            .nav-links a:hover {
+                color: var(--white);
+            }
+
+            .nav-cta {
+                background: var(--red) !important;
+                color: var(--white) !important;
+                padding: 8px 18px;
+                border-radius: 6px;
+                transition: opacity 0.2s !important;
+            }
+            .nav-cta:hover {
+                opacity: 0.85 !important;
+            }
+
+            .hamburger {
+                display: none;
+                flex-direction: column;
+                justify-content: center;
+                gap: 5px;
+                cursor: pointer;
+                background: none;
+                border: none;
+                padding: 6px;
+                z-index: 210;
+            }
+            .hamburger span {
+                display: block;
+                width: 22px;
+                height: 2px;
+                background: white;
+                border-radius: 2px;
+                transition:
+                    transform 0.3s,
+                    opacity 0.3s;
+            }
+            .hamburger.open span:nth-child(1) {
+                transform: translateY(7px) rotate(45deg);
+            }
+            .hamburger.open span:nth-child(2) {
+                opacity: 0;
+                transform: scaleX(0);
+            }
+            .hamburger.open span:nth-child(3) {
+                transform: translateY(-7px) rotate(-45deg);
+            }
+
+            /* ─────────────────── HERO ─────────────────── */
+            .hero {
+                min-height: 100svh;
+                background:
+                    linear-gradient(
+                        160deg,
+                        rgba(8, 14, 26, 0.92) 0%,
+                        rgba(12, 22, 40, 0.85) 45%,
+                        rgba(42, 82, 152, 0.35) 100%
+                    ),
+                    url("fb8fb3cd-f9a2-4877-bd60-92f45d77ca81.png") center 35% /
+                        cover no-repeat;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                text-align: center;
+                padding: 80px 6vw 56px;
+                position: relative;
+                overflow: hidden;
+            }
+
+            .hero::before {
+                content: "";
+                position: absolute;
+                inset: 0;
+                background: radial-gradient(
+                    ellipse 70% 55% at 50% 60%,
+                    rgba(42, 82, 152, 0.22) 0%,
+                    transparent 70%
+                );
+            }
+
+            .hero > * {
+                position: relative;
+            }
+
+            .hero-badge {
+                display: inline-flex;
+                align-items: center;
+                gap: 8px;
+                background: rgba(255, 255, 255, 0.08);
+                border: 1px solid rgba(255, 255, 255, 0.18);
+                border-radius: 999px;
+                padding: 6px 16px;
+                font-size: 0.8rem;
+                color: rgba(255, 255, 255, 0.85);
+                margin-bottom: 1.75rem;
+                letter-spacing: 0.4px;
+            }
+
+            .badge-dot {
+                width: 7px;
+                height: 7px;
+                background: #4ade80;
+                border-radius: 50%;
+                animation: pulse 2s infinite;
+                flex-shrink: 0;
+            }
+
+            @keyframes pulse {
+                0%,
+                100% {
+                    opacity: 1;
+                    transform: scale(1);
+                }
+                50% {
+                    opacity: 0.45;
+                    transform: scale(1.4);
+                }
+            }
+
+            .hero h1 {
+                font-size: clamp(1.9rem, 5.5vw, 3.8rem);
+                font-weight: 800;
+                color: var(--white);
+                line-height: 1.15;
+                max-width: 860px;
+                margin-bottom: 1.25rem;
+                letter-spacing: -0.5px;
+            }
+
+            .hero h1 span {
+                color: #ff6b6b;
+            }
+
+            .hero p {
+                font-size: clamp(0.95rem, 2vw, 1.15rem);
+                color: rgba(255, 255, 255, 0.7);
+                max-width: 600px;
+                margin-bottom: 2.25rem;
+            }
+
+            .hero-actions {
+                display: flex;
+                gap: 0.85rem;
+                flex-wrap: wrap;
+                justify-content: center;
+            }
+
+            .btn {
+                display: inline-flex;
+                align-items: center;
+                gap: 8px;
+                padding: 13px 26px;
+                border-radius: 8px;
+                font-size: 0.93rem;
+                font-weight: 600;
+                text-decoration: none;
+                transition:
+                    transform 0.2s,
+                    opacity 0.2s,
+                    box-shadow 0.2s;
+                cursor: pointer;
+                border: none;
+                white-space: nowrap;
+            }
+            .btn:hover {
+                transform: translateY(-2px);
+            }
+
+            .btn-primary {
+                background: var(--red);
+                color: var(--white);
+                box-shadow: 0 4px 18px rgba(213, 43, 30, 0.45);
+            }
+            .btn-primary:hover {
+                box-shadow: 0 6px 24px rgba(213, 43, 30, 0.55);
+            }
+
+            .btn-outline {
+                background: rgba(255, 255, 255, 0.1);
+                color: var(--white);
+                border: 1px solid rgba(255, 255, 255, 0.28);
+            }
+
+            .hero-meta {
+                margin-top: 3rem;
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                color: rgba(255, 255, 255, 0.42);
+                font-size: 0.78rem;
+                flex-wrap: wrap;
+                justify-content: center;
+            }
+
+            /* ─────────────────── TRUST BAR ─────────────────── */
+            .trust-bar {
+                background: var(--navy);
+                padding: 24px 5vw;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                flex-wrap: wrap;
+                gap: 1.5rem 2.5rem;
+            }
+
+            .trust-item {
+                display: flex;
+                align-items: center;
+                gap: 9px;
+                color: rgba(255, 255, 255, 0.58);
+                font-size: 0.82rem;
+                font-weight: 500;
+                white-space: nowrap;
+            }
+
+            .trust-item svg {
+                width: 16px;
+                height: 16px;
+                fill: rgba(255, 255, 255, 0.3);
+                flex-shrink: 0;
+            }
+
+            .trust-stat {
+                color: #4ade80;
+                font-weight: 700;
+            }
+
+            /* ─────────────────── SECTIONS ─────────────────── */
+            section {
+                padding: 88px 6vw;
+            }
+
+            .section-label {
+                display: inline-block;
+                font-size: 0.75rem;
+                font-weight: 700;
+                letter-spacing: 2px;
+                text-transform: uppercase;
+                color: var(--red);
+                margin-bottom: 0.65rem;
+            }
+
+            h2 {
+                font-size: clamp(1.65rem, 4vw, 2.6rem);
+                font-weight: 800;
+                line-height: 1.2;
+                letter-spacing: -0.4px;
+                margin-bottom: 0.9rem;
+            }
+
+            .section-intro {
+                font-size: 1rem;
+                color: var(--gray);
+                max-width: 580px;
+                margin-bottom: 3rem;
+                line-height: 1.7;
+            }
+
+            /* ─────────────────── PROBLEM ─────────────────── */
+            .problem {
+                background: var(--white);
+            }
+
+            .reasons-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));
+                gap: 1.25rem;
+            }
+
+            .reason-card {
+                background: var(--off);
+                border: 1px solid var(--border);
+                border-radius: 14px;
+                padding: 1.75rem;
+                transition:
+                    transform 0.25s,
+                    box-shadow 0.25s;
+            }
+            .reason-card:hover {
+                transform: translateY(-4px);
+                box-shadow: 0 10px 30px rgba(15, 31, 54, 0.1);
+            }
+
+            .reason-icon {
+                width: 46px;
+                height: 46px;
+                background: linear-gradient(135deg, var(--blue), var(--mid));
+                border-radius: 11px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                margin-bottom: 1.1rem;
+                font-size: 1.35rem;
+            }
+
+            .reason-card h3 {
+                font-size: 1rem;
+                font-weight: 700;
+                margin-bottom: 0.5rem;
+            }
+            .reason-card p {
+                font-size: 0.88rem;
+                color: var(--gray);
+                line-height: 1.65;
+            }
+
+            /* ─────────────────── DARK MISSION ─────────────────── */
+            .mission {
+                background: var(--navy);
+                padding: 80px 6vw;
+            }
+
+            .mission-inner {
+                max-width: 800px;
+            }
+            .mission .section-label {
+                color: rgba(213, 43, 30, 0.85);
+            }
+            .mission h2 {
+                color: var(--white);
+                margin-bottom: 1.25rem;
+            }
+
+            .mission-body {
+                display: flex;
+                flex-direction: column;
+                gap: 1rem;
+            }
+            .mission-body p {
+                font-size: 1rem;
+                color: rgba(255, 255, 255, 0.62);
+                line-height: 1.8;
+            }
+
+            .mission-quote {
+                margin-top: 2rem;
+                border-left: 3px solid var(--red);
+                padding-left: 1.25rem;
+                font-size: 1.05rem;
+                color: rgba(255, 255, 255, 0.5);
+                font-style: italic;
+                line-height: 1.7;
+            }
+
+            /* ─────────────────── PRODUCT (services grid) ─────────────────── */
+            .product {
+                background: var(--off);
+            }
+
+            .services-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+                gap: 1.25rem;
+            }
+
+            .service-card {
+                background: var(--white);
+                border: 1px solid var(--border);
+                border-radius: 14px;
+                padding: 1.75rem;
+                display: flex;
+                flex-direction: column;
+                gap: 0.85rem;
+            }
+
+            .service-card .tag {
+                display: inline-block;
+                font-size: 0.7rem;
+                font-weight: 700;
+                letter-spacing: 1px;
+                text-transform: uppercase;
+                padding: 3px 10px;
+                border-radius: 999px;
+                background: var(--light);
+                color: var(--mid);
+                width: fit-content;
+            }
+
+            .service-card h3 {
+                font-size: 1.08rem;
+                font-weight: 700;
+            }
+            .service-card p {
+                font-size: 0.88rem;
+                color: var(--gray);
+                flex: 1;
+                line-height: 1.65;
+            }
+
+            .service-features {
+                list-style: none;
+                display: flex;
+                flex-direction: column;
+                gap: 5px;
+            }
+            .service-features li {
+                font-size: 0.84rem;
+                color: var(--gray);
+                display: flex;
+                align-items: flex-start;
+                gap: 8px;
+            }
+            .service-features li::before {
+                content: "→";
+                color: var(--mid);
+                flex-shrink: 0;
+                margin-top: 1px;
+            }
+
+            /* ─────────────────── HOW IT WORKS ─────────────────── */
+            .how {
+                background: var(--white);
+            }
+
+            .steps {
+                display: flex;
+                flex-direction: column;
+                max-width: 700px;
+                margin: 0 auto;
+            }
+
+            .step {
+                display: flex;
+                gap: 1.25rem;
+                padding: 1.6rem 0;
+                border-bottom: 1px solid var(--border);
+            }
+            .step:last-child {
+                border-bottom: none;
+            }
+
+            .step-num {
+                width: 38px;
+                height: 38px;
+                flex-shrink: 0;
+                background: var(--navy);
+                color: var(--white);
+                border-radius: 9px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-weight: 800;
+                font-size: 0.85rem;
+            }
+
+            .step-content h3 {
+                font-size: 0.97rem;
+                font-weight: 700;
+                margin-bottom: 0.3rem;
+            }
+            .step-content p {
+                font-size: 0.88rem;
+                color: var(--gray);
+                line-height: 1.65;
+            }
+
+            /* ─────────────────── COMPARISON ─────────────────── */
+            .comparison {
+                background: #0a1522;
+                color: var(--white);
+            }
+            .comparison h2 {
+                color: var(--white);
+            }
+            .comparison .section-intro {
+                color: rgba(255, 255, 255, 0.55);
+            }
+
+            .table-wrap {
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+            }
+
+            .compare-table {
+                width: 100%;
+                min-width: 540px;
+                border-collapse: collapse;
+                font-size: 0.9rem;
+            }
+            .compare-table thead tr {
+                background: rgba(255, 255, 255, 0.05);
+            }
+            .compare-table th {
+                padding: 14px 16px;
+                text-align: left;
+                font-weight: 700;
+                font-size: 0.78rem;
+                letter-spacing: 0.4px;
+                color: rgba(255, 255, 255, 0.5);
+                text-transform: uppercase;
+                white-space: nowrap;
+            }
+            .compare-table th.hl {
+                color: var(--white);
+                background: rgba(213, 43, 30, 0.18);
+            }
+            .compare-table tbody tr {
+                border-bottom: 1px solid rgba(255, 255, 255, 0.055);
+                transition: background 0.2s;
+            }
+            .compare-table tbody tr:last-child {
+                border-bottom: none;
+            }
+            .compare-table tbody tr:hover {
+                background: rgba(255, 255, 255, 0.035);
+            }
+            .compare-table td {
+                padding: 13px 16px;
+                color: rgba(255, 255, 255, 0.7);
+            }
+            .compare-table td.hl {
+                background: rgba(213, 43, 30, 0.07);
+                color: var(--white);
+                font-weight: 600;
+            }
+            .compare-table td:first-child {
+                color: rgba(255, 255, 255, 0.88);
+            }
+
+            .chk {
+                color: #4ade80;
+            }
+            .crx {
+                color: #f87171;
+            }
+            .prx {
+                color: #fbbf24;
+            }
+
+            /* ─────────────────── MARKET / AUDIENCE ─────────────────── */
+            .market {
+                background: var(--light);
+            }
+
+            .audience-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+                gap: 1rem;
+            }
+
+            .audience-card {
+                background: var(--white);
+                border-radius: 12px;
+                padding: 1.4rem;
+                text-align: center;
+                border: 1px solid var(--border);
+            }
+            .audience-card .aud-icon {
+                font-size: 1.9rem;
+                margin-bottom: 0.65rem;
+            }
+            .audience-card h3 {
+                font-size: 0.92rem;
+                font-weight: 700;
+                margin-bottom: 0.35rem;
+            }
+            .audience-card p {
+                font-size: 0.82rem;
+                color: var(--gray);
+                line-height: 1.6;
+            }
+
+            /* ─────────────────── METRICS BAND ─────────────────── */
+            .metrics-band {
+                background: var(--navy);
+                padding: 56px 6vw;
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+                gap: 2rem;
+                text-align: center;
+            }
+
+            .metric-item h3 {
+                font-size: clamp(2rem, 4vw, 3rem);
+                font-weight: 800;
+                color: var(--white);
+                line-height: 1;
+                margin-bottom: 0.4rem;
+            }
+
+            .metric-item h3 span {
+                color: #ff6b6b;
+            }
+            .metric-item p {
+                font-size: 0.82rem;
+                color: rgba(255, 255, 255, 0.45);
+                letter-spacing: 0.3px;
+            }
+
+            /* ─────────────────── PROJECTIONS ─────────────────── */
+            .projections {
+                background: var(--off);
+            }
+
+            .proj-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+                gap: 1rem;
+                margin-bottom: 2.5rem;
+            }
+
+            .proj-card {
+                background: var(--white);
+                border: 1px solid var(--border);
+                border-radius: 12px;
+                padding: 1.5rem;
+            }
+
+            .proj-card .year {
+                font-size: 0.72rem;
+                font-weight: 700;
+                letter-spacing: 1.5px;
+                text-transform: uppercase;
+                color: var(--mid);
+                margin-bottom: 0.5rem;
+            }
+
+            .proj-card .revenue {
+                font-size: 1.55rem;
+                font-weight: 800;
+                color: var(--navy);
+                line-height: 1;
+                margin-bottom: 0.4rem;
+            }
+
+            .proj-card .subs {
+                font-size: 0.82rem;
+                color: var(--gray);
+            }
+
+            /* ─────────────────── MILESTONES ─────────────────── */
+            .milestones {
+                background: var(--white);
+            }
+
+            .timeline {
+                display: flex;
+                flex-direction: column;
+                max-width: 700px;
+            }
+
+            .tl-item {
+                display: flex;
+                gap: 1.25rem;
+                padding: 1.4rem 0;
+                border-bottom: 1px solid var(--border);
+            }
+            .tl-item:last-child {
+                border-bottom: none;
+            }
+
+            .tl-dot {
+                width: 14px;
+                height: 14px;
+                flex-shrink: 0;
+                border-radius: 50%;
+                background: var(--border);
+                margin-top: 6px;
+                border: 2px solid var(--border);
+            }
+            .tl-dot.done {
+                background: #4ade80;
+                border-color: #4ade80;
+            }
+            .tl-dot.active {
+                background: var(--red);
+                border-color: var(--red);
+            }
+
+            .tl-content h3 {
+                font-size: 0.88rem;
+                font-weight: 700;
+                color: var(--mid);
+                margin-bottom: 0.2rem;
+            }
+            .tl-content p {
+                font-size: 0.88rem;
+                color: var(--gray);
+                line-height: 1.6;
+            }
+
+            /* ─────────────────── USE OF FUNDS ─────────────────── */
+            .funds {
+                background: var(--off);
+            }
+
+            .funds-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+                gap: 1rem;
+            }
+
+            .fund-card {
+                background: var(--white);
+                border: 1px solid var(--border);
+                border-radius: 12px;
+                padding: 1.4rem;
+                position: relative;
+                overflow: hidden;
+            }
+
+            .fund-card::before {
+                content: "";
+                position: absolute;
+                top: 0;
+                left: 0;
+                right: 0;
+                height: 3px;
+                background: linear-gradient(90deg, var(--red), var(--mid));
+            }
+
+            .fund-pct {
+                font-size: 2rem;
+                font-weight: 800;
+                color: var(--navy);
+                line-height: 1;
+                margin-bottom: 0.3rem;
+            }
+
+            .fund-chf {
+                font-size: 0.82rem;
+                font-weight: 700;
+                color: var(--mid);
+                margin-bottom: 0.5rem;
+            }
+
+            .fund-card h3 {
+                font-size: 0.88rem;
+                font-weight: 700;
+                margin-bottom: 0.3rem;
+            }
+            .fund-card p {
+                font-size: 0.82rem;
+                color: var(--gray);
+                line-height: 1.6;
+            }
+
+            /* ─────────────────── CONTACT ─────────────────── */
+            .contact {
+                background:
+                    linear-gradient(
+                        160deg,
+                        rgba(8, 14, 26, 0.92) 0%,
+                        rgba(12, 22, 40, 0.85) 45%,
+                        rgba(42, 82, 152, 0.35) 100%
+                    ),
+                    url("fb8fb3cd-f9a2-4877-bd60-92f45d77ca81.png") center 35% /
+                        cover no-repeat;
+                color: var(--white);
+                text-align: center;
+            }
+            .contact h2 {
+                color: var(--white);
+                max-width: 580px;
+                margin: 0 auto 0.85rem;
+            }
+            .contact > p {
+                color: rgba(255, 255, 255, 0.6);
+                margin-bottom: 2.25rem;
+            }
+
+            .contact-form {
+                display: flex;
+                flex-direction: column;
+                gap: 1rem;
+                max-width: 500px;
+                margin: 0 auto;
+                text-align: left;
+            }
+
+            .form-row {
+                display: flex;
+                gap: 1rem;
+            }
+            .form-row > * {
+                flex: 1;
+                min-width: 0;
+            }
+
+            label {
+                display: block;
+                font-size: 0.8rem;
+                font-weight: 600;
+                color: rgba(255, 255, 255, 0.65);
+                margin-bottom: 5px;
+                letter-spacing: 0.2px;
+            }
+
+            input,
+            textarea,
+            select {
+                width: 100%;
+                padding: 11px 13px;
+                border-radius: 8px;
+                border: 1px solid rgba(255, 255, 255, 0.14);
+                background: rgba(255, 255, 255, 0.08);
+                color: var(--white);
+                font-size: 0.9rem;
+                font-family: inherit;
+                outline: none;
+                transition: border-color 0.2s;
+            }
+            input::placeholder,
+            textarea::placeholder {
+                color: rgba(255, 255, 255, 0.28);
+            }
+            input:focus,
+            textarea:focus,
+            select:focus {
+                border-color: rgba(255, 255, 255, 0.42);
+            }
+            select option {
+                background: var(--navy);
+            }
+            textarea {
+                resize: vertical;
+                min-height: 100px;
+            }
+
+            .form-submit {
+                display: flex;
+                gap: 1rem;
+                align-items: center;
+                flex-wrap: wrap;
+            }
+
+            .privacy-note {
+                font-size: 0.76rem;
+                color: rgba(255, 255, 255, 0.38);
+            }
+
+            #form-feedback {
+                display: none;
+                padding: 11px 15px;
+                border-radius: 8px;
+                background: rgba(74, 222, 128, 0.14);
+                border: 1px solid rgba(74, 222, 128, 0.28);
+                color: #4ade80;
+                font-size: 0.88rem;
+            }
+
+            /* ─────────────────── FOOTER ─────────────────── */
+            footer {
+                background: #060e1a;
+                color: rgba(255, 255, 255, 0.4);
+                padding: 36px 6vw;
+                display: flex;
+                align-items: flex-start;
+                justify-content: space-between;
+                flex-wrap: wrap;
+                gap: 1.5rem;
+                font-size: 0.8rem;
+                line-height: 1.8;
+            }
+            footer a {
+                color: rgba(255, 255, 255, 0.4);
+                text-decoration: none;
+            }
+            footer a:hover {
+                color: rgba(255, 255, 255, 0.72);
+            }
+            .footer-links {
+                display: flex;
+                gap: 1.25rem;
+                flex-wrap: wrap;
+            }
+
+            /* ─────────────────── MOBILE ─────────────────── */
+            @media (max-width: 768px) {
+                .hamburger {
+                    display: flex;
+                }
+                .nav-links {
+                    position: fixed;
+                    top: 0;
+                    left: 0;
+                    right: 0;
+                    bottom: 0;
+                    background: rgba(6, 12, 24, 0.98);
+                    backdrop-filter: blur(14px);
+                    flex-direction: column;
+                    align-items: center;
+                    justify-content: center;
+                    gap: 2rem;
+                    z-index: 199;
+                    display: none;
+                }
+                .nav-links.open {
+                    display: flex;
+                }
+                .nav-links a {
+                    font-size: 1.15rem;
+                    color: rgba(255, 255, 255, 0.88);
+                }
+                .nav-cta {
+                    padding: 12px 30px;
+                    font-size: 1rem;
+                }
+                .hero {
+                    padding: 90px 5vw 48px;
+                    min-height: 100svh;
+                }
+                section {
+                    padding: 60px 5vw;
+                }
+                .trust-bar {
+                    display: grid;
+                    grid-template-columns: 1fr 1fr;
+                    gap: 1rem;
+                    padding: 20px 5vw;
+                    justify-items: start;
+                }
+                .trust-item {
+                    white-space: normal;
+                }
+                .reasons-grid,
+                .services-grid {
+                    grid-template-columns: 1fr;
+                }
+                .audience-grid {
+                    grid-template-columns: 1fr 1fr;
+                }
+                .mission {
+                    padding: 56px 5vw;
+                }
+                .table-wrap::before {
+                    content: "← scroll to see →";
+                    display: block;
+                    font-size: 0.72rem;
+                    color: rgba(255, 255, 255, 0.35);
+                    margin-bottom: 0.75rem;
+                    text-align: center;
+                    letter-spacing: 0.5px;
+                }
+                .form-row {
+                    flex-direction: column;
+                    gap: 1rem;
+                }
+                footer {
+                    flex-direction: column;
+                    gap: 1.25rem;
+                }
+                .footer-links {
+                    flex-direction: column;
+                    gap: 0.6rem;
+                }
+                .metrics-band {
+                    grid-template-columns: 1fr 1fr;
+                }
+                .proj-grid {
+                    grid-template-columns: 1fr 1fr;
+                }
+            }
+
+            @media (max-width: 480px) {
+                .audience-grid {
+                    grid-template-columns: 1fr;
+                }
+                .trust-bar {
+                    grid-template-columns: 1fr;
+                }
+                .btn {
+                    padding: 12px 20px;
+                    font-size: 0.88rem;
+                }
+                .hero-badge {
+                    font-size: 0.75rem;
+                    padding: 5px 13px;
+                }
+                .metrics-band {
+                    grid-template-columns: 1fr;
+                }
+                .proj-grid {
+                    grid-template-columns: 1fr;
+                }
+                .funds-grid {
+                    grid-template-columns: 1fr;
+                }
+            }
+        </style>
+    </head>
+    <body>
+        <!-- ── NAV ── -->
+        <nav>
+            <a href="#" class="logo">
+                <div class="logo-icon">HS</div>
+                HELVETISCAN
+            </a>
+
+            <button class="hamburger" id="hamburger" aria-label="Open menu">
+                <span></span><span></span><span></span>
+            </button>
+
+            <ul class="nav-links" id="nav-links">
+                <li><a href="#problem">Problem</a></li>
+                <li><a href="#product">Product</a></li>
+                <li><a href="#findings">Findings</a></li>
+                <li><a href="#market">Market</a></li>
+                <li><a href="#traction">Traction</a></li>
+                <li><a href="#contact" class="nav-cta">Contact Us</a></li>
+            </ul>
+        </nav>
+
+        <!-- ── HERO ── -->
+        <section class="hero">
+            <div class="hero-badge">
+                <span class="badge-dot"></span>
+                Seed Round — Basel, Switzerland — March 2026
+            </div>
+
+            <h1>
+                We hold the only complete map of the
+                <span>Swiss digital attack surface.</span>
+            </h1>
+
+            <p>
+                Switzerland's new cybersecurity laws just made our product
+                mandatory. 75,000 SMEs. No accessible solution. We are building
+                it.
+            </p>
+
+            <div class="hero-actions">
+                <a href="#contact" class="btn btn-primary"
+                    >Request Investor Brief</a
+                >
+                <a href="#product" class="btn btn-outline"
+                    >See the Platform →</a
+                >
+            </div>
+
+            <div class="hero-meta">
+                <span>🇨🇭 Basel-Stadt GmbH (Q2 2026)</span>
+                <span style="opacity: 0.3">·</span>
+                <span>CHF 300k Seed Round</span>
+                <span style="opacity: 0.3">·</span>
+                <span>rafael@extrapolo.com</span>
+            </div>
+        </section>
+
+        <!-- ── TRUST BAR ── -->
+        <div class="trust-bar">
+            <div class="trust-item">
+                <svg viewBox="0 0 24 24">
+                    <circle cx="12" cy="12" r="10" />
+                    <polyline points="12 6 12 12 16 14" />
+                </svg>
+                <span
+                    ><span class="trust-stat">2.5M+</span> .ch domains
+                    scanned</span
+                >
+            </div>
+            <div class="trust-item">
+                <svg viewBox="0 0 24 24">
+                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                </svg>
+                <span
+                    ><span class="trust-stat">100%</span> .ch namespace
+                    mapped</span
+                >
+            </div>
+            <div class="trust-item">
+                <svg viewBox="0 0 24 24">
+                    <line x1="12" y1="1" x2="12" y2="23" />
+                    <path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6" />
+                </svg>
+                <span
+                    ><span class="trust-stat">CHF 6M+</span> revenue at 10%
+                    penetration</span
+                >
+            </div>
+            <div class="trust-item">
+                <svg viewBox="0 0 24 24">
+                    <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" />
+                    <polyline points="17 6 23 6 23 12" />
+                </svg>
+                <span
+                    ><span class="trust-stat">85%+</span> gross margin at
+                    scale</span
+                >
+            </div>
+            <div class="trust-item">
+                <svg viewBox="0 0 24 24">
+                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                    <path d="M7 11V7a5 5 0 0110 0v4" />
+                </svg>
+                <span
+                    ><span class="trust-stat">ISG</span> mandatory since Apr
+                    2025</span
+                >
+            </div>
+        </div>
+
+        <!-- ── THE PROBLEM ── -->
+        <section id="problem" class="problem">
+            <div class="section-label">The Problem</div>
+            <h2>Three laws. 600,000 SMEs. Zero accessible tools.</h2>
+            <p class="section-intro">
+                Switzerland's regulatory landscape has fundamentally shifted —
+                and the mass market of SMEs has no compliant, affordable
+                solution.
+            </p>
+
+            <div class="reasons-grid">
+                <div class="reason-card">
+                    <div class="reason-icon">⚖️</div>
+                    <h3>ISG — Swiss Federal Law</h3>
+                    <p>
+                        Since April 2025, organisations must report cyberattacks
+                        to the NCSC within 24 hours. Fines up to CHF 100,000.
+                        Knowing your attack surface is the only defensible
+                        compliance strategy.
+                    </p>
+                </div>
+                <div class="reason-card">
+                    <div class="reason-icon">🏦</div>
+                    <h3>DORA — EU Resilience Act</h3>
+                    <p>
+                        Operative since January 2025. Swiss financial
+                        institutions and their suppliers must conduct annual
+                        attack surface assessments. Creates indirect obligations
+                        for thousands of Swiss SME suppliers.
+                    </p>
+                </div>
+                <div class="reason-card">
+                    <div class="reason-icon">🔗</div>
+                    <h3>NIS2 — Cascade Effect</h3>
+                    <p>
+                        European clients now audit their Swiss suppliers'
+                        cybersecurity posture as a condition of contract. A
+                        Swiss SME without evidence of surface monitoring risks
+                        losing enterprise customers.
+                    </p>
+                </div>
+                <div class="reason-card">
+                    <div class="reason-icon">🎯</div>
+                    <h3>The Gap Is Enormous</h3>
+                    <p>
+                        Existing solutions cost CHF 10,000–25,000/year, require
+                        internal IT access, and target enterprise clients.
+                        <strong
+                            >70% of Swiss SMEs have no formal cybersecurity
+                            posture</strong
+                        >
+                        — and no tool built for them.
+                    </p>
+                </div>
+            </div>
+        </section>
+
+        <!-- ── THE MOAT ── -->
+        <section class="mission">
+            <div class="mission-inner">
+                <div class="section-label">Competitive Moat</div>
+                <h2>No competitor holds what we built.</h2>
+                <div class="mission-body">
+                    <p>
+                        Before company formation, we independently enumerated
+                        the entire Swiss .ch domain namespace — over 2.5 million
+                        domains. This proprietary dataset is the foundation for
+                        every product feature and cannot be easily replicated.
+                        No domestic or international player holds this asset.
+                    </p>
+                    <p>
+                        The dataset enables national-level risk benchmarking
+                        against Swiss industry peers, identification of .ch
+                        look-alike domains used for phishing, and longitudinal
+                        tracking of the Swiss internet attack surface over time.
+                        These are capabilities no generic global platform can
+                        offer.
+                    </p>
+                </div>
+                <p class="mission-quote">
+                    "We have performed a complete enumeration of the entire
+                    Swiss .ch domain namespace. This is the foundation for a
+                    scalable SaaS product — and a moat that grows with every
+                    scan."
+                </p>
+            </div>
+        </section>
+
+        <!-- ── THE PRODUCT ── -->
+        <section id="product" class="product">
+            <div class="section-label">The Platform</div>
+            <h2>
+                Automated. External. Zero internal access required. Constantly.
+            </h2>
+            <p class="section-intro">
+                HELVETISCAN monitors everything an attacker can see from the
+                outside — no agent installation, no IT access, no technical
+                expertise needed by the client.
+            </p>
+
+            <div class="services-grid">
+                <div class="service-card">
+                    <span class="tag">TLS & Certs</span>
+                    <h3>Certificate Intelligence</h3>
+                    <p>
+                        Expired or weak TLS certificates, missing CT logs,
+                        outdated protocol versions — including certificates
+                        expiring within 30 days.
+                    </p>
+                </div>
+                <div class="service-card">
+                    <span class="tag">DNS</span>
+                    <h3>DNS & DNSSEC Analysis</h3>
+                    <p>
+                        Missing CAA records, absence of DNSSEC signing, wildcard
+                        exposure, and full subdomain enumeration including
+                        forgotten legacy assets.
+                    </p>
+                </div>
+                <div class="service-card">
+                    <span class="tag">HTTP</span>
+                    <h3>Security Header Audit</h3>
+                    <p>
+                        HSTS, CSP, X-Frame-Options, Referrer-Policy,
+                        Permissions-Policy — scored and benchmarked against
+                        Swiss industry peers.
+                    </p>
+                </div>
+                <div class="service-card">
+                    <span class="tag">Ports</span>
+                    <h3>Exposed Services</h3>
+                    <p>
+                        Open database ports, RDP, legacy protocols visible on
+                        the public internet — ranked by exploitability and
+                        business impact.
+                    </p>
+                </div>
+                <div class="service-card">
+                    <span class="tag">Email</span>
+                    <h3>Email Spoofability</h3>
+                    <p>
+                        Full SPF/DKIM/DMARC policy validation — not just
+                        presence detection. Identifies whether a domain can be
+                        impersonated today.
+                    </p>
+                </div>
+                <div class="service-card">
+                    <span class="tag">AI</span>
+                    <h3>AI Risk Narrative</h3>
+                    <p>
+                        LLM-generated plain-language risk reports explaining
+                        findings in business terms — structured for ISG, DORA,
+                        and FINMA audit requirements.
+                    </p>
+                </div>
+            </div>
+        </section>
+
+        <!-- ── FINDINGS ── -->
+        <section id="findings" class="how" style="background: var(--off)">
+            <div class="section-label">Live Scan Data</div>
+            <h2>What we found scanning every .ch domain.</h2>
+            <p class="section-intro">
+                These are not estimates. Every figure comes from production
+                scans of the full Swiss namespace — the same engine that powers
+                the platform.
+            </p>
+
+            <div class="services-grid">
+                <div class="service-card">
+                    <span class="tag">HTTP / DNS</span>
+                    <h3>1 in 4 .ch domains is dead</h3>
+                    <p>
+                        76.4% of .ch domains return a live HTTP response.
+                        450,916 domains fail DNS entirely — no active server
+                        behind them.
+                    </p>
+                    <ul class="service-features">
+                        <li>
+                            Apache: 38.3% · nginx: 34.0% · Cloudflare: 10.2%
+                        </li>
+                        <li>
+                            WordPress powers 71.5% of identifiable CMS sites
+                            (~19% of all live .ch)
+                        </li>
+                        <li>
+                            43,473 active sites run end-of-life PHP versions
+                        </li>
+                    </ul>
+                </div>
+
+                <div class="service-card">
+                    <span class="tag">HTTPS &amp; TLS</span>
+                    <h3>28.3% still on plain HTTP</h3>
+                    <p>
+                        71.7% of live .ch domains end on HTTPS — but over a
+                        quarter of Swiss sites transmit data unencrypted in
+                        2025.
+                    </p>
+                    <ul class="service-features">
+                        <li>TLS 1.3 adoption: 92.9% of HTTPS sites</li>
+                        <li>Let's Encrypt issues 83.1% of certificates</li>
+                        <li>60,171 certificates expire within 30 days</li>
+                    </ul>
+                </div>
+
+                <div class="service-card">
+                    <span class="tag">Email Security</span>
+                    <h3>43.3% of domains fully spoofable</h3>
+                    <p>
+                        Nearly half of scanned .ch domains can be impersonated
+                        in a phishing attack today — SPF absent or permissive,
+                        DMARC missing or on p=none.
+                    </p>
+                    <ul class="service-features">
+                        <li>DKIM adoption: only 6.8%</li>
+                        <li>
+                            24.7% of DMARC adopters use p=none (no enforcement)
+                        </li>
+                        <li>
+                            Only 30.2% implement HSTS despite 71.7% serving
+                            HTTPS
+                        </li>
+                    </ul>
+                </div>
+
+                <div class="service-card">
+                    <span class="tag">Exposed Services</span>
+                    <h3>313,472 domains expose MySQL</h3>
+                    <p>
+                        Databases, file shares, and container APIs are directly
+                        reachable from the public internet on tens of thousands
+                        of Swiss domains.
+                    </p>
+                    <ul class="service-features">
+                        <li>SMB (file sharing) exposed: 87,292 domains</li>
+                        <li>Docker API exposed: 1,742 domains</li>
+                        <li>FTP open: 688k domains — 42% of all scanned</li>
+                    </ul>
+                </div>
+
+                <div class="service-card">
+                    <span class="tag">Hosting</span>
+                    <h3>40.6% hosted outside Switzerland</h3>
+                    <p>
+                        Data sovereignty is a live compliance issue. A large
+                        share of Swiss domains are physically hosted abroad —
+                        often under foreign jurisdiction.
+                    </p>
+                    <ul class="service-features">
+                        <li>Germany: 17.3% · United States: 11.6%</li>
+                        <li>
+                            Single Hostpoint IP hosts 133,425 domains (6.9% of
+                            live .ch)
+                        </li>
+                        <li>
+                            Top 10 IPs collectively serve ~21% of the namespace
+                        </li>
+                    </ul>
+                </div>
+
+                <div class="service-card">
+                    <span class="tag">Security Headers</span>
+                    <h3>49.1% send zero security headers</h3>
+                    <p>
+                        Basic browser-enforced protections are absent on nearly
+                        half of Swiss domains — HSTS, CSP, X-Frame-Options are
+                        the norm in every other developed market.
+                    </p>
+                    <ul class="service-features">
+                        <li>40.6% of sites expose server version strings</li>
+                        <li>
+                            Domains in high-risk jurisdictions: 501 in
+                            RU/BY/IR/CN/SY
+                        </li>
+                        <li>
+                            Wix: 77k · Register.it: 35k · Shopify: 15k Swiss
+                            domains
+                        </li>
+                    </ul>
+                </div>
+            </div>
+
+            <div
+                style="
+                    margin-top: 2.5rem;
+                    display: flex;
+                    gap: 1rem;
+                    flex-wrap: wrap;
+                "
+            >
+                <a
+                    href="https://xn--2dk.xyz/dataviz/swiss/"
+                    target="_blank"
+                    rel="noopener"
+                    class="btn btn-primary"
+                >
+                    <svg
+                        width="16"
+                        height="16"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                    >
+                        <rect x="3" y="3" width="18" height="18" rx="2" />
+                        <path d="M3 9h18M9 21V9" />
+                    </svg>
+                    Explore Data Visualisation
+                </a>
+                <a
+                    href="https://github.com/rafapolo/helvetiscan/blob/main/docs/FINDINGS.md"
+                    target="_blank"
+                    rel="noopener"
+                    class="btn btn-outline"
+                    style="
+                        background: rgba(15, 31, 54, 0.07);
+                        color: var(--navy);
+                        border: 1px solid var(--border);
+                    "
+                >
+                    <svg
+                        width="16"
+                        height="16"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                    >
+                        <path
+                            d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"
+                        />
+                        <polyline points="14 2 14 8 20 8" />
+                        <line x1="16" y1="13" x2="8" y2="13" />
+                        <line x1="16" y1="17" x2="8" y2="17" />
+                        <polyline points="10 9 9 9 8 9" />
+                    </svg>
+                    Full Findings Report
+                </a>
+                <a
+                    href="https://github.com/rafapolo/helvetiscan"
+                    target="_blank"
+                    rel="noopener"
+                    class="btn btn-outline"
+                    style="
+                        background: rgba(15, 31, 54, 0.07);
+                        color: var(--navy);
+                        border: 1px solid var(--border);
+                    "
+                >
+                    <svg
+                        width="16"
+                        height="16"
+                        viewBox="0 0 24 24"
+                        fill="currentColor"
+                    >
+                        <path
+                            d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"
+                        />
+                    </svg>
+                    View on GitHub
+                </a>
+            </div>
+        </section>
+
+        <!-- ── COMPETITIVE TABLE ── -->
+        <section id="competitive" class="comparison">
+            <div class="section-label">Competitive Landscape</div>
+            <h2>An uncontested segment.</h2>
+            <p class="section-intro">
+                Every existing player has built upmarket. None of them have
+                incentive to build a CHF 800/year automated tool for the SME
+                mass market.
+            </p>
+
+            <div class="table-wrap">
+                <table class="compare-table">
+                    <thead>
+                        <tr>
+                            <th>Criteria</th>
+                            <th>Swiss Post Cyber</th>
+                            <th>Exeon Analytics</th>
+                            <th>ImmuniWeb</th>
+                            <th class="hl">HELVETISCAN</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Target Market</td>
+                            <td>Enterprise (250+)</td>
+                            <td>Mid-Market</td>
+                            <td>Enterprise</td>
+                            <td class="hl">
+                                <span class="chk">SME (primary)</span>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td>Annual Price</td>
+                            <td>CHF 200k+</td>
+                            <td>CHF 50k+</td>
+                            <td>CHF 15k+</td>
+                            <td class="hl"><span class="chk">CHF 800</span></td>
+                        </tr>
+                        <tr>
+                            <td>Internal Access Required</td>
+                            <td><span class="crx">✘ Yes</span></td>
+                            <td><span class="crx">✘ Yes</span></td>
+                            <td><span class="prx">⚠ Partial</span></td>
+                            <td class="hl"><span class="chk">✔ No</span></td>
+                        </tr>
+                        <tr>
+                            <td>Swiss .ch Proprietary Dataset</td>
+                            <td><span class="crx">✘ No</span></td>
+                            <td><span class="crx">✘ No</span></td>
+                            <td><span class="crx">✘ No</span></td>
+                            <td class="hl">
+                                <span class="chk">✔ 100% namespace</span>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td>AI Risk Narrative</td>
+                            <td><span class="crx">✘ No</span></td>
+                            <td><span class="prx">⚠ Partial</span></td>
+                            <td><span class="prx">⚠ Partial</span></td>
+                            <td class="hl"><span class="chk">✔ Yes</span></td>
+                        </tr>
+                        <tr>
+                            <td>DORA-Ready Reports</td>
+                            <td><span class="chk">✔ Yes</span></td>
+                            <td><span class="chk">✔ Yes</span></td>
+                            <td><span class="prx">⚠ Partial</span></td>
+                            <td class="hl"><span class="chk">✔ Yes</span></td>
+                        </tr>
+                        <tr>
+                            <td>Self-Serve / No Sales Required</td>
+                            <td><span class="crx">✘ No</span></td>
+                            <td><span class="crx">✘ No</span></td>
+                            <td><span class="crx">✘ No</span></td>
+                            <td class="hl"><span class="chk">✔ Yes</span></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- ── MARKET ── -->
+        <section id="market" class="market">
+            <div class="section-label">Market Opportunity</div>
+            <h2>
+                75,000 addressable clients. Zero direct competitors at this
+                price.
+            </h2>
+            <p class="section-intro">
+                Three high-priority verticals for go-to-market — each with a
+                direct regulatory trigger.
+            </p>
+
+            <div class="audience-grid">
+                <div class="audience-card">
+                    <div class="aud-icon">🧬</div>
+                    <h3>Basel Pharma &amp; Life Sciences</h3>
+                    <p>
+                        Roche, Novartis, and 3,000+ Swiss suppliers under GDPR,
+                        NIS2, and FDA cybersecurity requirements.
+                    </p>
+                </div>
+                <div class="audience-card">
+                    <div class="aud-icon">🏦</div>
+                    <h3>Swiss Financial Services</h3>
+                    <p>
+                        300+ fintechs, 200+ banks, thousands of insurance and
+                        asset management firms subject to FINMA and DORA.
+                    </p>
+                </div>
+                <div class="audience-card">
+                    <div class="aud-icon">⚖️</div>
+                    <h3>Professional Services</h3>
+                    <p>
+                        Law firms, audit firms, HR tech — increasingly required
+                        by enterprise clients to demonstrate cyber hygiene.
+                    </p>
+                </div>
+                <div class="audience-card">
+                    <div class="aud-icon">🤝</div>
+                    <h3>Treuhand Network</h3>
+                    <p>
+                        80% of Swiss SMEs work with fiduciaries. 10 partnerships
+                        unlock access to their entire client base.
+                    </p>
+                </div>
+            </div>
+        </section>
+
+        <!-- ── METRICS ── -->
+        <div class="metrics-band">
+            <div class="metric-item">
+                <h3>600<span>k</span></h3>
+                <p>Total Swiss SMEs</p>
+            </div>
+            <div class="metric-item">
+                <h3>75<span>k</span></h3>
+                <p>Serviceable addressable market</p>
+            </div>
+            <div class="metric-item">
+                <h3>CHF <span>800</span></h3>
+                <p>Entry price per year</p>
+            </div>
+            <div class="metric-item">
+                <h3>85<span>%+</span></h3>
+                <p>Gross margin at 1,000 subscribers</p>
+            </div>
+            <div class="metric-item">
+                <h3>300<span>–400</span></h3>
+                <p>Subscribers to break-even</p>
+            </div>
+        </div>
+
+        <!-- ── PROJECTIONS ── -->
+        <section class="projections">
+            <div class="section-label">Financial Projections</div>
+            <h2>Profitable at Year 3. High margin from Year 2.</h2>
+            <p class="section-intro">
+                Infrastructure costs do not scale linearly with subscribers —
+                enabling rapid margin expansion as the base grows.
+            </p>
+
+            <div class="proj-grid">
+                <div class="proj-card">
+                    <div class="year">Year 1</div>
+                    <div class="revenue">CHF 40–120k</div>
+                    <div class="subs">50–150 subscribers</div>
+                </div>
+                <div class="proj-card">
+                    <div class="year">Year 2</div>
+                    <div class="revenue">CHF 240–480k</div>
+                    <div class="subs">300–600 subscribers · Break-even</div>
+                </div>
+                <div class="proj-card">
+                    <div class="year">Year 3</div>
+                    <div class="revenue">CHF 800k–1.6M</div>
+                    <div class="subs">1,000–2,000 subscribers</div>
+                </div>
+                <div class="proj-card">
+                    <div class="year">Year 4–5</div>
+                    <div class="revenue">CHF 4–6M</div>
+                    <div class="subs">5,000–7,500 subscribers</div>
+                </div>
+            </div>
+
+            <p style="font-size: 0.84rem; color: var(--gray); max-width: 620px">
+                Unit economics: CAC CHF 150–400 via LinkedIn outbound + content.
+                LTV CHF 2,400 at 3-year retention. LTV:CAC ratio 6:1–16:1.
+                Marginal cost of new subscriber near zero.
+            </p>
+        </section>
+
+        <!-- ── TRACTION / MILESTONES ── -->
+        <section id="traction" class="milestones">
+            <div class="section-label">Traction &amp; Milestones</div>
+            <h2>Production-ready before the seed round.</h2>
+            <p class="section-intro">
+                Built by a technical founder. Every core module is operational.
+            </p>
+
+            <div class="timeline">
+                <div class="tl-item">
+                    <div class="tl-dot done"></div>
+                    <div class="tl-content">
+                        <h3>Q1 2026 ✓</h3>
+                        <p>
+                            Complete .ch namespace enumeration (2.5M+ domains).
+                            Scan engine in Rust — HTTP, DNS, TLS, ports, WHOIS,
+                            subdomains. Risk scoring model v1. Swiss Innovation
+                            Challenge application submitted.
+                        </p>
+                    </div>
+                </div>
+                <div class="tl-item">
+                    <div class="tl-dot active"></div>
+                    <div class="tl-content">
+                        <h3>Q2 2026</h3>
+                        <p>
+                            GmbH incorporation (Basel-Stadt). Compliance report
+                            generator. REST API &amp; web dashboard. First 10
+                            paying pilot clients.
+                        </p>
+                    </div>
+                </div>
+                <div class="tl-item">
+                    <div class="tl-dot"></div>
+                    <div class="tl-content">
+                        <h3>Q3 2026</h3>
+                        <p>
+                            Seed round close (CHF 300k). 50 subscribers. First
+                            Treuhandpartner partnership signed.
+                        </p>
+                    </div>
+                </div>
+                <div class="tl-item">
+                    <div class="tl-dot"></div>
+                    <div class="tl-content">
+                        <h3>Q4 2026</h3>
+                        <p>
+                            100 subscribers. ISACA Switzerland community launch.
+                            First pharma enterprise pilot.
+                        </p>
+                    </div>
+                </div>
+                <div class="tl-item">
+                    <div class="tl-dot"></div>
+                    <div class="tl-content">
+                        <h3>Q2 2027</h3>
+                        <p>
+                            200 subscribers. Break-even approaching. Series A
+                            preparation.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ── CONTACT ── -->
+        <section id="contact" class="contact">
+            <div class="section-label">Investor Contact</div>
+            <h2>
+                Ready to back Switzerland's first SME cybersecurity intelligence
+                platform?
+            </h2>
+
+            <form class="contact-form" id="contact-form">
+                <div class="form-row">
+                    <div>
+                        <label for="name">Name</label>
+                        <input type="text" id="name" placeholder="Your Name" />
+                    </div>
+                    <div>
+                        <label for="org">Organisation</label>
+                        <input
+                            type="text"
+                            id="org"
+                            placeholder="Venture Fund"
+                        />
+                    </div>
+                </div>
+                <div>
+                    <label for="email">Email</label>
+                    <input type="email" id="email" placeholder="you@fund.ch" />
+                </div>
+                <div>
+                    <label for="interest">Interest</label>
+                    <select id="interest">
+                        <option value="">Select one</option>
+                        <option>Seed investment</option>
+                        <option>Strategic partnership</option>
+                        <option>Pilot client</option>
+                        <option>Advisory</option>
+                        <option>Other</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="message">Message</label>
+                    <textarea
+                        id="message"
+                        placeholder="Tell us briefly about your interest..."
+                    ></textarea>
+                </div>
+                <div class="form-submit">
+                    <button type="submit" class="btn btn-primary">
+                        Send Message
+                    </button>
+                    <span class="privacy-note"
+                        >Confidential — not for distribution</span
+                    >
+                </div>
+                <div id="form-feedback">
+                    Message received — we'll reply within 48 hours.
+                </div>
+            </form>
+        </section>
+
+        <!-- ── FOOTER ── -->
+        <footer>
+            <div>
+                <strong style="color: rgba(255, 255, 255, 0.6)"
+                    >HELVETISCAN</strong
+                ><br />
+                Basel, Switzerland · rafael@extrapolo.com<br />
+                Confidential Investor Brief — March 2026
+            </div>
+            <div class="footer-links">
+                <a href="#problem">Problem</a>
+                <a href="#product">Platform</a>
+                <a href="#findings">Findings</a>
+                <a href="#market">Market</a>
+                <a href="#traction">Traction</a>
+                <a href="#contact">Contact</a>
+                <a
+                    href="https://xn--2dk.xyz/dataviz/swiss/"
+                    target="_blank"
+                    rel="noopener"
+                    >DataViz ↗</a
+                >
+                <a
+                    href="https://github.com/rafapolo/helvetiscan"
+                    target="_blank"
+                    rel="noopener"
+                    >GitHub ↗</a
+                >
+            </div>
+        </footer>
+
+        <script>
+            // hamburger menu
+            const ham = document.getElementById("hamburger");
+            const nav = document.getElementById("nav-links");
+            ham.addEventListener("click", () => {
+                ham.classList.toggle("open");
+                nav.classList.toggle("open");
+            });
+            nav.querySelectorAll("a").forEach((a) =>
+                a.addEventListener("click", () => {
+                    ham.classList.remove("open");
+                    nav.classList.remove("open");
+                }),
+            );
+
+            // contact form → mailto
+            document
+                .getElementById("contact-form")
+                .addEventListener("submit", function (e) {
+                    e.preventDefault();
+                    const name = document.getElementById("name").value;
+                    const org = document.getElementById("org").value;
+                    const email = document.getElementById("email").value;
+                    const interest = document.getElementById("interest").value;
+                    const message = document.getElementById("message").value;
+                    const subject = encodeURIComponent(
+                        "HELVETISCAN — " + (interest || "Investor Enquiry"),
+                    );
+                    const body = encodeURIComponent(
+                        "Name: " +
+                            name +
+                            "\nOrganisation: " +
+                            org +
+                            "\nEmail: " +
+                            email +
+                            "\nInterest: " +
+                            interest +
+                            "\n\n" +
+                            message,
+                    );
+                    window.location.href =
+                        "mailto:rafael@extrapolo.com?subject=" +
+                        subject +
+                        "&body=" +
+                        body;
+                });
+        </script>
+    </body>
+</html>

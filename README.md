@@ -5,17 +5,19 @@ Scan, map and visualize the entire Swiss `.ch` namespace — over 2.5 million do
 
 <div align="center">
 
-![50k nodes sample](docs/50knodes.jpg)
+![50k nodes sample](docs/graph-50k.jpg)
 
 </div>
 
-This public visualization exposes the DNS dependency structure as an interactive force graph. 50 thousand domains shown in this graph, just 2%. Adjust `maxPoints` in the URL to load more. See it online [here](https://xn--2dk.xyz/dataviz/swiss/?maxPoints=50000&sim=1).[^2]
- 
- 
+This public visualization exposes the DNS dependency structure as an interactive force graph with 50 thousand domains shown by default, just 2%. Adjust `maxPoints` param in the URL to load as many you can.[^1] 
+
+Explore it online [here](https://xn--2dk.xyz/dataviz/swiss/?maxPoints=50000&sim=1). 
 
 ---
 
 ## The Tool
+
+The full HTTP scan completes in under 3 hours with high parallelization on a single machine with a 1 Gbps connection.
 
 ```
 Swiss Cyberspace scanner - HTTP, DNS, TLS, HTTP, ports, WHOIS, MX and CVEs
@@ -41,27 +43,9 @@ Options:
       --retry-errors <RETRY_ERRORS>  Re-scan domains whose error_kind matches this value (e.g. 'timeout')
 ```
 
-The full HTTP scan completes in under 2 hours with high parallelization on a single machine with a 1 Gbps connection.
-
 ---
 
-## The Mapping
-
-→ [Scan Modules and Security Scoring](docs/README.md)
-
-| Module | What it checks |
-|---|---|
-| **TLS & Certificates** | Expiration, chain validity, key strength, TLS version, CT logs |
-| **DNS & DNSSEC** | DNSSEC adoption, CAA records, zone transfers, open resolvers |
-| **HTTP Security Headers** | HSTS, CSP, X-Frame-Options, Referrer-Policy, Permissions-Policy |
-| **Open Ports** | Exposed databases, RDP, SMB, FTP, management interfaces |
-| **Email Security** | SPF, DKIM, DMARC — spoofing readiness across the namespace |
-| **Technology Fingerprinting** | CMS/framework detection, version extraction, CVE correlation |
-| **Domain Protection** | WHOIS expiry, typosquats, homoglyphs, orphaned subdomains |
-
----
-
-## The Findings (preliminary)
+## The Mapping[^2]
 
 -  76.4% has a live HTTP response; 1 in 4 is dead
 -  DNS failure accounts for 74.9% of errors (450,916 domains) — registered but no server
@@ -81,14 +65,18 @@ The full HTTP scan completes in under 2 hours with high parallelization on a sin
 -  313,472 domains (16% of live) expose MySQL; 87,292 expose SMB; 1,742 expose Docker API
 -  86.7% of .ch hosting stays within Europe; North America (US cloud) accounts for 13.0%
 -  Largest foreign IP concentrations (Wix 77K, Register.it 35K, Shopify 15K)
--  Domains in weak-jurisdiction countries (501 in RU/BY/IR/CN/SY)
+-  Domains served in weak-jurisdiction countries (501 in RU/BY/IR/CN/SY)
 -  US cloud exposure via server header (Cloudflare 181K, Vercel 10K, AWS 6K = 10.1%)
 -  TLS key sizes (no RSA <2048; ECDSA at 15.4%; 1,091 certs expiring in 7 days)
 -  Email spoofing exposure (305K domains = 43.3% fully spoofable)
 -  AXFR zone transfer leaks (2,300 parent domains, 27K subdomains exposed)
 -  Most common ports beyond 80/443 (FTP open on 688K = 42% of scanned)
 
-→ [See more](docs/FINDINGS.md)[^1]
+→ Read the [KEY FINDINGS](docs/FINDINGS.md)
 
-[^1]: Raw datasets are not published. Consider only processed edges.arrow and nodes.arrow for dataviz.
-[^2]: Full dataset visualization requires more than 16GB RAM for a proper WebGPU processing.
+---
+
+→ [RESEARCH & ROADMAP](docs/RESEARCH.md) / [SCAN OVERVIEW](docs/README.md) / [REGULATORY PRESSURE](docs/REGULATORY.md) / [LEGAL](docs/LEGAL.md) / [LICENSE](LICENSE.md)
+
+[^1]: Full dataset visualization requires ~32GB RAM for a proper WebGPU processing.
+[^2]: Raw datasets are not published. Consider only processed edges.arrow and nodes.arrow for dataviz.

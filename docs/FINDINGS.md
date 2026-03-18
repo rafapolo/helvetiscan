@@ -561,7 +561,7 @@ Top versions: `6.9.4` (2,140), `6.8.5` (203), `6.9.1` (101), `6.7.5` (82).
 
 ---
 
-## 32. CVE exposure at scale — maximum vulnerable population
+## 31. CVE exposure at scale — maximum vulnerable population
 
 *Dataset: 2,549,281 .ch domains. These figures represent the **maximum exposed population** — domains running a technology to which at least one cataloged CVE applies. Actual vulnerable count depends on software version, which is not yet compared against affected ranges. Treat all matches as "possibly vulnerable, requires verification."*
 
