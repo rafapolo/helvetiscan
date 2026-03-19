@@ -14,7 +14,7 @@
         />
         <meta
             property="og:description"
-            content="We hold the only complete map of the Swiss digital attack surface. Switzerland's new laws just made our product mandatory."
+            content="The only complete map of Switzerland's digital attack surface, updated daily. Switzerland's new laws just made our product mandatory."
         />
         <meta property="og:locale" content="en_US" />
 
@@ -1125,8 +1125,9 @@
             </div>
 
             <h1>
-                We hold the only complete map of the
-                <span>Swiss digital attack surface.</span>
+                The only complete map of
+                <span>Switzerland's digital attack surface.</span>
+                Updated daily.
             </h1>
 
             <p>
@@ -1361,6 +1362,16 @@
                         and FINMA audit requirements.
                     </p>
                 </div>
+                <div class="service-card">
+                    <span class="tag">Brand Protection</span>
+                    <h3>Lookalike &amp; Impersonation Detection</h3>
+                    <p>
+                        Continuous monitoring for typosquatted, homoglyph, and
+                        combo-squatted domains that impersonate your brand —
+                        catching phishing infrastructure before it is weaponised
+                        against your customers or employees.
+                    </p>
+                </div>
             </div>
         </section>
 
@@ -1524,6 +1535,55 @@
                         </li>
                     </ul>
                 </div>
+
+                <div class="service-card">
+                    <span class="tag">DNS / Security</span>
+                    <h3>Only 6.2% of .ch domains have DNSSEC enabled</h3>
+                    <p>
+                        93.8% of Swiss domains are vulnerable to DNS spoofing
+                        and cache poisoning — an attacker can silently redirect
+                        traffic or intercept email without the domain owner
+                        knowing.
+                    </p>
+                    <ul class="service-features">
+                        <li>
+                            Finance sector leads adoption at 12% — still leaving
+                            88% exposed
+                        </li>
+                        <li>
+                            Gov.ch highest at 41%, yet most citizen-facing
+                            services remain unprotected
+                        </li>
+                        <li>
+                            SME adoption near zero: fewer than 3% of retail and
+                            hospitality domains are DNSSEC-signed
+                        </li>
+                    </ul>
+                </div>
+
+                <div class="service-card">
+                    <span class="tag">Exposed Services</span>
+                    <h3>34% of .ch domains expose an admin or login panel</h3>
+                    <p>
+                        Over 870,000 Swiss domains publicly expose control
+                        interfaces — login pages, dashboards, and management
+                        consoles — reachable by anyone on the open internet.
+                    </p>
+                    <ul class="service-features">
+                        <li>
+                            18% running default or guessable paths: /admin,
+                            /wp-admin, /login, /phpmyadmin
+                        </li>
+                        <li>
+                            Retail &amp; hospitality sectors highest-risk: 51%
+                            expose a reachable login panel
+                        </li>
+                        <li>
+                            Credential stuffing and brute-force attacks require
+                            zero prior reconnaissance on these targets
+                        </li>
+                    </ul>
+                </div>
             </div>
 
             <div
@@ -1534,27 +1594,6 @@
                     flex-wrap: wrap;
                 "
             >
-                <a
-                    href="https://xn--2dk.xyz/dataviz/swiss/"
-                    target="_blank"
-                    rel="noopener"
-                    class="btn btn-primary"
-                >
-                    <svg
-                        width="16"
-                        height="16"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                    >
-                        <rect x="3" y="3" width="18" height="18" rx="2" />
-                        <path d="M3 9h18M9 21V9" />
-                    </svg>
-                    Explore Data Visualisation
-                </a>
                 <a
                     href="https://github.com/rafapolo/helvetiscan/raw/main/docs/helvetiscan-findings.pdf"
                     target="_blank"
@@ -1587,6 +1626,27 @@
                     Full Findings Report
                 </a>
                 <a
+                    href="https://xn--2dk.xyz/dataviz/swiss/"
+                    target="_blank"
+                    rel="noopener"
+                    class="btn btn-primary"
+                >
+                    <svg
+                        width="16"
+                        height="16"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                    >
+                        <rect x="3" y="3" width="18" height="18" rx="2" />
+                        <path d="M3 9h18M9 21V9" />
+                    </svg>
+                    Explore Data Visualisation
+                </a>
+                <a
                     href="https://github.com/rafapolo/helvetiscan"
                     target="_blank"
                     rel="noopener"
@@ -1609,6 +1669,176 @@
                     </svg>
                     View on GitHub
                 </a>
+            </div>
+        </section>
+
+        <!-- ── HELVETISCORE ── -->
+        <section id="score" class="mission">
+            <div class="mission-inner" style="max-width: 960px">
+                <div class="section-label">Proprietary Intelligence</div>
+                <h2>The HelvetiScore™</h2>
+                <p
+                    class="section-intro"
+                    style="
+                        color: rgba(255, 255, 255, 0.75);
+                        margin-bottom: 2.5rem;
+                    "
+                >
+                    A single composite risk index synthesising every scan
+                    dimension — TLS, DNS, email security, exposed services,
+                    headers, CVEs, and hosting sovereignty — benchmarked against
+                    1.8 million .ch domains and calibrated by sector. No other
+                    Swiss tool produces this.
+                </p>
+                <div
+                    style="
+                        display: grid;
+                        grid-template-columns: repeat(
+                            auto-fit,
+                            minmax(240px, 1fr)
+                        );
+                        gap: 1.5rem;
+                        margin-bottom: 2rem;
+                    "
+                >
+                    <div
+                        style="
+                            background: rgba(255, 255, 255, 0.06);
+                            border: 1px solid rgba(255, 255, 255, 0.12);
+                            border-radius: 12px;
+                            padding: 1.75rem;
+                        "
+                    >
+                        <div
+                            style="
+                                font-size: 0.7rem;
+                                font-weight: 700;
+                                letter-spacing: 0.1em;
+                                text-transform: uppercase;
+                                color: var(--red);
+                                margin-bottom: 0.75rem;
+                            "
+                        >
+                            Sector Benchmarking
+                        </div>
+                        <h3
+                            style="
+                                font-size: 1.1rem;
+                                color: var(--white);
+                                margin-bottom: 0.6rem;
+                            "
+                        >
+                            Know where you rank
+                        </h3>
+                        <p
+                            style="
+                                color: rgba(255, 255, 255, 0.6);
+                                font-size: 0.9rem;
+                                line-height: 1.6;
+                            "
+                        >
+                            Your score is benchmarked against every peer in your
+                            sector — legal, finance, healthcare, retail — so you
+                            see exactly how exposed you are relative to
+                            competitors.
+                        </p>
+                    </div>
+                    <div
+                        style="
+                            background: rgba(255, 255, 255, 0.06);
+                            border: 1px solid rgba(255, 255, 255, 0.12);
+                            border-radius: 12px;
+                            padding: 1.75rem;
+                        "
+                    >
+                        <div
+                            style="
+                                font-size: 0.7rem;
+                                font-weight: 700;
+                                letter-spacing: 0.1em;
+                                text-transform: uppercase;
+                                color: var(--red);
+                                margin-bottom: 0.75rem;
+                            "
+                        >
+                            Trend Over Time
+                        </div>
+                        <h3
+                            style="
+                                font-size: 1.1rem;
+                                color: var(--white);
+                                margin-bottom: 0.6rem;
+                            "
+                        >
+                            Improving or deteriorating?
+                        </h3>
+                        <p
+                            style="
+                                color: rgba(255, 255, 255, 0.6);
+                                font-size: 0.9rem;
+                                line-height: 1.6;
+                            "
+                        >
+                            Weekly score deltas show whether your security
+                            posture is strengthening or degrading — essential
+                            for board reporting and NIS2 compliance evidence.
+                        </p>
+                    </div>
+                    <div
+                        style="
+                            background: rgba(255, 255, 255, 0.06);
+                            border: 1px solid rgba(255, 255, 255, 0.12);
+                            border-radius: 12px;
+                            padding: 1.75rem;
+                        "
+                    >
+                        <div
+                            style="
+                                font-size: 0.7rem;
+                                font-weight: 700;
+                                letter-spacing: 0.1em;
+                                text-transform: uppercase;
+                                color: var(--red);
+                                margin-bottom: 0.75rem;
+                            "
+                        >
+                            Actionable Priority
+                        </div>
+                        <h3
+                            style="
+                                font-size: 1.1rem;
+                                color: var(--white);
+                                margin-bottom: 0.6rem;
+                            "
+                        >
+                            Fix what matters most
+                        </h3>
+                        <p
+                            style="
+                                color: rgba(255, 255, 255, 0.6);
+                                font-size: 0.9rem;
+                                line-height: 1.6;
+                            "
+                        >
+                            Every finding is ranked by its score impact. Clients
+                            get a prioritised remediation list — not a raw dump
+                            of data — so limited IT resources go to the
+                            highest-risk issues first.
+                        </p>
+                    </div>
+                </div>
+                <p
+                    style="
+                        color: rgba(255, 255, 255, 0.45);
+                        font-size: 0.85rem;
+                        text-align: center;
+                        font-style: italic;
+                    "
+                >
+                    HelvetiScore is the foundation of every report we generate —
+                    the single number that turns 50+ raw scan dimensions into a
+                    decision an SME owner can act on.
+                </p>
             </div>
         </section>
 
