@@ -1,0 +1,2423 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>
+            Full Findings Report — HelvetiScan · Swiss .ch Domain Security
+            Landscape · March 2026
+        </title>
+        <meta property="og:type" content="website" />
+        <meta
+            property="og:url"
+            content="https://helvetiscan.ミ.xyz/findings.html"
+        />
+        <meta
+            property="og:title"
+            content="HelvetiScan — Full Findings Report"
+        />
+        <meta
+            property="og:description"
+            content="Swiss .ch Domain Security Landscape · Key Findings · March 2026 · 2,549,281 domains scanned"
+        />
+        <meta property="og:locale" content="en_US" />
+        <style>
+            *,
+            *::before,
+            *::after {
+                box-sizing: border-box;
+                margin: 0;
+                padding: 0;
+            }
+
+            :root {
+                --red: #d52b1e;
+                --navy: #0f1f36;
+                --blue: #1a3a5c;
+                --mid: #2a5298;
+                --light: #e8f0fa;
+                --gray: #5a6a7a;
+                --white: #ffffff;
+                --off: #f5f7fa;
+                --border: #dce4ef;
+                --dark-bg: #0c1628;
+            }
+
+            html {
+                scroll-behavior: smooth;
+            }
+
+            body {
+                font-family:
+                    "Segoe UI",
+                    system-ui,
+                    -apple-system,
+                    sans-serif;
+                color: var(--navy);
+                background: var(--off);
+                line-height: 1.7;
+            }
+
+            /* ─── NAV ─── */
+            nav {
+                position: fixed;
+                top: 0;
+                left: 0;
+                right: 0;
+                z-index: 200;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                padding: 0 5vw;
+                height: 60px;
+                background: rgba(10, 18, 32, 0.97);
+                backdrop-filter: blur(10px);
+                border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+            }
+            .logo {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                text-decoration: none;
+                color: var(--white);
+                font-weight: 800;
+                font-size: 1.1rem;
+                letter-spacing: -0.5px;
+            }
+            .logo-icon {
+                width: 32px;
+                height: 32px;
+                background: var(--red);
+                border-radius: 7px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                flex-shrink: 0;
+                font-size: 0.85rem;
+                color: white;
+                font-weight: 800;
+                letter-spacing: -1px;
+            }
+            .nav-back {
+                color: rgba(255, 255, 255, 0.72);
+                text-decoration: none;
+                font-size: 0.88rem;
+                font-weight: 500;
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                transition: color 0.2s;
+            }
+            .nav-back:hover {
+                color: var(--white);
+            }
+
+            /* ─── HERO ─── */
+            .hero {
+                background: linear-gradient(
+                    160deg,
+                    #080e1a 0%,
+                    #0c1628 55%,
+                    #1a3a5c 100%
+                );
+                padding: 120px 6vw 72px;
+                text-align: center;
+            }
+            .hero-badge {
+                display: inline-block;
+                background: rgba(213, 43, 30, 0.18);
+                color: #e8634f;
+                border: 1px solid rgba(213, 43, 30, 0.35);
+                border-radius: 50px;
+                padding: 5px 18px;
+                font-size: 0.78rem;
+                font-weight: 700;
+                letter-spacing: 0.08em;
+                text-transform: uppercase;
+                margin-bottom: 1.5rem;
+            }
+            .hero h1 {
+                color: var(--white);
+                font-size: clamp(2rem, 5vw, 3.4rem);
+                font-weight: 900;
+                letter-spacing: -1.5px;
+                line-height: 1.08;
+                max-width: 820px;
+                margin: 0 auto 1rem;
+            }
+            .hero-sub {
+                color: rgba(255, 255, 255, 0.65);
+                font-size: 1.05rem;
+                margin-bottom: 2.5rem;
+            }
+            .hero-stats {
+                display: flex;
+                flex-wrap: wrap;
+                justify-content: center;
+                gap: 2rem 3.5rem;
+                margin-top: 2rem;
+            }
+            .hero-stat {
+                text-align: center;
+            }
+            .hero-stat .val {
+                display: block;
+                font-size: 2rem;
+                font-weight: 900;
+                color: var(--white);
+                letter-spacing: -1px;
+            }
+            .hero-stat .lbl {
+                font-size: 0.78rem;
+                color: rgba(255, 255, 255, 0.5);
+                text-transform: uppercase;
+                letter-spacing: 0.06em;
+            }
+
+            /* ─── SECTION BANDS ─── */
+            .section {
+                padding: 64px 6vw;
+            }
+            .section.bg-light {
+                background: var(--off);
+            }
+            .section.bg-dark {
+                background: var(--dark-bg);
+            }
+            .inner {
+                max-width: 960px;
+                margin: 0 auto;
+            }
+
+            /* ─── SECTION HEADER ─── */
+            .section-header {
+                border-left: 4px solid var(--mid);
+                padding-left: 1.1rem;
+                margin-bottom: 2rem;
+            }
+            .bg-dark .section-header {
+                border-left-color: #4a7fd4;
+            }
+            .section-header h2 {
+                font-size: 1.55rem;
+                font-weight: 800;
+                letter-spacing: -0.5px;
+                color: var(--navy);
+            }
+            .bg-dark .section-header h2 {
+                color: var(--white);
+            }
+
+            .section-header p {
+                color: var(--gray);
+                font-size: 0.9rem;
+                margin-top: 0.25rem;
+            }
+            .bg-dark .section-header p {
+                color: rgba(255, 255, 255, 0.55);
+            }
+
+            /* ─── STAT CARDS ─── */
+            .stat-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+                gap: 1rem;
+                margin-bottom: 1.5rem;
+            }
+            .stat-card {
+                background: var(--white);
+                border: 1px solid var(--border);
+                border-radius: 10px;
+                padding: 1.2rem 1.4rem;
+            }
+            .bg-dark .stat-card {
+                background: rgba(255, 255, 255, 0.06);
+                border-color: rgba(255, 255, 255, 0.1);
+            }
+            .stat-card .num {
+                font-size: 2rem;
+                font-weight: 900;
+                color: var(--mid);
+                letter-spacing: -1px;
+                line-height: 1;
+            }
+            .bg-dark .stat-card .num {
+                color: #7aaef5;
+            }
+            .stat-card .num.critical {
+                color: var(--red);
+            }
+            .bg-dark .stat-card .num.critical {
+                color: #f87171;
+            }
+            .stat-card .desc {
+                font-size: 0.82rem;
+                color: var(--gray);
+                margin-top: 0.3rem;
+                line-height: 1.4;
+            }
+            .bg-dark .stat-card .desc {
+                color: rgba(255, 255, 255, 0.55);
+            }
+
+            /* ─── TABLES ─── */
+            .table-wrap {
+                overflow-x: auto;
+                margin: 1.5rem 0;
+                border: 1px solid var(--border);
+                border-radius: 10px;
+            }
+            .bg-dark .table-wrap {
+                border-color: rgba(255, 255, 255, 0.1);
+            }
+            table {
+                width: 100%;
+                border-collapse: collapse;
+                font-size: 0.9rem;
+            }
+            thead tr {
+                background: var(--navy);
+            }
+            .bg-dark thead tr {
+                background: rgba(255, 255, 255, 0.12);
+            }
+            thead th {
+                color: var(--white);
+                font-weight: 700;
+                font-size: 0.78rem;
+                text-transform: uppercase;
+                letter-spacing: 0.05em;
+                padding: 10px 14px;
+                text-align: left;
+                white-space: nowrap;
+            }
+            .bg-dark thead th {
+                color: rgba(255, 255, 255, 0.75);
+            }
+            tbody tr {
+                border-bottom: 1px solid var(--border);
+            }
+            .bg-dark tbody tr {
+                border-bottom-color: rgba(255, 255, 255, 0.07);
+            }
+            tbody tr:last-child {
+                border-bottom: none;
+            }
+            tbody tr:nth-child(even) {
+                background: var(--off);
+            }
+            .bg-dark tbody tr:nth-child(even) {
+                background: rgba(255, 255, 255, 0.04);
+            }
+            tbody td {
+                padding: 9px 14px;
+                color: var(--navy);
+            }
+            .bg-dark tbody td {
+                color: rgba(255, 255, 255, 0.85);
+            }
+            tbody strong {
+                color: var(--navy);
+            }
+            .bg-dark tbody strong {
+                color: var(--white);
+            }
+
+            .tag {
+                display: inline-block;
+                padding: 2px 8px;
+                border-radius: 4px;
+                font-size: 0.75rem;
+                font-weight: 700;
+            }
+            .tag-critical {
+                background: #fde8e8;
+                color: #b91c1c;
+            }
+            .tag-high {
+                background: #fef3e0;
+                color: #b45309;
+            }
+            .bg-dark .tag-critical {
+                background: rgba(239, 68, 68, 0.2);
+                color: #fca5a5;
+            }
+            .bg-dark .tag-high {
+                background: rgba(245, 158, 11, 0.2);
+                color: #fcd34d;
+            }
+
+            /* ─── FINDINGS BOX ─── */
+            .findings-box {
+                background: var(--light);
+                border: 1px solid #b8cef0;
+                border-radius: 10px;
+                padding: 1.4rem 1.6rem;
+                margin: 1.25rem 0;
+                font-size: 0.92rem;
+                color: var(--blue);
+                line-height: 1.6;
+            }
+            .bg-dark .findings-box {
+                background: rgba(74, 127, 212, 0.15);
+                border-color: rgba(74, 127, 212, 0.3);
+                color: rgba(255, 255, 255, 0.8);
+            }
+
+            /* ─── TAKEAWAYS ─── */
+            .takeaway {
+                display: flex;
+                gap: 1.2rem;
+                padding: 1.4rem 0;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            }
+            .takeaway:last-child {
+                border-bottom: none;
+            }
+            .takeaway-num {
+                flex-shrink: 0;
+                width: 36px;
+                height: 36px;
+                background: var(--red);
+                color: #fff;
+                border-radius: 50%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-weight: 800;
+                font-size: 0.88rem;
+            }
+            .takeaway-body strong {
+                color: var(--white);
+            }
+            .takeaway-body {
+                font-size: 0.93rem;
+                color: rgba(255, 255, 255, 0.65);
+                line-height: 1.6;
+            }
+
+            /* ─── METHODOLOGY ─── */
+            .method-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+                gap: 1rem;
+                margin-top: 1.5rem;
+            }
+            .method-card {
+                background: var(--white);
+                border: 1px solid var(--border);
+                border-radius: 10px;
+                padding: 1.2rem 1.4rem;
+            }
+            .method-card h4 {
+                font-size: 0.85rem;
+                font-weight: 700;
+                color: var(--mid);
+                text-transform: uppercase;
+                letter-spacing: 0.05em;
+                margin-bottom: 0.5rem;
+            }
+            .method-card p {
+                font-size: 0.88rem;
+                color: var(--gray);
+                line-height: 1.55;
+            }
+
+            /* ─── FOOTER ─── */
+            footer {
+                background: #060e1a;
+                color: rgba(255, 255, 255, 0.4);
+                text-align: center;
+                padding: 2rem 5vw;
+                font-size: 0.82rem;
+            }
+            footer a {
+                color: rgba(255, 255, 255, 0.6);
+            }
+
+            @media (max-width: 640px) {
+                .stat-grid {
+                    grid-template-columns: 1fr 1fr;
+                }
+                .hero h1 {
+                    font-size: 1.9rem;
+                }
+                .section {
+                    padding: 48px 5vw;
+                }
+            }
+        </style>
+    </head>
+    <body>
+        <!-- NAV -->
+        <nav>
+            <a href="index.html" class="logo">
+                <div class="logo-icon">HS</div>
+                HELVETISCAN
+            </a>
+            <a href="index.html" class="nav-back">
+                <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2.5"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                >
+                    <polyline points="15 18 9 12 15 6" />
+                </svg>
+                Back to site
+            </a>
+        </nav>
+
+        <!-- HERO -->
+        <section class="hero">
+            <div class="hero-badge">Full Findings Report</div>
+            <h1>Swiss .ch Domain Security Landscape</h1>
+            <p class="hero-sub">Key Findings &middot; March 2026</p>
+            <div class="hero-stats">
+                <div class="hero-stat">
+                    <span class="val">2,549,281</span
+                    ><span class="lbl">Domains scanned</span>
+                </div>
+                <div class="hero-stat">
+                    <span class="val">49</span
+                    ><span class="lbl">Key findings</span>
+                </div>
+                <div class="hero-stat">
+                    <span class="val">8</span
+                    ><span class="lbl">Sectors classified</span>
+                </div>
+                <div class="hero-stat">
+                    <span class="val">74</span
+                    ><span class="lbl">CVEs cataloged</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- ═══════════════ 1. DATASET OVERVIEW — light ═══════════════ -->
+        <section class="section bg-light">
+            <div class="inner">
+                <div class="section-header">
+                    <h2>Dataset Overview</h2>
+                    <p>
+                        Full scan of the .ch TLD registry — DNS resolution, HTTP
+                        headers, TLS certificates, email authentication
+                        (SPF/DMARC/DKIM), TCP port survey, and CVE
+                        fingerprinting.
+                    </p>
+                </div>
+                <div class="stat-grid">
+                    <div class="stat-card">
+                        <div class="num">2,549,281</div>
+                        <div class="desc">Total .ch domains in scope</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="num">1,947,451</div>
+                        <div class="desc">Live domains (76.4%)</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="num">49</div>
+                        <div class="desc">Key findings reported</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="num">8</div>
+                        <div class="desc">Industry sectors classified</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="num">74</div>
+                        <div class="desc">CVEs in catalog</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="num">130,937</div>
+                        <div class="desc">Distinct hosting IPs</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="num">394,928</div>
+                        <div class="desc">Subdomains discovered</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="num critical">38.4%</div>
+                        <div class="desc">Match CISA KEV entries</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ═══════════════ 2. DOMAIN AVAILABILITY — dark ═══════════════ -->
+        <section class="section bg-dark">
+            <div class="inner">
+                <div class="section-header">
+                    <h2>Domain Availability &amp; Failure Modes</h2>
+                    <p>
+                        Dataset: 2,549,281 domains — complete coverage. Status
+                        'ok' = any HTTP response received.
+                    </p>
+                </div>
+                <div class="stat-grid">
+                    <div class="stat-card">
+                        <div class="num">76.4%</div>
+                        <div class="desc">
+                            of .ch domains serve a live HTTP response
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="num critical">74.9%</div>
+                        <div class="desc">
+                            of all errors are DNS failures (no A record)
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="num critical">5.1%</div>
+                        <div class="desc">
+                            TLS failures — reachable but broken certificate
+                        </div>
+                    </div>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Status</th>
+                                <th>Count</th>
+                                <th>Share</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>Live (ok)</td>
+                                <td>1,947,451</td>
+                                <td>76.4%</td>
+                            </tr>
+                            <tr>
+                                <td>Error</td>
+                                <td>601,830</td>
+                                <td>23.6%</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Error kind</th>
+                                <th>Count</th>
+                                <th>Share of errors</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>DNS (no A record)</td>
+                                <td>450,916</td>
+                                <td>74.9%</td>
+                            </tr>
+                            <tr>
+                                <td>Timeout</td>
+                                <td>93,913</td>
+                                <td>15.6%</td>
+                            </tr>
+                            <tr>
+                                <td>TLS failed</td>
+                                <td>30,925</td>
+                                <td>5.1%</td>
+                            </tr>
+                            <tr>
+                                <td>Connection refused</td>
+                                <td>14,482</td>
+                                <td>2.4%</td>
+                            </tr>
+                            <tr>
+                                <td>Other</td>
+                                <td>11,594</td>
+                                <td>1.9%</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- ═══════════════ 3. WEB SERVER — light ═══════════════ -->
+        <section class="section bg-light">
+            <div class="inner">
+                <div class="section-header">
+                    <h2>Web Server &amp; HTTP Landscape</h2>
+                    <p>
+                        Web server market share (1,779,967 domains with Server:
+                        header). 91.4% of live domains expose a Server: header.
+                        Median response time: 1.1 s. p99: 10.8 s.
+                    </p>
+                </div>
+                <div class="stat-grid">
+                    <div class="stat-card">
+                        <div class="num">38.3%</div>
+                        <div class="desc">
+                            Apache — largest single server family
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="num">10.2%</div>
+                        <div class="desc">
+                            Cloudflare proxies (US infrastructure)
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="num critical">550K+</div>
+                        <div class="desc">
+                            Domains serve content over plain HTTP
+                        </div>
+                    </div>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Server family</th>
+                                <th>Count</th>
+                                <th>Share of live</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>Apache</td>
+                                <td>682,437</td>
+                                <td>38.3%</td>
+                            </tr>
+                            <tr>
+                                <td>nginx / OpenResty</td>
+                                <td>605,026</td>
+                                <td>34.0%</td>
+                            </tr>
+                            <tr>
+                                <td>Cloudflare</td>
+                                <td>181,451</td>
+                                <td>10.2%</td>
+                            </tr>
+                            <tr>
+                                <td>Other</td>
+                                <td>126,980</td>
+                                <td>7.1%</td>
+                            </tr>
+                            <tr>
+                                <td>Pepyaka (Wix)</td>
+                                <td>102,701</td>
+                                <td>5.8%</td>
+                            </tr>
+                            <tr>
+                                <td>LiteSpeed</td>
+                                <td>35,038</td>
+                                <td>2.0%</td>
+                            </tr>
+                            <tr>
+                                <td>Squarespace</td>
+                                <td>19,853</td>
+                                <td>1.1%</td>
+                            </tr>
+                            <tr>
+                                <td>Microsoft IIS</td>
+                                <td>16,525</td>
+                                <td>0.9%</td>
+                            </tr>
+                            <tr>
+                                <td>Vercel</td>
+                                <td>9,956</td>
+                                <td>0.6%</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- ═══════════════ 4. CMS & PHP — dark ═══════════════ -->
+        <section class="section bg-dark">
+            <div class="inner">
+                <div class="section-header">
+                    <h2>CMS Landscape &amp; End-of-Life PHP</h2>
+                    <p>
+                        CMS: 526,328 installs detected. PHP: 174,706 domains
+                        expose X-Powered-By header (9% of live).
+                    </p>
+                </div>
+                <div class="stat-grid">
+                    <div class="stat-card">
+                        <div class="num">71.5%</div>
+                        <div class="desc">
+                            WordPress — dominant CMS (~19% of all live .ch)
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="num critical">43,473</div>
+                        <div class="desc">
+                            Live .ch sites advertise end-of-life PHP
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="num critical">PHP 7.4</div>
+                        <div class="desc">
+                            Most common EOL version — EOL since Nov 2022
+                        </div>
+                    </div>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>CMS</th>
+                                <th>Count</th>
+                                <th>Share of installs</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>WordPress</td>
+                                <td>376,098</td>
+                                <td>71.5%</td>
+                            </tr>
+                            <tr>
+                                <td>Wix</td>
+                                <td>83,246</td>
+                                <td>15.8%</td>
+                            </tr>
+                            <tr>
+                                <td>TYPO3</td>
+                                <td>26,372</td>
+                                <td>5.0%</td>
+                            </tr>
+                            <tr>
+                                <td>Joomla</td>
+                                <td>23,202</td>
+                                <td>4.4%</td>
+                            </tr>
+                            <tr>
+                                <td>Drupal</td>
+                                <td>10,028</td>
+                                <td>1.9%</td>
+                            </tr>
+                            <tr>
+                                <td>Other</td>
+                                <td>7,382</td>
+                                <td>1.4%</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>PHP branch</th>
+                                <th>Count</th>
+                                <th>EOL date</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>PHP 5.x</td>
+                                <td>16,839</td>
+                                <td>Dec 2018</td>
+                            </tr>
+                            <tr>
+                                <td>PHP 7.0–7.3</td>
+                                <td>6,190</td>
+                                <td>Dec 2019–2022</td>
+                            </tr>
+                            <tr>
+                                <td>PHP 7.4</td>
+                                <td>20,444</td>
+                                <td>Nov 2022</td>
+                            </tr>
+                            <tr>
+                                <td>PHP 8.x (supported)</td>
+                                <td>61,961</td>
+                                <td>—</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- ═══════════════ 5. HOSTING GEOGRAPHY — light ═══════════════ -->
+        <section class="section bg-light">
+            <div class="inner">
+                <div class="section-header">
+                    <h2>Hosting Geography</h2>
+                    <p>
+                        Based on 1,739,441 live domains with GeoLite2 IP
+                        geolocation (89.3% of live). Germany driven largely by
+                        Wix DE infrastructure.
+                    </p>
+                </div>
+                <div class="stat-grid">
+                    <div class="stat-card">
+                        <div class="num critical">40.6%</div>
+                        <div class="desc">
+                            of .ch domains hosted outside Switzerland
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="num">13.0%</div>
+                        <div class="desc">
+                            Hosted in North America (US cloud &amp; Wix)
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="num critical">207,977</div>
+                        <div class="desc">
+                            Domains fully offshored (foreign DNS + hosting)
+                        </div>
+                    </div>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Country</th>
+                                <th>Count</th>
+                                <th>Share</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>Switzerland (CH)</td>
+                                <td>1,033,304</td>
+                                <td>59.4%</td>
+                            </tr>
+                            <tr>
+                                <td>Germany (DE)</td>
+                                <td>300,707</td>
+                                <td>17.3%</td>
+                            </tr>
+                            <tr>
+                                <td>United States (US)</td>
+                                <td>202,562</td>
+                                <td>11.6%</td>
+                            </tr>
+                            <tr>
+                                <td>France (FR)</td>
+                                <td>52,720</td>
+                                <td>3.0%</td>
+                            </tr>
+                            <tr>
+                                <td>Italy (IT)</td>
+                                <td>41,992</td>
+                                <td>2.4%</td>
+                            </tr>
+                            <tr>
+                                <td>Canada (CA)</td>
+                                <td>22,713</td>
+                                <td>1.3%</td>
+                            </tr>
+                            <tr>
+                                <td>Netherlands (NL)</td>
+                                <td>22,181</td>
+                                <td>1.3%</td>
+                            </tr>
+                            <tr>
+                                <td>Denmark (DK)</td>
+                                <td>9,788</td>
+                                <td>0.6%</td>
+                            </tr>
+                            <tr>
+                                <td>United Kingdom (GB)</td>
+                                <td>9,247</td>
+                                <td>0.5%</td>
+                            </tr>
+                            <tr>
+                                <td>Other</td>
+                                <td>44,227</td>
+                                <td>2.5%</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- ═══════════════ 6. HOSTING CONCENTRATION — dark ═══════════════ -->
+        <section class="section bg-dark">
+            <div class="inner">
+                <div class="section-header">
+                    <h2>Hosting Concentration Risk</h2>
+                    <p>
+                        130,937 distinct IPs host 1,816,085 live domains —
+                        average 13.9 per IP, but heavily skewed to
+                        shared-hosting stacks.
+                    </p>
+                </div>
+                <div class="stat-grid">
+                    <div class="stat-card">
+                        <div class="num critical">133,425</div>
+                        <div class="desc">
+                            Domains on a single IP (Hostpoint 217.26.48.101)
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="num critical">21%</div>
+                        <div class="desc">
+                            of all live .ch domains on the top 10 IPs
+                        </div>
+                    </div>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>IP Address</th>
+                                <th>Domains</th>
+                                <th>Provider</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>217.26.48.101</td>
+                                <td>133,425</td>
+                                <td>Hostpoint AG (CH)</td>
+                            </tr>
+                            <tr>
+                                <td>217.26.63.20</td>
+                                <td>43,708</td>
+                                <td>Hostpoint AG (CH)</td>
+                            </tr>
+                            <tr>
+                                <td>81.88.58.216</td>
+                                <td>35,747</td>
+                                <td>Register S.p.A (IT)</td>
+                            </tr>
+                            <tr>
+                                <td>185.230.63.107</td>
+                                <td>35,031</td>
+                                <td>Wix Ltd (US)</td>
+                            </tr>
+                            <tr>
+                                <td>128.65.195.180</td>
+                                <td>32,764</td>
+                                <td>Swisscom AG (CH)</td>
+                            </tr>
+                            <tr>
+                                <td>84.16.66.164</td>
+                                <td>29,854</td>
+                                <td>Infomaniak (CH)</td>
+                            </tr>
+                            <tr>
+                                <td>185.101.158.113</td>
+                                <td>28,322</td>
+                                <td>Hosttech GmbH (CH)</td>
+                            </tr>
+                            <tr>
+                                <td>162.159.128.70</td>
+                                <td>28,171</td>
+                                <td>Cloudflare (US)</td>
+                            </tr>
+                            <tr>
+                                <td>185.230.63.171</td>
+                                <td>21,538</td>
+                                <td>Wix Ltd (US)</td>
+                            </tr>
+                            <tr>
+                                <td>185.230.63.186</td>
+                                <td>21,107</td>
+                                <td>Wix Ltd (US)</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- ═══════════════ 7. HOSTING SOVEREIGNTY — light ═══════════════ -->
+        <section class="section bg-light">
+            <div class="inner">
+                <div class="section-header">
+                    <h2>Hosting Sovereignty by Sector</h2>
+                    <p>
+                        207,977 domains are fully offshored: both foreign DNS
+                        operator AND foreign hosting (~8.2% of all live .ch).
+                    </p>
+                </div>
+                <div class="stat-grid">
+                    <div class="stat-card">
+                        <div class="num critical">49.9%</div>
+                        <div class="desc">
+                            Pharma CH-hosting rate — lowest of all sectors
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="num">75.1%</div>
+                        <div class="desc">
+                            Government CH-hosting rate — highest sector
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="num critical">13.5%</div>
+                        <div class="desc">
+                            Pharma US exposure — highest sector
+                        </div>
+                    </div>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Sector</th>
+                                <th>Domains</th>
+                                <th>CH-hosted</th>
+                                <th>US-hosted</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>Government</td>
+                                <td>6,887</td>
+                                <td>75.1%</td>
+                                <td>6.7%</td>
+                            </tr>
+                            <tr>
+                                <td>Education</td>
+                                <td>13,392</td>
+                                <td>69.8%</td>
+                                <td>8.9%</td>
+                            </tr>
+                            <tr>
+                                <td>Legal</td>
+                                <td>6,721</td>
+                                <td>68.0%</td>
+                                <td>9.4%</td>
+                            </tr>
+                            <tr>
+                                <td>Healthcare</td>
+                                <td>8,257</td>
+                                <td>60.9%</td>
+                                <td>9.3%</td>
+                            </tr>
+                            <tr>
+                                <td>Finance</td>
+                                <td>10,451</td>
+                                <td>60.0%</td>
+                                <td>11.3%</td>
+                            </tr>
+                            <tr>
+                                <td>Media</td>
+                                <td>4,696</td>
+                                <td>59.1%</td>
+                                <td>7.7%</td>
+                            </tr>
+                            <tr>
+                                <td>Retail</td>
+                                <td>30,563</td>
+                                <td>51.0%</td>
+                                <td>7.0%</td>
+                            </tr>
+                            <tr>
+                                <td>Pharma</td>
+                                <td>2,526</td>
+                                <td>49.9%</td>
+                                <td>13.5%</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="findings-box">
+                    77,676 Wix domains concentrated across three US IPs:
+                    185.230.63.107 (35,031) · 185.230.63.171 (21,538) ·
+                    185.230.63.186 (21,107)
+                </div>
+            </div>
+        </section>
+
+        <!-- ═══════════════ 8. US CLOUD EXPOSURE — dark ═══════════════ -->
+        <section class="section bg-dark">
+            <div class="inner">
+                <div class="section-header">
+                    <h2>US Cloud Infrastructure Exposure</h2>
+                    <p>
+                        These figures are a lower bound — domains behind
+                        Cloudflare often suppress or rewrite the Server: header.
+                        The actual count is higher.
+                    </p>
+                </div>
+                <div class="stat-grid">
+                    <div class="stat-card">
+                        <div class="num critical">10.1%</div>
+                        <div class="desc">
+                            of live .ch domains route through US cloud
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="num critical">197,587</div>
+                        <div class="desc">
+                            Domains behind Cloudflare, Vercel, or AWS
+                        </div>
+                    </div>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>US Provider</th>
+                                <th>Domains</th>
+                                <th>Share of live</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>Cloudflare</td>
+                                <td>181,451</td>
+                                <td>9.3%</td>
+                            </tr>
+                            <tr>
+                                <td>Vercel</td>
+                                <td>9,956</td>
+                                <td>0.5%</td>
+                            </tr>
+                            <tr>
+                                <td>AWS (ELB/S3)</td>
+                                <td>6,180</td>
+                                <td>0.3%</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Sector</th>
+                                <th>Cloudflare</th>
+                                <th>Vercel</th>
+                                <th>AWS</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>Finance</td>
+                                <td>944</td>
+                                <td>121</td>
+                                <td>39</td>
+                            </tr>
+                            <tr>
+                                <td>Healthcare</td>
+                                <td>601</td>
+                                <td>71</td>
+                                <td>14</td>
+                            </tr>
+                            <tr>
+                                <td>Government</td>
+                                <td>273</td>
+                                <td>26</td>
+                                <td>14</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="findings-box">
+                    944 Swiss finance domains and 601 healthcare domains route
+                    through Cloudflare — a US-incorporated entity subject to US
+                    legal process (CLOUD Act, FISA §702).
+                </div>
+            </div>
+        </section>
+
+        <!-- ═══════════════ 9. HTTPS & TLS — light ═══════════════ -->
+        <section class="section bg-light">
+            <div class="inner">
+                <div class="section-header">
+                    <h2>HTTPS &amp; TLS Certificate Landscape</h2>
+                    <p>
+                        Swiss national CA SwissSign covers only 1,270 domains
+                        (0.1%). TLS 1.0/1.1 appear extinct in the dataset.
+                    </p>
+                </div>
+                <div class="stat-grid">
+                    <div class="stat-card">
+                        <div class="num">71.7%</div>
+                        <div class="desc">of live domains end on HTTPS</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="num critical">28.3%</div>
+                        <div class="desc">
+                            Still deliver content over plain HTTP (~550K)
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="num critical">71,767</div>
+                        <div class="desc">Certs expiring within 30 days</div>
+                    </div>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>TLS Version</th>
+                                <th>Count</th>
+                                <th>Share</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>TLS 1.3</td>
+                                <td>1,076,502</td>
+                                <td>92.9%</td>
+                            </tr>
+                            <tr>
+                                <td>TLS 1.2</td>
+                                <td>81,980</td>
+                                <td>7.1%</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Algorithm</th>
+                                <th>Key size</th>
+                                <th>Domains</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>RSA</td>
+                                <td>2048</td>
+                                <td>844,699</td>
+                            </tr>
+                            <tr>
+                                <td>RSA</td>
+                                <td>4096</td>
+                                <td>129,671</td>
+                            </tr>
+                            <tr>
+                                <td>ECDSA P-256</td>
+                                <td>256</td>
+                                <td>164,373</td>
+                            </tr>
+                            <tr>
+                                <td>ECDSA P-384</td>
+                                <td>384</td>
+                                <td>13,907</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Certificate Authority</th>
+                                <th>Count</th>
+                                <th>Share</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>Let's Encrypt</td>
+                                <td>962,746</td>
+                                <td>83.1%</td>
+                            </tr>
+                            <tr>
+                                <td>Other</td>
+                                <td>145,398</td>
+                                <td>12.5%</td>
+                            </tr>
+                            <tr>
+                                <td>DigiCert</td>
+                                <td>25,477</td>
+                                <td>2.2%</td>
+                            </tr>
+                            <tr>
+                                <td>Sectigo/Comodo</td>
+                                <td>19,465</td>
+                                <td>1.7%</td>
+                            </tr>
+                            <tr>
+                                <td>SwissSign</td>
+                                <td>1,270</td>
+                                <td>0.1%</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- ═══════════════ 10. HTTP SECURITY HEADERS — dark ═══════════════ -->
+        <section class="section bg-dark">
+            <div class="inner">
+                <div class="section-header">
+                    <h2>HTTP Security Header Adoption</h2>
+                    <p>
+                        Legal is worst: 61.6% of legal domains send zero HTTP
+                        security headers. Government best at 47.8% with no
+                        headers.
+                    </p>
+                </div>
+                <div class="stat-grid">
+                    <div class="stat-card">
+                        <div class="num critical">49.1%</div>
+                        <div class="desc">
+                            of live .ch domains send ZERO security headers
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="num critical">7.7%</div>
+                        <div class="desc">
+                            CSP adoption — the weakest header by far
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="num">30.2%</div>
+                        <div class="desc">
+                            HSTS — despite 71.7% serving HTTPS
+                        </div>
+                    </div>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Header</th>
+                                <th>Count</th>
+                                <th>Share of live</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>HSTS</td>
+                                <td>588,872</td>
+                                <td>30.2%</td>
+                            </tr>
+                            <tr>
+                                <td>X-Content-Type-Options</td>
+                                <td>470,434</td>
+                                <td>24.2%</td>
+                            </tr>
+                            <tr>
+                                <td>X-Frame-Options</td>
+                                <td>460,142</td>
+                                <td>23.6%</td>
+                            </tr>
+                            <tr>
+                                <td>Content-Security-Policy</td>
+                                <td>149,180</td>
+                                <td>7.7%</td>
+                            </tr>
+                            <tr>
+                                <td><strong>None of the above</strong></td>
+                                <td><strong>955,764</strong></td>
+                                <td><strong>49.1%</strong></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Sector</th>
+                                <th>No headers</th>
+                                <th>HSTS</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>Legal</td>
+                                <td>61.6%</td>
+                                <td>23.6%</td>
+                            </tr>
+                            <tr>
+                                <td>Media</td>
+                                <td>58.3%</td>
+                                <td>27.5%</td>
+                            </tr>
+                            <tr>
+                                <td>Pharma</td>
+                                <td>58.0%</td>
+                                <td>30.6%</td>
+                            </tr>
+                            <tr>
+                                <td>Finance</td>
+                                <td>57.7%</td>
+                                <td>29.0%</td>
+                            </tr>
+                            <tr>
+                                <td>Healthcare</td>
+                                <td>55.9%</td>
+                                <td>31.2%</td>
+                            </tr>
+                            <tr>
+                                <td>Education</td>
+                                <td>54.5%</td>
+                                <td>29.9%</td>
+                            </tr>
+                            <tr>
+                                <td>Retail</td>
+                                <td>48.2%</td>
+                                <td>27.7%</td>
+                            </tr>
+                            <tr>
+                                <td>Government</td>
+                                <td>47.8%</td>
+                                <td>38.0%</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- ═══════════════ 11. EMAIL SECURITY — light ═══════════════ -->
+        <section class="section bg-light">
+            <div class="inner">
+                <div class="section-header">
+                    <h2>Email Security &amp; Spoofing Exposure</h2>
+                    <p>
+                        1,146,818 domains fully spoofable: no SPF, OR permissive
+                        SPF + no/p=none DMARC. Finance/pharma worst at 48.5%.
+                    </p>
+                </div>
+                <div class="stat-grid">
+                    <div class="stat-card">
+                        <div class="num critical">45.0%</div>
+                        <div class="desc">
+                            of .ch domains can have email impersonated
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="num critical">46.4%</div>
+                        <div class="desc">Have no SPF record at all</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="num">25.5%</div>
+                        <div class="desc">
+                            of DMARC-enabled are p=none (no enforcement)
+                        </div>
+                    </div>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Signal</th>
+                                <th>Count</th>
+                                <th>Share</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>SPF present</td>
+                                <td>1,365,991</td>
+                                <td>53.6%</td>
+                            </tr>
+                            <tr>
+                                <td>DMARC present</td>
+                                <td>714,725</td>
+                                <td>28.0%</td>
+                            </tr>
+                            <tr>
+                                <td>DKIM found</td>
+                                <td>174,388</td>
+                                <td>6.8%</td>
+                            </tr>
+                            <tr>
+                                <td>SPF too permissive</td>
+                                <td>74,477</td>
+                                <td>2.9%</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Fully spoofable</strong></td>
+                                <td><strong>1,146,818</strong></td>
+                                <td><strong>45.0%</strong></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Sector</th>
+                                <th>Spoofable %</th>
+                                <th>DMARC enf.</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>Pharma</td>
+                                <td>48.5%</td>
+                                <td>19.8%</td>
+                            </tr>
+                            <tr>
+                                <td>Finance</td>
+                                <td>48.5%</td>
+                                <td>18.5%</td>
+                            </tr>
+                            <tr>
+                                <td>Media</td>
+                                <td>48.1%</td>
+                                <td>18.9%</td>
+                            </tr>
+                            <tr>
+                                <td>Retail</td>
+                                <td>47.7%</td>
+                                <td>17.4%</td>
+                            </tr>
+                            <tr>
+                                <td>Healthcare</td>
+                                <td>44.3%</td>
+                                <td>15.1%</td>
+                            </tr>
+                            <tr>
+                                <td>Legal</td>
+                                <td>43.0%</td>
+                                <td>17.8%</td>
+                            </tr>
+                            <tr>
+                                <td>Education</td>
+                                <td>40.0%</td>
+                                <td>17.7%</td>
+                            </tr>
+                            <tr>
+                                <td>Government</td>
+                                <td>37.0%</td>
+                                <td>21.0%</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- ═══════════════ 12. DANGEROUS SERVICES — dark ═══════════════ -->
+        <section class="section bg-dark">
+            <div class="inner">
+                <div class="section-header">
+                    <h2>Dangerous Exposed Services</h2>
+                    <p>Port survey across 1,633,972 domains.</p>
+                </div>
+                <div class="stat-grid">
+                    <div class="stat-card">
+                        <div class="num critical">313,472</div>
+                        <div class="desc">
+                            MySQL (3306) — 16% of all live .ch domains
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="num critical">87,292</div>
+                        <div class="desc">
+                            SMB (445) — ransomware entry vector
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="num critical">1,742</div>
+                        <div class="desc">
+                            Docker API (2375) — often unauthenticated
+                        </div>
+                    </div>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Port</th>
+                                <th>Service</th>
+                                <th>Domains exposed</th>
+                                <th>Risk</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>3306</td>
+                                <td>MySQL</td>
+                                <td>313,472</td>
+                                <td>
+                                    <span class="tag tag-critical"
+                                        >CRITICAL</span
+                                    >
+                                </td>
+                            </tr>
+                            <tr>
+                                <td>21</td>
+                                <td>FTP (cleartext)</td>
+                                <td>688,489</td>
+                                <td><span class="tag tag-high">HIGH</span></td>
+                            </tr>
+                            <tr>
+                                <td>445</td>
+                                <td>SMB/CIFS</td>
+                                <td>87,292</td>
+                                <td>
+                                    <span class="tag tag-critical"
+                                        >CRITICAL</span
+                                    >
+                                </td>
+                            </tr>
+                            <tr>
+                                <td>22</td>
+                                <td>SSH</td>
+                                <td>430,272</td>
+                                <td><span class="tag tag-high">HIGH</span></td>
+                            </tr>
+                            <tr>
+                                <td>5432</td>
+                                <td>PostgreSQL</td>
+                                <td>17,976</td>
+                                <td><span class="tag tag-high">HIGH</span></td>
+                            </tr>
+                            <tr>
+                                <td>3389</td>
+                                <td>RDP</td>
+                                <td>3,718</td>
+                                <td>
+                                    <span class="tag tag-critical"
+                                        >CRITICAL</span
+                                    >
+                                </td>
+                            </tr>
+                            <tr>
+                                <td>9200</td>
+                                <td>Elasticsearch</td>
+                                <td>2,378</td>
+                                <td>
+                                    <span class="tag tag-critical"
+                                        >CRITICAL</span
+                                    >
+                                </td>
+                            </tr>
+                            <tr>
+                                <td>2375</td>
+                                <td>Docker API</td>
+                                <td>1,742</td>
+                                <td>
+                                    <span class="tag tag-critical"
+                                        >CRITICAL</span
+                                    >
+                                </td>
+                            </tr>
+                            <tr>
+                                <td>6379</td>
+                                <td>Redis</td>
+                                <td>2,045</td>
+                                <td><span class="tag tag-high">HIGH</span></td>
+                            </tr>
+                            <tr>
+                                <td>5900</td>
+                                <td>VNC</td>
+                                <td>1,910</td>
+                                <td><span class="tag tag-high">HIGH</span></td>
+                            </tr>
+                            <tr>
+                                <td>6443</td>
+                                <td>Kubernetes API</td>
+                                <td>2,057</td>
+                                <td><span class="tag tag-high">HIGH</span></td>
+                            </tr>
+                            <tr>
+                                <td>23</td>
+                                <td>Telnet</td>
+                                <td>1,440</td>
+                                <td><span class="tag tag-high">HIGH</span></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- ═══════════════ 13. DNS HYGIENE — light ═══════════════ -->
+        <section class="section bg-light">
+            <div class="inner">
+                <div class="section-header">
+                    <h2>DNS Hygiene &amp; Infrastructure</h2>
+                    <p>
+                        If Hostpoint's nameservers failed, 14.6% of .ch domains
+                        would stop resolving. Top 3 providers control 29.3% of
+                        all .ch DNS — a single incident = national-scale outage.
+                    </p>
+                </div>
+                <div class="stat-grid">
+                    <div class="stat-card">
+                        <div class="num">42.2%</div>
+                        <div class="desc">
+                            DNSSEC signing — above global average
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="num critical">98.5%</div>
+                        <div class="desc">
+                            No CAA record — any CA can issue freely
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="num critical">14,316</div>
+                        <div class="desc">
+                            Domains leak full DNS zone via AXFR
+                        </div>
+                    </div>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>DNS Signal</th>
+                                <th>Count</th>
+                                <th>Share of total</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>DNSSEC signed</td>
+                                <td>1,075,048</td>
+                                <td>42.2%</td>
+                            </tr>
+                            <tr>
+                                <td>No CAA record</td>
+                                <td>2,511,838</td>
+                                <td>98.5%</td>
+                            </tr>
+                            <tr>
+                                <td>Wildcard DNS enabled</td>
+                                <td>771,104</td>
+                                <td>30.2%</td>
+                            </tr>
+                            <tr>
+                                <td>SPF with no MX record</td>
+                                <td>350,229</td>
+                                <td>13.7%</td>
+                            </tr>
+                            <tr>
+                                <td>AXFR zone transfer leaking</td>
+                                <td>14,316 domains</td>
+                                <td>—</td>
+                            </tr>
+                            <tr>
+                                <td>Subdomains via AXFR</td>
+                                <td>164,117</td>
+                                <td>—</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>DNS Operator</th>
+                                <th>Domains</th>
+                                <th>Share</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>Hostpoint</td>
+                                <td>314,457</td>
+                                <td>14.6%</td>
+                            </tr>
+                            <tr>
+                                <td>Infomaniak</td>
+                                <td>242,089</td>
+                                <td>11.2%</td>
+                            </tr>
+                            <tr>
+                                <td>cyon.ch</td>
+                                <td>72,060</td>
+                                <td>3.4%</td>
+                            </tr>
+                            <tr>
+                                <td>wixdns.net</td>
+                                <td>61,715</td>
+                                <td>2.9%</td>
+                            </tr>
+                            <tr>
+                                <td>GoDaddy</td>
+                                <td>54,348</td>
+                                <td>2.5%</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- ═══════════════ 14. CVE & CISA — dark ═══════════════ -->
+        <section class="section bg-dark">
+            <div class="inner">
+                <div class="section-header">
+                    <h2>CVE &amp; CISA Known Exploited Vulnerabilities</h2>
+                    <p>
+                        Version-unaware matching: any domain running a covered
+                        technology is flagged regardless of installed version.
+                        Verification required to confirm actual vulnerability.
+                    </p>
+                </div>
+                <div class="stat-grid">
+                    <div class="stat-card">
+                        <div class="num critical">38.4%</div>
+                        <div class="desc">
+                            of all .ch domains match a CISA KEV entry
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="num critical">977,666</div>
+                        <div class="desc">
+                            Unique domains with at least one KEV match
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="num critical">61</div>
+                        <div class="desc">
+                            Max distinct CVEs on a single domain
+                        </div>
+                    </div>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Technology</th>
+                                <th>Domains</th>
+                                <th>CRITICAL CVEs</th>
+                                <th>HIGH CVEs</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>Apache</td>
+                                <td>682,438</td>
+                                <td>39</td>
+                                <td>1</td>
+                            </tr>
+                            <tr>
+                                <td>nginx</td>
+                                <td>516,211</td>
+                                <td>0</td>
+                                <td>3</td>
+                            </tr>
+                            <tr>
+                                <td>WordPress</td>
+                                <td>376,098</td>
+                                <td>4</td>
+                                <td>3</td>
+                            </tr>
+                            <tr>
+                                <td>PHP</td>
+                                <td>108,926</td>
+                                <td>9</td>
+                                <td>1</td>
+                            </tr>
+                            <tr>
+                                <td>PHP (EOL)</td>
+                                <td>43,473</td>
+                                <td>9</td>
+                                <td>1</td>
+                            </tr>
+                            <tr>
+                                <td>TYPO3</td>
+                                <td>26,372</td>
+                                <td>2</td>
+                                <td>1</td>
+                            </tr>
+                            <tr>
+                                <td>Joomla</td>
+                                <td>23,202</td>
+                                <td>3</td>
+                                <td>0</td>
+                            </tr>
+                            <tr>
+                                <td>Drupal</td>
+                                <td>10,028</td>
+                                <td>4</td>
+                                <td>0</td>
+                            </tr>
+                            <tr>
+                                <td>OpenSSL</td>
+                                <td>7,805</td>
+                                <td>1</td>
+                                <td>2</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- ═══════════════ 15. SECTOR RISK — light ═══════════════ -->
+        <section class="section bg-light">
+            <div class="inner">
+                <div class="section-header">
+                    <h2>Sector Risk Benchmarks</h2>
+                    <p>
+                        Risk score 0–100, higher = better security. Government
+                        scores lowest mean despite leading on HSTS — dragged
+                        down by weak DMARC enforcement (79% weak/absent).
+                    </p>
+                </div>
+                <div class="stat-grid">
+                    <div class="stat-card">
+                        <div class="num critical">66.6</div>
+                        <div class="desc">
+                            Finance — highest mean risk score (0–100)
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="num critical">26.9%</div>
+                        <div class="desc">
+                            Healthcare below 50/100 — worst tail risk
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="num critical">25.6%</div>
+                        <div class="desc">
+                            Government below 50/100 — second worst tail
+                        </div>
+                    </div>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Sector</th>
+                                <th>Domains</th>
+                                <th>Risk score (mean)</th>
+                                <th>HSTS</th>
+                                <th>DMARC</th>
+                                <th>DNSSEC</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>Finance</td>
+                                <td>13,761</td>
+                                <td>66.6</td>
+                                <td>55.4%</td>
+                                <td>18.5%</td>
+                                <td>36.8%</td>
+                            </tr>
+                            <tr>
+                                <td>Retail</td>
+                                <td>38,230</td>
+                                <td>66.2</td>
+                                <td>58.8%</td>
+                                <td>17.5%</td>
+                                <td>37.8%</td>
+                            </tr>
+                            <tr>
+                                <td>Legal</td>
+                                <td>8,539</td>
+                                <td>65.2</td>
+                                <td>53.5%</td>
+                                <td>17.9%</td>
+                                <td>42.4%</td>
+                            </tr>
+                            <tr>
+                                <td>Pharma</td>
+                                <td>3,296</td>
+                                <td>64.9</td>
+                                <td>52.4%</td>
+                                <td>19.8%</td>
+                                <td>34.0%</td>
+                            </tr>
+                            <tr>
+                                <td>Media</td>
+                                <td>6,060</td>
+                                <td>64.5</td>
+                                <td>52.2%</td>
+                                <td>18.9%</td>
+                                <td>39.6%</td>
+                            </tr>
+                            <tr>
+                                <td>Education</td>
+                                <td>16,110</td>
+                                <td>63.6</td>
+                                <td>56.7%</td>
+                                <td>17.8%</td>
+                                <td>42.8%</td>
+                            </tr>
+                            <tr>
+                                <td>Healthcare</td>
+                                <td>9,925</td>
+                                <td>62.1</td>
+                                <td>54.2%</td>
+                                <td>15.1%</td>
+                                <td>39.6%</td>
+                            </tr>
+                            <tr>
+                                <td>Government</td>
+                                <td>7,893</td>
+                                <td>61.9</td>
+                                <td>60.5%</td>
+                                <td>21.0%</td>
+                                <td>40.7%</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- ═══════════════ 16. CRITICAL FINDINGS — dark ═══════════════ -->
+        <section class="section bg-dark">
+            <div class="inner">
+                <div class="section-header">
+                    <h2>Critical Findings: Finance &amp; Healthcare</h2>
+                    <p>
+                        Maximum-exposed population — version-unaware CVE
+                        matching. Healthcare has proportionally more TYPO3
+                        exposure (7.3%) than finance (1.7%).
+                    </p>
+                </div>
+                <div class="stat-grid">
+                    <div class="stat-card">
+                        <div class="num critical">3,945</div>
+                        <div class="desc">
+                            Finance domains running Apache with CRITICAL CVE
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="num critical">2,954</div>
+                        <div class="desc">
+                            Healthcare domains running Apache with CRITICAL CVE
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="num critical">15.1%</div>
+                        <div class="desc">
+                            Healthcare DMARC coverage — lowest of any sector
+                        </div>
+                    </div>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Sector</th>
+                                <th>Technology</th>
+                                <th>CRITICAL CVE domains</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>Finance</td>
+                                <td>Apache</td>
+                                <td>3,945</td>
+                            </tr>
+                            <tr>
+                                <td>Finance</td>
+                                <td>WordPress</td>
+                                <td>2,017</td>
+                            </tr>
+                            <tr>
+                                <td>Finance</td>
+                                <td>PHP</td>
+                                <td>698</td>
+                            </tr>
+                            <tr>
+                                <td>Finance</td>
+                                <td>Drupal</td>
+                                <td>258</td>
+                            </tr>
+                            <tr>
+                                <td>Healthcare</td>
+                                <td>Apache</td>
+                                <td>2,954</td>
+                            </tr>
+                            <tr>
+                                <td>Healthcare</td>
+                                <td>WordPress</td>
+                                <td>2,575</td>
+                            </tr>
+                            <tr>
+                                <td>Healthcare</td>
+                                <td>TYPO3</td>
+                                <td>493</td>
+                            </tr>
+                            <tr>
+                                <td>Healthcare</td>
+                                <td>PHP</td>
+                                <td>631</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Sector</th>
+                                <th>Below 50 (risk score)</th>
+                                <th>% below</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>Healthcare</td>
+                                <td>2,672</td>
+                                <td>26.9%</td>
+                            </tr>
+                            <tr>
+                                <td>Government</td>
+                                <td>2,022</td>
+                                <td>25.6%</td>
+                            </tr>
+                            <tr>
+                                <td>Education</td>
+                                <td>3,853</td>
+                                <td>23.9%</td>
+                            </tr>
+                            <tr>
+                                <td>Legal</td>
+                                <td>1,789</td>
+                                <td>21.0%</td>
+                            </tr>
+                            <tr>
+                                <td>Finance</td>
+                                <td>2,177</td>
+                                <td>15.8%</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- ═══════════════ 17. DNS CONCENTRATION — light ═══════════════ -->
+        <section class="section bg-light">
+            <div class="inner">
+                <div class="section-header">
+                    <h2>
+                        DNS Concentration &amp; National Infrastructure Risk
+                    </h2>
+                    <p>
+                        Infomaniak appears under two operator names; combined it
+                        controls ~11.2% (242,089 domains). The top 3 distinct
+                        providers (Hostpoint + Infomaniak + cyon.ch)
+                        collectively serve 29.3% of .ch — a single incident at
+                        any one = national-scale DNS outage.
+                    </p>
+                </div>
+                <div class="stat-grid">
+                    <div class="stat-card">
+                        <div class="num critical">14.6%</div>
+                        <div class="desc">
+                            of .ch domains depend on Hostpoint nameservers
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="num critical">29.3%</div>
+                        <div class="desc">
+                            Controlled by top 3 providers combined
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="num">18,985</div>
+                        <div class="desc">
+                            Distinct NS operators across the TLD
+                        </div>
+                    </div>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>NS Operator</th>
+                                <th>Domains</th>
+                                <th>Share</th>
+                                <th>Cumulative</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>Hostpoint</td>
+                                <td>314,457</td>
+                                <td>14.6%</td>
+                                <td>14.6%</td>
+                            </tr>
+                            <tr>
+                                <td>Infomaniak (current)</td>
+                                <td>136,225</td>
+                                <td>6.3%</td>
+                                <td>21.0%</td>
+                            </tr>
+                            <tr>
+                                <td>Infomaniak (legacy)</td>
+                                <td>105,864</td>
+                                <td>4.9%</td>
+                                <td>25.9%</td>
+                            </tr>
+                            <tr>
+                                <td>cyon.ch</td>
+                                <td>72,060</td>
+                                <td>3.4%</td>
+                                <td>29.3%</td>
+                            </tr>
+                            <tr>
+                                <td>wixdns.net</td>
+                                <td>61,715</td>
+                                <td>2.9%</td>
+                                <td>32.2%</td>
+                            </tr>
+                            <tr>
+                                <td>GoDaddy</td>
+                                <td>54,348</td>
+                                <td>2.5%</td>
+                                <td>—</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- ═══════════════ 18. KEY TAKEAWAYS — dark ═══════════════ -->
+        <section class="section bg-dark">
+            <div class="inner">
+                <div class="section-header">
+                    <h2>Key Takeaways</h2>
+                </div>
+                <div class="takeaway">
+                    <div class="takeaway-num">01</div>
+                    <div class="takeaway-body">
+                        <strong>Email impersonation is trivially easy.</strong>
+                        45% of .ch domains are fully spoofable — any sender can
+                        forge email from nearly half of all Swiss .ch addresses
+                        with no technical barrier.
+                    </div>
+                </div>
+                <div class="takeaway">
+                    <div class="takeaway-num">02</div>
+                    <div class="takeaway-body">
+                        <strong>Apache is the dominant attack surface.</strong>
+                        682K domains match Apache; 39 CRITICAL CVEs in catalog +
+                        CISA KEV confirmation. A single Apache vulnerability
+                        affects 38% of live .ch.
+                    </div>
+                </div>
+                <div class="takeaway">
+                    <div class="takeaway-num">03</div>
+                    <div class="takeaway-body">
+                        <strong
+                            >Half of all sites have zero HTTP security
+                            headers.</strong
+                        >
+                        49% send nothing. Legal (61.6%) and pharma (58%) sectors
+                        are worst. CSP adoption at 7.7% leaves most sites open
+                        to XSS.
+                    </div>
+                </div>
+                <div class="takeaway">
+                    <div class="takeaway-num">04</div>
+                    <div class="takeaway-body">
+                        <strong
+                            >DNS concentration creates systemic
+                            fragility.</strong
+                        >
+                        A Hostpoint outage alone takes 14.6% offline. The top 3
+                        NS providers control 29.3% — well beyond acceptable
+                        single-point-of-failure tolerance.
+                    </div>
+                </div>
+                <div class="takeaway">
+                    <div class="takeaway-num">05</div>
+                    <div class="takeaway-body">
+                        <strong
+                            >Hosting sovereignty is eroding — especially in
+                            sensitive sectors.</strong
+                        >
+                        40.6% abroad; pharma at 49.9% domestic. 944 finance and
+                        601 healthcare domains route through a US-controlled CDN
+                        (CLOUD Act / FISA §702 exposure).
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ═══════════════ 19. METHODOLOGY — light ═══════════════ -->
+        <section class="section bg-light">
+            <div class="inner">
+                <div class="section-header">
+                    <h2>Methodology &amp; Data Quality Notes</h2>
+                </div>
+                <div class="method-grid">
+                    <div class="method-card">
+                        <h4>Scope</h4>
+                        <p>
+                            Full .ch TLD registry — 2,549,281 domains attempted.
+                            No pending entries; scan is complete.
+                        </p>
+                    </div>
+                    <div class="method-card">
+                        <h4>Email Auth</h4>
+                        <p>
+                            DNS-level checks for SPF, DMARC, DKIM across all
+                            2.5M domains.
+                        </p>
+                    </div>
+                    <div class="method-card">
+                        <h4>HTTP Scanning</h4>
+                        <p>
+                            Custom HTTP client with Range header (explains 40%
+                            206 Partial Content responses — scanner artifact).
+                        </p>
+                    </div>
+                    <div class="method-card">
+                        <h4>CVE Matching</h4>
+                        <p>
+                            Version-unaware: any domain running a covered
+                            technology is flagged regardless of installed
+                            version. Treat as 'possibly vulnerable — requires
+                            verification.' 74 CVEs seeded; CISA KEV entries
+                            imported.
+                        </p>
+                    </div>
+                    <div class="method-card">
+                        <h4>Port Scanning</h4>
+                        <p>
+                            1,633,972 domains scanned. Covers ports: 21, 22, 23,
+                            25, 80, 443, 445, 587, 3306, 3389, 5432, 5900, 6379,
+                            6443, 8080, 8443, 9200, 11211, 27017.
+                        </p>
+                    </div>
+                    <div class="method-card">
+                        <h4>Geolocation</h4>
+                        <p>
+                            MaxMind GeoLite2 database. 89.3% of live domains
+                            resolved to a country. Foreign IPs counted against
+                            Swiss sovereignty.
+                        </p>
+                    </div>
+                    <div class="method-card">
+                        <h4>TLS</h4>
+                        <p>
+                            1,158,482 domains with successful TLS handshake.
+                            Certificate key inventory: no RSA &lt; 2048 found.
+                        </p>
+                    </div>
+                    <div class="method-card">
+                        <h4>Sector Classification</h4>
+                        <p>
+                            103,814 domains classified across 8 sectors via
+                            keyword and DNS pattern matching. Cloudflare (181K),
+                            Wix (103K), Squarespace (20K), Vercel (10K) excluded
+                            from CVE exposure — operators cannot patch
+                            underlying infrastructure.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <footer>
+            <p>
+                &copy; 2026 HelvetiScan &mdash; Swiss .ch Domain Security
+                Landscape &mdash; March 2026
+            </p>
+            <p style="margin-top: 0.4rem">
+                <a href="index.html">helvetiscan.ミ.xyz</a>
+            </p>
+        </footer>
+    </body>
+</html>
