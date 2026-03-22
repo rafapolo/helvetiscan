@@ -651,9 +651,9 @@ async fn fetch_url_inner(
         body.extend_from_slice(&chunk[..take]);
     }
 
-    if let Some(ref base) = args.save_html {
+    if let Some(ref base) = args.save_md {
         if status.is_success() && !body.is_empty() {
-            save_html_zip(base, domain, body.clone()).await;
+            save_md(base, domain, body.clone()).await;
         }
     }
 
@@ -788,20 +788,15 @@ pub(crate) fn detect_cms(
     None
 }
 
-async fn save_html_zip(base: &std::path::Path, domain: &str, body: Vec<u8>) {
-    let zip_path = base.join(format!("{domain}.html.zip"));
-    if zip_path.exists() { return; }
+async fn save_md(base: &std::path::Path, domain: &str, body: Vec<u8>) {
+    let md_path = base.join(format!("{domain}.md"));
+    if md_path.exists() { return; }
     let base = base.to_path_buf();
     let _ = tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
         std::fs::create_dir_all(&base)?;
-        let file = std::fs::File::create(&zip_path)?;
-        let mut zip = zip::ZipWriter::new(file);
-        let opts = zip::write::SimpleFileOptions::default()
-            .compression_method(zip::CompressionMethod::Deflated);
-        zip.start_file("index.html", opts)?;
-        use std::io::Write as _;
-        zip.write_all(&body)?;
-        zip.finish()?;
+        let html = String::from_utf8_lossy(&body);
+        let md = htmd::convert(&html)?;
+        std::fs::write(&md_path, md.as_bytes())?;
         Ok(())
     }).await;
 }

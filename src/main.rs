@@ -119,9 +119,9 @@ pub(crate) struct ScanArgs {
     #[arg(long, help = "Suppress progress bar output")]
     pub(crate) quiet: bool,
 
-    /// Save each fetched HTML body to <path>/<domain>.html.zip
+    /// Save each fetched HTML body converted to Markdown at <path>/<domain>.md
     #[arg(long)]
-    pub(crate) save_html: Option<PathBuf>,
+    pub(crate) save_md: Option<PathBuf>,
 
     /// Path to GeoLite2-Country.mmdb for hosting country lookup (optional).
     #[arg(long, default_value = "data/GeoLite2-Country.mmdb")]
@@ -189,6 +189,9 @@ pub(crate) struct PortsArgs {
 
     #[arg(long, help = "Re-scan domains whose error_kind matches this value (e.g. 'timeout')")]
     pub(crate) retry_errors: Option<String>,
+
+    #[arg(long, help = "Re-grab banners for open ports that currently have no banner")]
+    pub(crate) grab_banners: bool,
 }
 
 #[derive(Parser, Debug, Clone)]
@@ -317,9 +320,9 @@ pub(crate) struct FullArgs {
     #[arg(long, default_value_t = 500)]
     pub(crate) concurrency: usize,
 
-    /// Save each fetched HTML body to <path>/<domain>.html.zip
+    /// Save each fetched HTML body converted to Markdown at <path>/<domain>.md
     #[arg(long)]
-    pub(crate) save_html: Option<PathBuf>,
+    pub(crate) save_md: Option<PathBuf>,
 
     /// Divide each module's default concurrency by this when running in parallel (default: 3).
     #[arg(long, default_value_t = 3)]
@@ -356,7 +359,7 @@ impl Default for ScanArgs {
             user_agent: "helvetiscan/1.0".to_string(),
             quiet: false,
             retry_errors: None,
-            save_html: None,
+            save_md: None,
             country_mmdb: PathBuf::from("data/GeoLite2-Country.mmdb"),
         }
     }
@@ -415,6 +418,7 @@ impl Default for PortsArgs {
             connect_timeout: Duration::from_millis(800),
             quiet: false,
             retry_errors: None,
+            grab_banners: false,
         }
     }
 }
@@ -595,11 +599,11 @@ async fn cmd_full_pipeline(args: FullArgs) -> Result<()> {
         let prog = http_prog.clone();
         let crx = http_crx;
         let db = db.clone();
-        let save_html = args.save_html.clone();
+        let save_md = args.save_md.clone();
         let country_mmdb = args.country_mmdb.clone();
         async move {
             let r = http_scan::cmd_scan(ScanArgs {
-                db, concurrency: http_conc, save_html, country_mmdb, ..ScanArgs::default()
+                db, concurrency: http_conc, save_md, country_mmdb, ..ScanArgs::default()
             }, Some(crx), Some(prog)).await;
             ("http", r)
         }

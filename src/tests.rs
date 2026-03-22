@@ -324,7 +324,7 @@ async fn sample_domains_e2e_scan() {
         user_agent: "helvetiscan/test".into(),
         quiet: false,
         retry_errors: None,
-        save_html: None,
+        save_md: None,
         country_mmdb: std::path::PathBuf::from("data/GeoLite2-Country.mmdb"),
     }, None, None)
     .await
