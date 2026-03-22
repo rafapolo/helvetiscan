@@ -35,7 +35,7 @@ pub(crate) const PORTS: &[(u16, &str)] = &[
     (2375,  "docker-api"),
     (6443,  "kubernetes-api"),
 ];
-pub(crate) const BANNER_PORTS: &[u16] = &[22, 23, 25, 587, 9200, 27017, 11211];
+pub(crate) const BANNER_PORTS: &[u16] = &[21, 22, 23, 25, 587, 3306, 5900, 6379, 9200, 11211, 27017, 2375];
 
 // ---- Enums ----
 

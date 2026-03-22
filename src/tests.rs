@@ -17,7 +17,7 @@ use crate::dns_scan::{load_scan_targets, cmd_dns};
 use crate::email_security::{parse_spf, parse_dmarc};
 use crate::classify::classify_by_keywords;
 use crate::tls_scan::cmd_tls;
-use crate::ports_scan::{grab_banner, cmd_ports};
+use crate::ports_scan::{grab_banner, grab_mysql_banner, grab_memcached_banner, grab_redis_banner, cmd_ports};
 use crate::whois::parse_whois_response;
 use crate::{InitArgs, ScanArgs, DnsArgs, TlsArgs, PortsArgs};
 
@@ -359,6 +359,7 @@ async fn sample_domains_e2e_scan() {
         connect_timeout: Duration::from_millis(800),
         quiet: false,
         retry_errors: None,
+        grab_banners: false,
     }, None, None)
     .await
     .unwrap();
@@ -595,6 +596,77 @@ async fn grab_banner_no_listener_returns_none() {
 
     let ip = IpAddr::V4(Ipv4Addr::LOCALHOST);
     assert!(grab_banner(ip, port).await.is_none());
+}
+
+#[tokio::test]
+async fn grab_mysql_banner_extracts_version() {
+    use tokio::io::AsyncWriteExt;
+    use tokio::net::TcpListener;
+    use std::net::{IpAddr, Ipv4Addr};
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+
+    tokio::spawn(async move {
+        if let Ok((mut stream, _)) = listener.accept().await {
+            let version = b"8.0.35";
+            let mut packet = vec![0u8; 5 + version.len() + 1];
+            packet[4] = 0x0a; // protocol version 10
+            packet[5..5 + version.len()].copy_from_slice(version);
+            packet[5 + version.len()] = 0x00;
+            let _ = stream.write_all(&packet).await;
+        }
+    });
+
+    let ip = IpAddr::V4(Ipv4Addr::LOCALHOST);
+    let banner = grab_mysql_banner(ip, port).await;
+    assert_eq!(banner, Some("MySQL 8.0.35".into()));
+}
+
+#[tokio::test]
+async fn grab_memcached_banner_extracts_version() {
+    use tokio::io::AsyncWriteExt;
+    use tokio::net::TcpListener;
+    use std::net::{IpAddr, Ipv4Addr};
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+
+    tokio::spawn(async move {
+        if let Ok((mut stream, _)) = listener.accept().await {
+            // Read the "version\r\n" probe then respond
+            let mut buf = [0u8; 16];
+            let _ = tokio::io::AsyncReadExt::read(&mut stream, &mut buf).await;
+            let _ = stream.write_all(b"VERSION 1.6.12\r\n").await;
+        }
+    });
+
+    let ip = IpAddr::V4(Ipv4Addr::LOCALHOST);
+    let banner = grab_memcached_banner(ip, port).await;
+    assert_eq!(banner, Some("VERSION 1.6.12".into()));
+}
+
+#[tokio::test]
+async fn grab_redis_banner_extracts_version() {
+    use tokio::io::AsyncWriteExt;
+    use tokio::net::TcpListener;
+    use std::net::{IpAddr, Ipv4Addr};
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+
+    tokio::spawn(async move {
+        if let Ok((mut stream, _)) = listener.accept().await {
+            // Read the INFO probe then respond with INFO server output
+            let mut buf = [0u8; 32];
+            let _ = tokio::io::AsyncReadExt::read(&mut stream, &mut buf).await;
+            let _ = stream.write_all(b"# Server\r\nredis_version:7.2.4\r\n").await;
+        }
+    });
+
+    let ip = IpAddr::V4(Ipv4Addr::LOCALHOST);
+    let banner = grab_redis_banner(ip, port).await;
+    assert_eq!(banner, Some("Redis 7.2.4".into()));
 }
 
 // ---- risk_score VIEW ----
