@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use clap::{Parser, Subcommand};
+use rusqlite;
 
 mod shared;
 mod schema;
@@ -62,6 +63,8 @@ enum Command {
     Whois(WhoisArgs),
     /// Fetch/refresh the CVE catalog from CISA KEV and seed built-in entries.
     UpdateCves,
+    /// List all services and versions detected in port banners.
+    ListServices,
     /// Classify domains by industry sector using keyword heuristics.
     Classify(ClassifyArgs),
     /// Compute sector-level risk benchmarks across classified domains.
@@ -76,6 +79,8 @@ enum Command {
     ExportParquet(ExportParquetArgs),
     /// Import Parquet files from a directory back into the SQLite database.
     ImportParquet(ImportParquetArgs),
+    /// Show all scanned data tables for a target domain.
+    Show(ShowArgs),
 }
 
 #[derive(Parser, Debug)]
@@ -192,6 +197,14 @@ pub(crate) struct PortsArgs {
 
     #[arg(long, help = "Re-grab banners for open ports that currently have no banner")]
     pub(crate) grab_banners: bool,
+
+    #[arg(
+        long,
+        value_delimiter = ',',
+        help = "Scan only these port numbers (comma-separated, e.g. 389,636,1433,161). \
+                Targets all domains regardless of ports_scanned_at."
+    )]
+    pub(crate) ports: Option<Vec<u16>>,
 }
 
 #[derive(Parser, Debug, Clone)]
@@ -301,6 +314,17 @@ pub(crate) struct ImportParquetArgs {
     /// How to handle conflicts: replace (default), ignore, or abort.
     #[arg(long, default_value = "replace")]
     pub(crate) on_conflict: String,
+}
+
+#[derive(Parser, Debug)]
+pub(crate) struct ShowArgs {
+    /// Target domain to show data for.
+    #[arg(long)]
+    pub(crate) domain: String,
+
+    /// Path to the SQLite database.
+    #[arg(long, default_value = "data/domains.db")]
+    pub(crate) db: PathBuf,
 }
 
 #[derive(Parser, Debug)]
@@ -419,6 +443,7 @@ impl Default for PortsArgs {
             quiet: false,
             retry_errors: None,
             grab_banners: false,
+            ports: None,
         }
     }
 }
@@ -473,6 +498,7 @@ async fn main() -> Result<()> {
                 Command::Subdomains(a) => subdomains::cmd_subdomains(a, None, None).await,
                 Command::Whois(a) => whois::cmd_whois(a, None, None).await,
                 Command::UpdateCves => cve::cmd_update_cves(db).await,
+                Command::ListServices => cve::cmd_list_services(db),
                 Command::Classify(a) => classify::cmd_classify(a.db).await,
                 Command::Benchmark(a) => benchmark::cmd_benchmark(a.db).await,
                 Command::Sovereignty(a) => sovereignty::cmd_sovereignty(a).await,
@@ -487,10 +513,94 @@ async fn main() -> Result<()> {
                 Command::ImportParquet(a) => {
                     processing::import_from_parquet::cmd_import_parquet(a)
                 }
+                Command::Show(a) => cmd_show(a),
             }
         }
         (None, _, None) => unreachable!("clap ensures at least one argument is provided"),
     }
+}
+
+// ---- show ----
+
+fn cmd_show(args: ShowArgs) -> Result<()> {
+    let conn = shared::open_db(&args.db)
+        .with_context(|| format!("open db {:?}", args.db))?;
+    let d = &args.domain;
+
+    macro_rules! print_table {
+        ($title:expr, $sql:expr) => {{
+            let mut stmt = conn.prepare($sql)?;
+            let cols: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
+            let rows: Vec<Vec<String>> = stmt
+                .query_map([d], |row| {
+                    Ok((0..cols.len())
+                        .map(|i| {
+                            row.get_ref(i)
+                                .map(|v| match v {
+                                    rusqlite::types::ValueRef::Null => "NULL".to_string(),
+                                    rusqlite::types::ValueRef::Integer(n) => n.to_string(),
+                                    rusqlite::types::ValueRef::Real(f) => format!("{f:.2}"),
+                                    rusqlite::types::ValueRef::Text(t) => {
+                                        String::from_utf8_lossy(t).to_string()
+                                    }
+                                    rusqlite::types::ValueRef::Blob(b) => {
+                                        format!("<blob {} bytes>", b.len())
+                                    }
+                                })
+                                .unwrap_or_else(|_| "ERR".to_string())
+                        })
+                        .collect())
+                })?
+                .filter_map(|r| r.ok())
+                .collect();
+            if !rows.is_empty() {
+                println!("\n=== {} ===", $title);
+                // column widths
+                let mut widths: Vec<usize> = cols.iter().map(|c| c.len()).collect();
+                for row in &rows {
+                    for (i, cell) in row.iter().enumerate() {
+                        widths[i] = widths[i].max(cell.len().min(80));
+                    }
+                }
+                let header: Vec<String> = cols.iter().zip(&widths).map(|(c, w)| format!("{:<w$}", c, w = w)).collect();
+                let sep: Vec<String> = widths.iter().map(|w| "-".repeat(*w)).collect();
+                println!("{}", header.join("  "));
+                println!("{}", sep.join("  "));
+                for row in &rows {
+                    let cells: Vec<String> = row.iter().zip(&widths).map(|(c, w)| {
+                        let truncated = if c.len() > *w { format!("{}…", &c[..*w - 1]) } else { c.clone() };
+                        format!("{:<w$}", truncated, w = w)
+                    }).collect();
+                    println!("{}", cells.join("  "));
+                }
+            }
+        }};
+    }
+
+    println!("=== helvetiscan: data for {} ===", d);
+
+    print_table!("domains",
+        "SELECT * FROM domains WHERE domain = ?1");
+    print_table!("dns_info",
+        "SELECT * FROM dns_info WHERE domain = ?1");
+    print_table!("tls_info",
+        "SELECT * FROM tls_info WHERE domain = ?1");
+    print_table!("ports_info",
+        "SELECT * FROM ports_info WHERE domain = ?1");
+    print_table!("subdomains",
+        "SELECT * FROM subdomains WHERE domain = ?1");
+    print_table!("whois_info",
+        "SELECT * FROM whois_info WHERE domain = ?1");
+    print_table!("http_headers",
+        "SELECT * FROM http_headers WHERE domain = ?1");
+    print_table!("email_security",
+        "SELECT * FROM email_security WHERE domain = ?1");
+    print_table!("domain_classification",
+        "SELECT * FROM domain_classification WHERE domain = ?1");
+    print_table!("cve_matches",
+        "SELECT * FROM cve_matches WHERE domain = ?1");
+
+    Ok(())
 }
 
 // ---- full pipeline ----

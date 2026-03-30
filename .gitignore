@@ -9,15 +9,11 @@ data/
 investor/
 tasks/
 
-# Generated web assets (too large for git; run `bun run convert` to regenerate)
-web/*.arrow
-web/*.parquet
-
-# Python
-__pycache__/
-*.pyc
-*.pyo
-
-# macOS
+# others
 .DS_Store
 /tmp
+.claude
+.agents
+/.cocoindex_code/
+tenta/
+/Users/polux/Projetos/helvetiscan/skills-lock.json

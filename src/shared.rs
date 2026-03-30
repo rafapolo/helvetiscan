@@ -34,8 +34,14 @@ pub(crate) const PORTS: &[(u16, &str)] = &[
     (11211, "memcached"),
     (2375,  "docker-api"),
     (6443,  "kubernetes-api"),
+    (389,   "ldap"),
+    (636,   "ldaps"),
+    (1433,  "mssql"),
 ];
-pub(crate) const BANNER_PORTS: &[u16] = &[21, 22, 23, 25, 587, 3306, 5900, 6379, 9200, 11211, 27017, 2375];
+pub(crate) const UDP_PORTS: &[(u16, &str)] = &[
+    (161, "snmp"),
+];
+pub(crate) const BANNER_PORTS: &[u16] = &[21, 22, 23, 25, 587, 3306, 5900, 6379, 9200, 11211, 27017, 2375, 6443, 389, 636, 1433, 161];
 
 // ---- Enums ----
 

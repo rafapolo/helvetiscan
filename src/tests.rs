@@ -360,6 +360,7 @@ async fn sample_domains_e2e_scan() {
         quiet: false,
         retry_errors: None,
         grab_banners: false,
+        ports: None,
     }, None, None)
     .await
     .unwrap();

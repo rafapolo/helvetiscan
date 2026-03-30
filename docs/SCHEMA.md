@@ -25,6 +25,8 @@ erDiagram
         INTEGER   sovereignty_score
         VARCHAR   country_code
         TIMESTAMP updated_at
+        TIMESTAMP ports_scanned_at
+        TIMESTAMP ports_targeted_at
     }
     dns_info {
         VARCHAR   domain PK
@@ -261,15 +263,17 @@ Populated by `helvetiscan tls`. Raw TLS handshake via `tokio-rustls`; cert parse
 
 Populated by `helvetiscan ports`. Normalized: one row per `(domain, port)`. Primary key is `(domain, port)`.
 
-Ports probed: **80, 443, 22, 21, 25, 587, 3306, 5432, 6379, 8080, 8443, 23, 445, 3389, 5900, 9200, 27017, 11211, 2375, 6443**
+Ports probed (TCP): **80, 443, 22, 21, 25, 587, 3306, 5432, 6379, 8080, 8443, 23, 445, 3389, 5900, 9200, 27017, 11211, 2375, 6443, 389, 636, 1433**
+
+Ports probed (UDP): **161**
 
 | Column | Type | Notes |
 |---|---|---|
 | `domain` | VARCHAR PK | |
-| `port` | INTEGER PK | TCP port number |
-| `service` | VARCHAR | Human name: `ssh`, `http`, `mysql`, etc. |
-| `open` | BOOLEAN | True = TCP connect succeeded |
-| `banner` | VARCHAR | First line grabbed from open service (ports 22, 23, 25, 587, 9200, 27017, 11211) |
+| `port` | INTEGER PK | Port number (TCP unless noted) |
+| `service` | VARCHAR | Human name: `ssh`, `http`, `mysql`, `ldap`, `mssql`, `snmp`, etc. |
+| `open` | BOOLEAN | True = TCP connect succeeded (or UDP probe responded for port 161) |
+| `banner` | VARCHAR | Service banner or version string (ports 22, 23, 25, 587, 389, 1433, 3306, 6379, 9200, 11211, 27017, 2375, 6443; sysDescr for SNMP 161/UDP) |
 | `ip` | VARCHAR | Resolved IP (same for all ports of a domain) |
 | `scanned_at` | TIMESTAMP | |
 
@@ -448,8 +452,10 @@ SELECT * FROM risk_score LIMIT 10;
 | `cert_expiring` | BOOLEAN | `days_remaining` between 0 and 29 |
 | `no_dnssec` | BOOLEAN | No DNSKEY/DS records |
 | `domain_expiring` | BOOLEAN | Domain expires within 30 days |
-| `exposed_db_port` | BOOLEAN | Open port in (3306, 5432, 6379, 9200, 27017, 11211, 2375) |
+| `exposed_db_port` | BOOLEAN | Open port in (3306, 5432, 6379, 9200, 27017, 11211) |
 | `exposed_risky_port` | BOOLEAN | Open port in (445, 23, 3389, 5900) |
+| `exposed_ftp` | BOOLEAN | Port 21 open — plaintext file transfer reachable from internet |
+| `exposed_docker_api` | BOOLEAN | Port 2375 open — unauthenticated Docker socket, full host compromise vector |
 | `has_critical_cve` | BOOLEAN | At least one `CRITICAL` CVE match in `cve_matches` |
 | `spf_permissive` | BOOLEAN | SPF `+all` or `?all` — anyone can send email as this domain |
 | `dmarc_weak` | BOOLEAN | DMARC `p=none` or absent |
@@ -458,7 +464,7 @@ SELECT * FROM risk_score LIMIT 10;
 | `sovereignty_penalty` | INTEGER | Score deduction from sovereignty tier (0, −1, −3, or −5) |
 | `score` | INTEGER | 0–100; starts at 100, deducted per flag |
 
-Score deductions: missing_hsts −10, missing_csp −10, missing_caa −8, weak_tls −10, cert_expired −20, cert_expiring −15, no_dnssec −5, no_dmarc −7, domain_expiring −5, exposed_db_port −10, exposed_risky_port −10, has_critical_cve −15, spf_permissive −7, dmarc_weak −7 (replaces no_dmarc when email_security exists), no_dkim −5, sovereignty EU −1 / non-EU −3 / US −5.
+Score deductions: missing_hsts −10, missing_csp −10, missing_caa −8, weak_tls −10, cert_expired −20, cert_expiring −15, no_dnssec −5, no_dmarc −7, domain_expiring −5, exposed_db_port −10, exposed_risky_port −10, exposed_ftp −10, exposed_docker_api −10, has_critical_cve −15, spf_permissive −7, dmarc_weak −7 (replaces no_dmarc when email_security exists), no_dkim −5, sovereignty EU −1 / non-EU −3 / US −5.
 
 
 ## `domain_percentile` View
@@ -478,6 +484,27 @@ SELECT * FROM domain_percentile WHERE sector = 'finance' ORDER BY percentile_in_
 | `percentile_in_sector` | DOUBLE | 0.0–1.0 rank within the sector (PERCENT_RANK) |
 
 Requires both `domain_classification` and `sector_benchmarks` to be populated.
+
+## `ns_concentration` View
+
+Computed on demand. Shows which nameserver operators control what share of .ch domains, ordered by domain count descending.
+
+```sql
+SELECT * FROM ns_concentration LIMIT 20;
+```
+
+| Column | Type | Notes |
+|---|---|---|
+| `ns_operator` | TEXT | Operator name (from `ns_operators`) |
+| `domain_count` | INTEGER | Number of distinct domains using this operator |
+| `pct_of_ch` | REAL | Percentage of all successfully scanned domains |
+
+Requires the `ns_operators` table to be populated via the `sovereignty` command. Useful for DNS concentration and hub resilience analysis — e.g., which single provider failure would affect the most .ch domains.
+
+```sql
+-- Domains where a single NS operator controls >10% of .ch
+SELECT ns_operator, domain_count, pct_of_ch FROM ns_concentration WHERE pct_of_ch > 10;
+```
 
 ### `ns_staging`
 

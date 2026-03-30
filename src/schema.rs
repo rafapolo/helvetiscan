@@ -191,6 +191,8 @@ pub(crate) fn ensure_schema(conn: &rusqlite::Connection) -> Result<()> {
     migrate_ports_info(conn)?;
     migrate_ports_open_only(conn)?;
     migrate_domains_country_code(conn)?;
+    migrate_ports_ip_from_domains(conn)?;
+    migrate_ports_targeted_at(conn)?;
 
     conn.execute_batch("DROP VIEW IF EXISTS risk_score;")?;
     conn.execute_batch("
@@ -211,13 +213,21 @@ pub(crate) fn ensure_schema(conn: &rusqlite::Connection) -> Result<()> {
             EXISTS(
                 SELECT 1 FROM ports_info p
                 WHERE p.domain = d.domain
-                  AND p.port IN (3306,5432,6379,9200,27017,11211,2375)
+                  AND p.port IN (3306,5432,6379,9200,27017,11211)
             )                                                                            AS exposed_db_port,
             EXISTS(
                 SELECT 1 FROM ports_info p
                 WHERE p.domain = d.domain
                   AND p.port IN (445,23,3389,5900)
             )                                                                            AS exposed_risky_port,
+            EXISTS(
+                SELECT 1 FROM ports_info p
+                WHERE p.domain = d.domain AND p.port = 21
+            )                                                                            AS exposed_ftp,
+            EXISTS(
+                SELECT 1 FROM ports_info p
+                WHERE p.domain = d.domain AND p.port = 2375
+            )                                                                            AS exposed_docker_api,
             EXISTS(SELECT 1 FROM cve_matches m WHERE m.domain = d.domain AND m.severity = 'CRITICAL') AS has_critical_cve,
             (COALESCE(es.spf_too_permissive, 0))                                        AS spf_permissive,
             (NOT COALESCE(es.dkim_found, 0))                                            AS no_dkim,
@@ -244,12 +254,20 @@ pub(crate) fn ensure_schema(conn: &rusqlite::Connection) -> Result<()> {
                 - CASE WHEN EXISTS(
                       SELECT 1 FROM ports_info p
                       WHERE p.domain = d.domain
-                        AND p.port IN (3306,5432,6379,9200,27017,11211,2375)
+                        AND p.port IN (3306,5432,6379,9200,27017,11211)
                   )                                                                        THEN 10 ELSE 0 END
                 - CASE WHEN EXISTS(
                       SELECT 1 FROM ports_info p
                       WHERE p.domain = d.domain
                         AND p.port IN (445,23,3389,5900)
+                  )                                                                        THEN 10 ELSE 0 END
+                - CASE WHEN EXISTS(
+                      SELECT 1 FROM ports_info p
+                      WHERE p.domain = d.domain AND p.port = 21
+                  )                                                                        THEN 10 ELSE 0 END
+                - CASE WHEN EXISTS(
+                      SELECT 1 FROM ports_info p
+                      WHERE p.domain = d.domain AND p.port = 2375
                   )                                                                        THEN 10 ELSE 0 END
                 - CASE WHEN EXISTS(SELECT 1 FROM cve_matches m WHERE m.domain = d.domain AND m.severity = 'CRITICAL') THEN 15 ELSE 0 END
                 - CASE WHEN COALESCE(es.spf_too_permissive, 0)                            THEN  7 ELSE 0 END
@@ -281,6 +299,19 @@ pub(crate) fn ensure_schema(conn: &rusqlite::Connection) -> Result<()> {
         FROM risk_score rs
         JOIN domain_classification dc ON dc.domain = rs.domain
         JOIN sector_benchmarks sb ON sb.sector = dc.sector AND sb.metric = 'risk_score';
+    ")?;
+
+    conn.execute_batch("DROP VIEW IF EXISTS ns_concentration;")?;
+    conn.execute_batch("
+        CREATE VIEW ns_concentration AS
+        SELECT
+            ns_operator,
+            COUNT(DISTINCT domain)                                                         AS domain_count,
+            ROUND(100.0 * COUNT(DISTINCT domain)
+                / (SELECT COUNT(*) FROM domains WHERE status = 'ok'), 2)                  AS pct_of_ch
+        FROM ns_operators
+        GROUP BY ns_operator
+        ORDER BY domain_count DESC;
     ")?;
     Ok(())
 }
@@ -352,6 +383,21 @@ pub(crate) fn migrate_ports_info(conn: &rusqlite::Connection) -> Result<()> {
     Ok(())
 }
 
+pub(crate) fn migrate_ports_ip_from_domains(conn: &rusqlite::Connection) -> Result<()> {
+    conn.execute_batch("
+        UPDATE ports_info
+        SET ip = (SELECT ip FROM domains WHERE domains.domain = ports_info.domain)
+        WHERE (ports_info.ip IS NULL OR ports_info.ip = '127.0.0.1')
+          AND EXISTS (
+              SELECT 1 FROM domains
+              WHERE domains.domain = ports_info.domain
+                AND domains.ip IS NOT NULL
+                AND domains.ip <> '127.0.0.1'
+          );
+    ")?;
+    Ok(())
+}
+
 pub(crate) fn migrate_ports_open_only(conn: &rusqlite::Connection) -> Result<()> {
     // Idempotency check: already migrated if ports_scanned_at exists on domains
     let already_done: bool = conn.query_row(
@@ -396,6 +442,18 @@ pub(crate) fn migrate_ports_open_only(conn: &rusqlite::Connection) -> Result<()>
         ")?;
     }
 
+    Ok(())
+}
+
+pub(crate) fn migrate_ports_targeted_at(conn: &rusqlite::Connection) -> Result<()> {
+    let has_col: bool = conn.query_row(
+        "SELECT COUNT(*) > 0 FROM pragma_table_info('domains') WHERE name = 'ports_targeted_at'",
+        [],
+        |r| r.get(0),
+    ).unwrap_or(false);
+    if !has_col {
+        conn.execute_batch("ALTER TABLE domains ADD COLUMN ports_targeted_at TEXT;")?;
+    }
     Ok(())
 }
 
