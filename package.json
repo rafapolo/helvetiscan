@@ -12,9 +12,9 @@
   },
   "devDependencies": {
     "apache-arrow": "^21.1.0",
-    "playwright": "^1.58.2"
+    "playwright": "^1.60.0"
   },
   "dependencies": {
-    "csv-parse": "^6.1.0"
+    "csv-parse": "^6.2.1"
   }
 }
