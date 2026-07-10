@@ -11,6 +11,7 @@ mod http_scan;
 mod dns_scan;
 mod tls_scan;
 mod ports_scan;
+mod smtp_check;
 mod subdomains;
 mod whois;
 mod email_security;
@@ -53,6 +54,8 @@ enum Command {
     Scan(ScanArgs),
     /// Resolve DNS metadata for all domains missing a dns_info row.
     Dns(DnsArgs),
+    /// Check SMTP servers for STARTTLS/TLS support and relay vulnerabilities.
+    SmtpCheck(SmtpCheckArgs),
     /// Scan TLS metadata for all domains missing a tls_info row.
     Tls(TlsArgs),
     /// Scan a small fixed set of TCP ports for all domains missing a ports_info row.
@@ -205,6 +208,21 @@ pub(crate) struct PortsArgs {
                 Targets all domains regardless of ports_scanned_at."
     )]
     pub(crate) ports: Option<Vec<u16>>,
+}
+
+#[derive(Parser, Debug, Clone)]
+pub(crate) struct SmtpCheckArgs {
+    #[arg(long, default_value = "data/domains.db")]
+    pub(crate) db: PathBuf,
+
+    #[arg(long)]
+    pub(crate) domain: Option<String>,
+
+    #[arg(long, default_value_t = 100)]
+    pub(crate) concurrency: usize,
+
+    #[arg(long, help = "Suppress progress bar output")]
+    pub(crate) quiet: bool,
 }
 
 #[derive(Parser, Debug, Clone)]
@@ -415,6 +433,17 @@ impl Default for TlsArgs {
     }
 }
 
+impl Default for SmtpCheckArgs {
+    fn default() -> Self {
+        Self {
+            db: PathBuf::from("data/domains.db"),
+            domain: None,
+            concurrency: 100,
+            quiet: false,
+        }
+    }
+}
+
 impl Default for SubdomainsArgs {
     fn default() -> Self {
         Self {
@@ -482,6 +511,7 @@ async fn main() -> Result<()> {
                 Command::Dns(mut a)  => { if a.domain.is_none() { a.domain = Some(domain); } if a.retry_errors.is_none() { a.retry_errors = retry_errors; } dns_scan::cmd_dns(a, None, None).await }
                 Command::Tls(mut a)  => { if a.domain.is_none() { a.domain = Some(domain); } if a.retry_errors.is_none() { a.retry_errors = retry_errors; } tls_scan::cmd_tls(a, None, None).await }
                 Command::Ports(mut a) => { if a.domain.is_none() { a.domain = Some(domain); } if a.retry_errors.is_none() { a.retry_errors = retry_errors; } ports_scan::cmd_ports(a, None, None).await }
+                Command::SmtpCheck(mut a) => { if a.domain.is_none() { a.domain = Some(domain); } smtp_check::cmd_smtp_check(a, None, None).await }
                 Command::Subdomains(mut a) => { if a.domain.is_none() { a.domain = Some(domain); } subdomains::cmd_subdomains(a, None, None).await }
                 Command::Whois(mut a) => { if a.domain.is_none() { a.domain = Some(domain); } whois::cmd_whois(a, None, None).await }
                 _ => Err(anyhow!("--domain is not supported with this subcommand")),
@@ -495,6 +525,7 @@ async fn main() -> Result<()> {
                 Command::Dns(mut a)  => { if a.retry_errors.is_none() { a.retry_errors = retry_errors; } dns_scan::cmd_dns(a, None, None).await }
                 Command::Tls(mut a)  => { if a.retry_errors.is_none() { a.retry_errors = retry_errors; } tls_scan::cmd_tls(a, None, None).await }
                 Command::Ports(mut a) => { if a.retry_errors.is_none() { a.retry_errors = retry_errors; } ports_scan::cmd_ports(a, None, None).await }
+                Command::SmtpCheck(a) => smtp_check::cmd_smtp_check(a, None, None).await,
                 Command::Subdomains(a) => subdomains::cmd_subdomains(a, None, None).await,
                 Command::Whois(a) => whois::cmd_whois(a, None, None).await,
                 Command::UpdateCves => cve::cmd_update_cves(db).await,
@@ -599,6 +630,8 @@ fn cmd_show(args: ShowArgs) -> Result<()> {
         "SELECT * FROM domain_classification WHERE domain = ?1");
     print_table!("cve_matches",
         "SELECT * FROM cve_matches WHERE domain = ?1");
+    print_table!("smtp_tls_check",
+        "SELECT * FROM smtp_tls_check WHERE domain = ?1");
 
     Ok(())
 }
@@ -855,6 +888,9 @@ async fn cmd_full_pipeline(args: FullArgs) -> Result<()> {
         }};
     }
 
+    step2!("smtp-check",  smtp_check::cmd_smtp_check(SmtpCheckArgs {
+        db: db.clone(), ..SmtpCheckArgs::default()
+    }, None, None).await);
     step2!("update-cves", cve::cmd_update_cves(db.clone()).await);
     step2!("classify",    classify::cmd_classify(db.clone()).await);
     step2!("sovereignty", sovereignty::cmd_sovereignty(SovereigntyArgs {
@@ -923,6 +959,9 @@ async fn cmd_single_all(db: PathBuf, domain: &str, retry_errors: Option<String>)
     step!("whois",      whois::cmd_whois(WhoisArgs {
         db: db.clone(), domain: Some(domain.clone()), quiet: false,
         retry_errors: retry_errors.clone(), ..WhoisArgs::default()
+    }, None, None).await);
+    step!("smtp-check", smtp_check::cmd_smtp_check(SmtpCheckArgs {
+        db: db.clone(), domain: Some(domain.clone()), quiet: false, ..SmtpCheckArgs::default()
     }, None, None).await);
     print_single_domain_summary(&db, &domain)
 }

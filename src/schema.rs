@@ -231,6 +231,19 @@ pub(crate) fn ensure_schema(conn: &rusqlite::Connection) -> Result<()> {
             EXISTS(SELECT 1 FROM cve_matches m WHERE m.domain = d.domain AND m.severity = 'CRITICAL') AS has_critical_cve,
             (COALESCE(es.spf_too_permissive, 0))                                        AS spf_permissive,
             (NOT COALESCE(es.dkim_found, 0))                                            AS no_dkim,
+            EXISTS(
+                SELECT 1 FROM smtp_tls_check st
+                WHERE st.domain = d.domain
+                  AND st.has_starttls = 0
+                  AND st.error IS NULL
+            )                                                                            AS smtp_no_starttls,
+            EXISTS(
+                SELECT 1 FROM smtp_tls_check st
+                WHERE st.domain = d.domain
+                  AND st.starttls_works = 0
+                  AND st.has_starttls = 1
+                  AND st.error IS NULL
+            )                                                                            AS smtp_starttls_fails,
             d.sovereignty_score,
             CASE COALESCE(d.sovereignty_score, 0)
                 WHEN 3 THEN -5
@@ -272,6 +285,19 @@ pub(crate) fn ensure_schema(conn: &rusqlite::Connection) -> Result<()> {
                 - CASE WHEN EXISTS(SELECT 1 FROM cve_matches m WHERE m.domain = d.domain AND m.severity = 'CRITICAL') THEN 15 ELSE 0 END
                 - CASE WHEN COALESCE(es.spf_too_permissive, 0)                            THEN  7 ELSE 0 END
                 - CASE WHEN NOT COALESCE(es.dkim_found, 0)                                THEN  5 ELSE 0 END
+                - CASE WHEN EXISTS(
+                      SELECT 1 FROM smtp_tls_check st
+                      WHERE st.domain = d.domain
+                        AND st.has_starttls = 0
+                        AND st.error IS NULL
+                  )                                                                        THEN 12 ELSE 0 END
+                - CASE WHEN EXISTS(
+                      SELECT 1 FROM smtp_tls_check st
+                      WHERE st.domain = d.domain
+                        AND st.starttls_works = 0
+                        AND st.has_starttls = 1
+                        AND st.error IS NULL
+                  )                                                                        THEN  8 ELSE 0 END
                 - CASE COALESCE(d.sovereignty_score, 0)
                       WHEN 3 THEN 5
                       WHEN 2 THEN 3
@@ -442,6 +468,27 @@ pub(crate) fn migrate_ports_open_only(conn: &rusqlite::Connection) -> Result<()>
         ")?;
     }
 
+    Ok(())
+}
+
+pub(crate) fn ensure_smtp_tls_check_schema(conn: &rusqlite::Connection) -> Result<()> {
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS smtp_tls_check (
+            domain         TEXT    NOT NULL,
+            port           INTEGER NOT NULL,
+            smtp_banner    TEXT,
+            ehlo_response  TEXT,
+            has_starttls   INTEGER NOT NULL DEFAULT 0,
+            starttls_works INTEGER NOT NULL DEFAULT 0,
+            tls_version    TEXT,
+            cipher         TEXT,
+            error          TEXT,
+            checked_at     TEXT,
+            PRIMARY KEY (domain, port)
+        );
+    ",
+    )?;
     Ok(())
 }
 
