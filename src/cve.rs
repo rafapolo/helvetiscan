@@ -386,6 +386,51 @@ pub(crate) fn cmd_list_services(db: std::path::PathBuf) -> Result<()> {
     Ok(())
 }
 
+/// Map Apache product names from the CISA KEV feed to specific technology tags.
+/// HTTP Server products keep the bare `"apache"` tag so they match Server headers.
+/// All other Apache products get scoped tags (e.g. `"apache-struts"`) so they
+/// only fire when that specific product is detected.
+fn map_apache_product(product: &str) -> Option<&'static str> {
+    let p = product;
+    if p.contains("http server") || p == "apache" {
+        Some("apache")
+    } else if p.contains("struts") {
+        Some("apache-struts")
+    } else if p.contains("tomcat") {
+        Some("apache-tomcat")
+    } else if p.contains("log4j") {
+        Some("apache-log4j")
+    } else if p.contains("activemq") {
+        Some("apache-activemq")
+    } else if p.contains("ofbiz") {
+        Some("apache-ofbiz")
+    } else if p.contains("solr") {
+        Some("apache-solr")
+    } else if p.contains("airflow") {
+        Some("apache-airflow")
+    } else if p.contains("flink") {
+        Some("apache-flink")
+    } else if p.contains("spark") {
+        Some("apache-spark")
+    } else if p.contains("rocketmq") {
+        Some("apache-rocketmq")
+    } else if p.contains("superset") {
+        Some("apache-superset")
+    } else if p.contains("couchdb") {
+        Some("apache-couchdb")
+    } else if p.contains("apisix") {
+        Some("apache-apisix")
+    } else if p.contains("kylin") {
+        Some("apache-kylin")
+    } else if p.contains("shiro") {
+        Some("apache-shiro")
+    } else if p.contains("hugegraph") {
+        Some("apache-hugegraph")
+    } else {
+        None
+    }
+}
+
 // ---- CISA KEV fetcher ----
 
 pub(crate) async fn cmd_update_cves(db: PathBuf) -> Result<()> {
@@ -437,8 +482,12 @@ pub(crate) async fn cmd_update_cves(db: PathBuf) -> Result<()> {
         let combined = format!("{vendor} {product}");
 
         let matched_tech = relevant_vendors.iter().find(|&&v| combined.contains(v));
-        let Some(&technology) = matched_tech else { continue };
-        let technology = if technology == "sql server" { "mssql" } else { technology };
+        let Some(&technology_base) = matched_tech else { continue };
+        let technology = match technology_base {
+            "apache"   => map_apache_product(&product).unwrap_or("apache"),
+            "sql server" => "mssql",
+            t          => t,
+        };
 
         let cve_id = entry["cveID"].as_str().unwrap_or("").to_string();
         if cve_id.is_empty() { continue; }
@@ -447,13 +496,14 @@ pub(crate) async fn cmd_update_cves(db: PathBuf) -> Result<()> {
         let published_at: Option<String> = entry["dateAdded"].as_str().map(|s: &str| s.to_string());
 
         conn.execute(
-            "INSERT INTO cve_catalog (cve_id, technology, severity, in_kev, summary, published_at)
-             VALUES (?1, ?2, 'CRITICAL', 1, ?3, ?4)
-             ON CONFLICT(cve_id) DO UPDATE SET
-                severity     = excluded.severity,
-                in_kev       = excluded.in_kev,
-                summary      = excluded.summary,
-                published_at = excluded.published_at",
+             "INSERT INTO cve_catalog (cve_id, technology, severity, in_kev, summary, published_at)
+              VALUES (?1, ?2, 'CRITICAL', 1, ?3, ?4)
+              ON CONFLICT(cve_id) DO UPDATE SET
+                 technology   = excluded.technology,
+                 severity     = excluded.severity,
+                 in_kev       = excluded.in_kev,
+                 summary      = excluded.summary,
+                 published_at = excluded.published_at",
             rusqlite::params![
                 cve_id.as_str(),
                 technology,
