@@ -397,7 +397,7 @@ fn map_apache_product(product: &str) -> Option<&'static str> {
     } else if p.contains("struts") {
         Some("apache-struts")
     } else if p.contains("tomcat") {
-        Some("apache-tomcat")
+        Some("tomcat")
     } else if p.contains("log4j") {
         Some("apache-log4j")
     } else if p.contains("activemq") {
