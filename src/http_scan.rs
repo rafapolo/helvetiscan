@@ -672,7 +672,7 @@ async fn fetch_url_inner(
     } else {
         Some(format!("{:x}", md5::compute(&body)))
     };
-    let cms = detect_cms(powered_by.as_deref(), &body, server.as_deref());
+    let cms = detect_cms(powered_by.as_deref(), &body, server.as_deref(), Some(&final_url));
 
     let row = Row {
         domain: String::new(),
@@ -736,6 +736,7 @@ pub(crate) fn detect_cms(
     powered_by: Option<&str>,
     body: &[u8],
     server: Option<&str>,
+    final_url: Option<&str>,
 ) -> Option<String> {
     if let Some(pb) = powered_by {
         let pb_lc = pb.to_ascii_lowercase();
@@ -773,9 +774,13 @@ pub(crate) fn detect_cms(
     if lower.contains("typo3conf/") || lower.contains("typo3temp/") {
         return Some("TYPO3".into());
     }
-    // Server header: Apache/nginx
+    if lower.contains("roundcube") {
+        return Some("roundcube".into());
+    }
+    // Server header: Tomcat takes priority over generic Apache
     if let Some(srv) = server {
         let srv_lc = srv.to_ascii_lowercase();
+        if srv_lc.contains("coyote") || srv_lc.contains("tomcat") { return Some("tomcat".into()); }
         if srv_lc.contains("apache") { return Some("apache".into()); }
         if srv_lc.contains("nginx")  { return Some("nginx".into()); }
     }
@@ -783,6 +788,13 @@ pub(crate) fn detect_cms(
     if let Some(pb) = powered_by {
         if pb.to_ascii_lowercase().contains("php") {
             return Some("php".into());
+        }
+    }
+    // URL path patterns: Exchange via /owa/, /ecp/, /autodiscover/
+    if let Some(url) = final_url {
+        let url_lc = url.to_ascii_lowercase();
+        if url_lc.contains("/owa/") || url_lc.contains("/ecp/") || url_lc.contains("/autodiscover/") {
+            return Some("exchange".into());
         }
     }
     None

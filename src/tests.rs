@@ -400,57 +400,84 @@ async fn sample_domains_e2e_scan() {
 
 #[test]
 fn wp_content_in_body() {
-    assert_eq!(detect_cms(None, b"<link rel='stylesheet' href='/wp-content/themes/x/style.css'>", None), Some("WordPress".into()));
+    assert_eq!(detect_cms(None, b"<link rel='stylesheet' href='/wp-content/themes/x/style.css'>", None, None), Some("WordPress".into()));
 }
 
 #[test]
 fn wp_includes_in_body() {
-    assert_eq!(detect_cms(None, b"<script src='/wp-includes/js/jquery.js'></script>", None), Some("WordPress".into()));
+    assert_eq!(detect_cms(None, b"<script src='/wp-includes/js/jquery.js'></script>", None, None), Some("WordPress".into()));
 }
 
 #[test]
 fn powered_by_wordpress() {
-    assert_eq!(detect_cms(Some("WordPress 6.4"), b"", None), Some("WordPress".into()));
+    assert_eq!(detect_cms(Some("WordPress 6.4"), b"", None, None), Some("WordPress".into()));
 }
 
 #[test]
 fn drupal_settings_in_body() {
-    assert_eq!(detect_cms(None, b"jQuery.extend(Drupal.settings, {});", None), Some("Drupal".into()));
+    assert_eq!(detect_cms(None, b"jQuery.extend(Drupal.settings, {});", None, None)
+, Some("Drupal".into()));
 }
 
 #[test]
 fn joomla_com_in_body() {
-    assert_eq!(detect_cms(None, b"<a href='/components/com_content/'>read more</a>", None), Some("Joomla".into()));
+    assert_eq!(detect_cms(None, b"<a href='/components/com_content/'>read more</a>", None, None), Some("Joomla".into()));
 }
 
 #[test]
 fn typo3conf_in_body() {
-    assert_eq!(detect_cms(None, b"<link href='/typo3conf/ext/theme/Resources/Public/main.css'>", None), Some("TYPO3".into()));
+    assert_eq!(detect_cms(None, b"<link href='/typo3conf/ext/theme/Resources/Public/main.css'>", None, None), Some("TYPO3".into()));
 }
 
 #[test]
 fn blank_html_returns_none() {
-    assert_eq!(detect_cms(None, b"<!DOCTYPE html><html><head></head><body></body></html>", None), None);
+    assert_eq!(detect_cms(None, b"<!DOCTYPE html><html><head></head><body></body></html>", None, None), None);
 }
 
 #[test]
 fn empty_body_returns_none() {
-    assert_eq!(detect_cms(None, b"", None), None);
+    assert_eq!(detect_cms(None, b"", None, None), None);
 }
 
 #[test]
 fn server_header_apache_version() {
-    assert_eq!(detect_cms(None, b"", Some("Apache/2.4.57")), Some("apache".into()));
+    assert_eq!(detect_cms(None, b"", Some("Apache/2.4.57"), None), Some("apache".into()));
 }
 
 #[test]
 fn server_header_nginx_version() {
-    assert_eq!(detect_cms(None, b"", Some("nginx/1.24.0")), Some("nginx".into()));
+    assert_eq!(detect_cms(None, b"", Some("nginx/1.24.0"), None), Some("nginx".into()));
 }
 
 #[test]
 fn powered_by_php_version() {
-    assert_eq!(detect_cms(Some("PHP/8.2.1"), b"", None), Some("php".into()));
+    assert_eq!(detect_cms(Some("PHP/8.2.1"), b"", None, None), Some("php".into()));
+}
+
+#[test]
+fn tomcat_via_coyote_header() {
+    assert_eq!(detect_cms(None, b"", Some("Apache-Coyote/1.1"), None), Some("tomcat".into()));
+}
+
+#[test]
+fn roundcube_in_body() {
+    assert_eq!(detect_cms(None, b"Copyright (C) The Roundcube Dev Team", None, None), Some("roundcube".into()));
+}
+
+#[test]
+fn exchange_via_owa_url() {
+    assert_eq!(detect_cms(None, b"", None, Some("https://4814.ch/owa/auth/logon.aspx")), Some("exchange".into()));
+}
+
+#[test]
+fn exchange_via_ecp_url() {
+    assert_eq!(detect_cms(None, b"", None, Some("https://domain.ch/ecp/")), Some("exchange".into()));
+}
+
+#[test]
+fn no_false_positive_domain_containing_owa() {
+    // Domain name containing "nowak" must NOT match Exchange
+    assert_eq!(detect_cms(None, b"", None, Some("https://a-nowak.ch/")), None);
 }
 
 // ---- flush_http_headers_batch ----
