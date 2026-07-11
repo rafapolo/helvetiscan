@@ -475,20 +475,41 @@ pub(crate) fn ensure_smtp_tls_check_schema(conn: &rusqlite::Connection) -> Resul
     conn.execute_batch(
         "
         CREATE TABLE IF NOT EXISTS smtp_tls_check (
-            domain         TEXT    NOT NULL,
-            port           INTEGER NOT NULL,
-            smtp_banner    TEXT,
-            ehlo_response  TEXT,
-            has_starttls   INTEGER NOT NULL DEFAULT 0,
-            starttls_works INTEGER NOT NULL DEFAULT 0,
-            tls_version    TEXT,
-            cipher         TEXT,
-            error          TEXT,
-            checked_at     TEXT,
+            domain          TEXT    NOT NULL,
+            port            INTEGER NOT NULL,
+            smtp_banner     TEXT,
+            ehlo_response   TEXT,
+            has_starttls    INTEGER NOT NULL DEFAULT 0,
+            starttls_works  INTEGER NOT NULL DEFAULT 0,
+            tls_version     TEXT,
+            cipher          TEXT,
+            auth_mechanisms TEXT,
+            allows_relay    INTEGER,
+            error           TEXT,
+            checked_at      TEXT,
             PRIMARY KEY (domain, port)
         );
     ",
     )?;
+    migrate_smtp_tls_check(conn)?;
+    Ok(())
+}
+
+fn migrate_smtp_tls_check(conn: &rusqlite::Connection) -> Result<()> {
+    let has_auth: bool = conn
+        .query_row(
+            "SELECT COUNT(*) > 0 FROM pragma_table_info('smtp_tls_check')
+             WHERE name = 'auth_mechanisms'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(false);
+    if !has_auth {
+        conn.execute_batch(
+            "ALTER TABLE smtp_tls_check ADD COLUMN auth_mechanisms TEXT;
+             ALTER TABLE smtp_tls_check ADD COLUMN allows_relay INTEGER;",
+        )?;
+    }
     Ok(())
 }
 

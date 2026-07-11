@@ -8,14 +8,13 @@ use anyhow::{Context, Result};
 use rustls::pki_types::ServerName;
 use rustls::ClientConfig;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, Semaphore};
 use tokio::task::JoinSet;
 use tokio_rustls::TlsConnector;
 
 use crate::shared::{
-    build_default_resolver, progress_reporter, sql_bool, sql_string, sql_string_opt,
+    build_default_resolver, progress_reporter, sql_bool, sql_bool_opt, sql_string, sql_string_opt,
     DISPATCH_BATCH_SIZE, DISPATCH_BATCH_SLEEP, Progress,
 };
 use crate::dns_scan::resolve_first_ip;
@@ -31,6 +30,8 @@ pub(crate) struct SmtpTlsRow {
     pub(crate) starttls_works: bool,
     pub(crate) tls_version: Option<String>,
     pub(crate) cipher: Option<String>,
+    pub(crate) auth_mechanisms: Option<String>,
+    pub(crate) allows_relay: Option<bool>,
     pub(crate) error: Option<String>,
 }
 
@@ -275,39 +276,31 @@ async fn check_smtp_tls(
 ) -> SmtpTlsRow {
     let timeout = Duration::from_secs(5);
 
+    fn err_row(domain: String, port: u16, error: String) -> SmtpTlsRow {
+        SmtpTlsRow {
+            domain,
+            port,
+            smtp_banner: None,
+            ehlo_response: None,
+            has_starttls: false,
+            starttls_works: false,
+            tls_version: None,
+            cipher: None,
+            auth_mechanisms: None,
+            allows_relay: None,
+            error: Some(error),
+        }
+    }
+
     let ip = match resolve_first_ip(resolver, &domain).await {
         Ok(ip) => ip,
-        Err(_) => {
-            return SmtpTlsRow {
-                domain,
-                port,
-                smtp_banner: None,
-                ehlo_response: None,
-                has_starttls: false,
-                starttls_works: false,
-                tls_version: None,
-                cipher: None,
-                error: Some("dns_resolution_failed".to_string()),
-            };
-        }
+        Err(_) => return err_row(domain, port, "dns_resolution_failed".into()),
     };
 
     let addr = SocketAddr::new(ip, port);
     let stream = match tokio::time::timeout(timeout, TcpStream::connect(addr)).await {
         Ok(Ok(s)) => s,
-        _ => {
-            return SmtpTlsRow {
-                domain,
-                port,
-                smtp_banner: None,
-                ehlo_response: None,
-                has_starttls: false,
-                starttls_works: false,
-                tls_version: None,
-                cipher: None,
-                error: Some("connection_failed".to_string()),
-            };
-        }
+        _ => return err_row(domain, port, "connection_failed".into()),
     };
 
     let (reader, mut writer) = stream.into_split();
@@ -315,19 +308,7 @@ async fn check_smtp_tls(
 
     let greeting = match tokio::time::timeout(timeout, read_smtp_greeting(&mut lines)).await {
         Ok(Some(g)) => g,
-        _ => {
-            return SmtpTlsRow {
-                domain,
-                port,
-                smtp_banner: None,
-                ehlo_response: None,
-                has_starttls: false,
-                starttls_works: false,
-                tls_version: None,
-                cipher: None,
-                error: Some("no_greeting".to_string()),
-            };
-        }
+        _ => return err_row(domain, port, "no_greeting".into()),
     };
 
     let ehlo_result = match tokio::time::timeout(timeout, send_ehlo(&mut writer, &mut lines)).await {
@@ -342,14 +323,22 @@ async fn check_smtp_tls(
                 starttls_works: false,
                 tls_version: None,
                 cipher: None,
+                auth_mechanisms: None,
+                allows_relay: None,
                 error: Some("ehlo_failed".to_string()),
             };
         }
     };
 
-    let (ehlo_text, has_starttls, _auth_methods) = ehlo_result;
+    let (ehlo_text, has_starttls, pre_tls_auth) = ehlo_result;
+    let auth_mechanisms = if pre_tls_auth.is_empty() {
+        None
+    } else {
+        Some(pre_tls_auth.join(","))
+    };
 
     if !has_starttls {
+        let (allows_relay, _) = test_relay(&mut writer, &mut lines, timeout).await;
         return SmtpTlsRow {
             domain,
             port,
@@ -359,11 +348,18 @@ async fn check_smtp_tls(
             starttls_works: false,
             tls_version: None,
             cipher: None,
+            auth_mechanisms,
+            allows_relay,
             error: None,
         };
     }
 
-    if tokio::time::timeout(timeout, writer.write_all(b"STARTTLS\r\n")).await.ok().and_then(|r| r.ok()).is_none() {
+    if tokio::time::timeout(timeout, writer.write_all(b"STARTTLS\r\n"))
+        .await
+        .ok()
+        .and_then(|r| r.ok())
+        .is_none()
+    {
         return SmtpTlsRow {
             domain,
             port,
@@ -373,6 +369,8 @@ async fn check_smtp_tls(
             starttls_works: false,
             tls_version: None,
             cipher: None,
+            auth_mechanisms,
+            allows_relay: None,
             error: Some("starttls_command_failed".to_string()),
         };
     }
@@ -389,6 +387,8 @@ async fn check_smtp_tls(
                 starttls_works: false,
                 tls_version: None,
                 cipher: None,
+                auth_mechanisms,
+                allows_relay: None,
                 error: Some("no_starttls_response".to_string()),
             };
         }
@@ -405,6 +405,8 @@ async fn check_smtp_tls(
             starttls_works: false,
             tls_version: None,
             cipher: None,
+            auth_mechanisms,
+            allows_relay: None,
             error: Some(format!("starttls_rejected: {}", trimmed)),
         };
     }
@@ -421,6 +423,8 @@ async fn check_smtp_tls(
                 starttls_works: false,
                 tls_version: None,
                 cipher: None,
+                auth_mechanisms,
+                allows_relay: None,
                 error: Some("reunite_failed".to_string()),
             };
         }
@@ -438,6 +442,8 @@ async fn check_smtp_tls(
                 starttls_works: false,
                 tls_version: None,
                 cipher: None,
+                auth_mechanisms,
+                allows_relay: None,
                 error: Some("invalid_domain".to_string()),
             };
         }
@@ -453,6 +459,20 @@ async fn check_smtp_tls(
                 .negotiated_cipher_suite()
                 .map(|suite| format!("{:?}", suite.suite()));
 
+            // Re-EHLO over TLS (required by RFC 3207 after STARTTLS)
+            let (tls_reader, mut tls_writer) = tokio::io::split(tls_stream);
+            let mut tls_lines = tokio::io::BufReader::new(tls_reader).lines();
+
+            let tls_ehlo = tokio::time::timeout(timeout, send_ehlo(&mut tls_writer, &mut tls_lines)).await;
+            let (tls_auth_mechanisms, allows_relay) = match tls_ehlo {
+                Ok(Some((_, _, auth))) => {
+                    let mechs = if auth.is_empty() { None } else { Some(auth.join(",")) };
+                    let (relay, _) = test_relay(&mut tls_writer, &mut tls_lines, timeout).await;
+                    (mechs, relay)
+                }
+                _ => (auth_mechanisms, None),
+            };
+
             SmtpTlsRow {
                 domain,
                 port,
@@ -462,41 +482,79 @@ async fn check_smtp_tls(
                 starttls_works: true,
                 tls_version: tls_ver,
                 cipher: cipher_str,
+                auth_mechanisms: tls_auth_mechanisms,
+                allows_relay,
                 error: None,
             }
         }
-        Ok(Err(e)) => {
-            SmtpTlsRow {
-                domain,
-                port,
-                smtp_banner: Some(greeting),
-                ehlo_response: Some(ehlo_text),
-                has_starttls: true,
-                starttls_works: false,
-                tls_version: None,
-                cipher: None,
-                error: Some(format!("tls_handshake_failed: {e}")),
-            }
-        }
-        Err(_) => {
-            SmtpTlsRow {
-                domain,
-                port,
-                smtp_banner: Some(greeting),
-                ehlo_response: Some(ehlo_text),
-                has_starttls: true,
-                starttls_works: false,
-                tls_version: None,
-                cipher: None,
-                error: Some("tls_handshake_timeout".to_string()),
-            }
-        }
+        Ok(Err(e)) => SmtpTlsRow {
+            domain,
+            port,
+            smtp_banner: Some(greeting),
+            ehlo_response: Some(ehlo_text),
+            has_starttls: true,
+            starttls_works: false,
+            tls_version: None,
+            cipher: None,
+            auth_mechanisms,
+            allows_relay: None,
+            error: Some(format!("tls_handshake_failed: {e}")),
+        },
+        Err(_) => SmtpTlsRow {
+            domain,
+            port,
+            smtp_banner: Some(greeting),
+            ehlo_response: Some(ehlo_text),
+            has_starttls: true,
+            starttls_works: false,
+            tls_version: None,
+            cipher: None,
+            auth_mechanisms,
+            allows_relay: None,
+            error: Some("tls_handshake_timeout".to_string()),
+        },
     }
 }
 
-async fn read_smtp_greeting(
-    lines: &mut tokio::io::Lines<BufReader<OwnedReadHalf>>,
-) -> Option<String> {
+async fn test_relay<R, W>(
+    writer: &mut W,
+    lines: &mut tokio::io::Lines<tokio::io::BufReader<R>>,
+    timeout: Duration,
+) -> (Option<bool>, Option<String>)
+where
+    R: tokio::io::AsyncRead + Unpin + Send,
+    W: tokio::io::AsyncWrite + Unpin + Send,
+{
+    if writer.write_all(b"MAIL FROM:<relay-test@example.com>\r\n").await.is_err() {
+        return (None, Some("mail_from_failed".into()));
+    }
+    let resp = match tokio::time::timeout(timeout, lines.next_line()).await {
+        Ok(Ok(Some(l))) => l,
+        _ => return (None, Some("no_mail_from_response".into())),
+    };
+    if !resp.trim().starts_with("250") {
+        let _ = writer.write_all(b"RSET\r\n").await;
+        return (None, Some(format!("mail_from_rejected: {}", resp.trim())));
+    }
+    if writer.write_all(b"RCPT TO:<relay-test@example.org>\r\n").await.is_err() {
+        return (None, Some("rcpt_to_failed".into()));
+    }
+    let resp = match tokio::time::timeout(timeout, lines.next_line()).await {
+        Ok(Ok(Some(l))) => l,
+        _ => return (None, Some("no_rcpt_to_response".into())),
+    };
+    let relay = resp.trim().starts_with("250");
+    let _ = writer.write_all(b"RSET\r\n").await;
+    let _ = tokio::time::timeout(timeout, lines.next_line()).await;
+    (Some(relay), None)
+}
+
+async fn read_smtp_greeting<R>(
+    lines: &mut tokio::io::Lines<tokio::io::BufReader<R>>,
+) -> Option<String>
+where
+    R: tokio::io::AsyncRead + Unpin + Send,
+{
     let mut mta_info = String::new();
     loop {
         let line = lines.next_line().await.ok()??;
@@ -514,10 +572,14 @@ async fn read_smtp_greeting(
     if mta_info.is_empty() { None } else { Some(mta_info) }
 }
 
-async fn send_ehlo(
-    writer: &mut OwnedWriteHalf,
-    lines: &mut tokio::io::Lines<BufReader<OwnedReadHalf>>,
-) -> Option<(String, bool, Vec<String>)> {
+async fn send_ehlo<R, W>(
+    writer: &mut W,
+    lines: &mut tokio::io::Lines<tokio::io::BufReader<R>>,
+) -> Option<(String, bool, Vec<String>)>
+where
+    R: tokio::io::AsyncRead + Unpin + Send,
+    W: tokio::io::AsyncWrite + Unpin + Send,
+{
     writer.write_all(b"EHLO scanner\r\n").await.ok()?;
     let mut responses = Vec::new();
     let mut has_starttls = false;
@@ -583,10 +645,10 @@ fn flush_batch(conn: &rusqlite::Connection, batch: &mut Vec<SmtpTlsRow>) -> Resu
             "INSERT INTO smtp_tls_check (
                 domain, port, smtp_banner, ehlo_response,
                 has_starttls, starttls_works, tls_version, cipher,
-                error, checked_at
+                auth_mechanisms, allows_relay, error, checked_at
             ) VALUES ({}, {}, {}, {},
                       {}, {}, {}, {},
-                      {}, datetime('now'))
+                      {}, {}, {}, datetime('now'))
             ON CONFLICT(domain, port) DO UPDATE SET
                 smtp_banner      = excluded.smtp_banner,
                 ehlo_response    = excluded.ehlo_response,
@@ -594,6 +656,8 @@ fn flush_batch(conn: &rusqlite::Connection, batch: &mut Vec<SmtpTlsRow>) -> Resu
                 starttls_works   = excluded.starttls_works,
                 tls_version      = excluded.tls_version,
                 cipher           = excluded.cipher,
+                auth_mechanisms  = excluded.auth_mechanisms,
+                allows_relay     = excluded.allows_relay,
                 error            = excluded.error,
                 checked_at       = datetime('now');\n",
             sql_string(row.domain.as_str()),
@@ -604,6 +668,8 @@ fn flush_batch(conn: &rusqlite::Connection, batch: &mut Vec<SmtpTlsRow>) -> Resu
             sql_bool(row.starttls_works),
             sql_string_opt(row.tls_version.as_deref()),
             sql_string_opt(row.cipher.as_deref()),
+            sql_string_opt(row.auth_mechanisms.as_deref()),
+            sql_bool_opt(row.allows_relay),
             sql_string_opt(row.error.as_deref()),
         ));
     }
