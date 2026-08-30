@@ -274,10 +274,8 @@ async fn axfr_from_ns_ip(ns_ip: IpAddr, domain: &str) -> Vec<String> {
 
     let Ok(name) = Name::from_ascii(domain) else { return vec![]; };
 
-    let mut msg = Message::new();
-    msg.set_message_type(MessageType::Query);
-    msg.set_op_code(OpCode::Query);
-    msg.set_recursion_desired(false);
+    let mut msg = Message::new(0, MessageType::Query, OpCode::Query);
+    msg.metadata.recursion_desired = false;
     msg.add_query(Query::query(name, RecordType::AXFR));
 
     let Ok(msg_bytes) = msg.to_bytes() else { return vec![]; };
@@ -318,13 +316,13 @@ async fn axfr_from_ns_ip(ns_ip: IpAddr, domain: &str) -> Vec<String> {
         }
 
         let Ok(resp) = Message::from_bytes(&buf) else { break; };
-        if resp.response_code() != ResponseCode::NoError { break; }
+        if resp.metadata.response_code != ResponseCode::NoError { break; }
 
-        for record in resp.answers() {
+        for record in &resp.answers {
             if record.record_type() == RecordType::SOA {
                 soa_count += 1;
             }
-            let rname = record.name().to_ascii().to_ascii_lowercase();
+            let rname = record.name.to_ascii().to_ascii_lowercase();
             if rname != apex && rname.ends_with(&apex_suffix) {
                 let sub = rname.trim_end_matches('.').to_string();
                 found.push(sub);

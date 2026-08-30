@@ -11,7 +11,7 @@ libc = "0.2"
 clap = { version = "4", features = ["derive"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 futures-util = "0.3"
-hickory-resolver = "0.25"
+hickory-resolver = "0.26"
 reqwest = { version = "0.12", default-features = false, features = ["brotli", "deflate", "gzip", "hickory-dns", "http2", "rustls-tls", "stream"] }
 rustls = "0.23"
 tokio = { version = "1", features = ["full"] }

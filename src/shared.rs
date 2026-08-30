@@ -3,9 +3,10 @@ use std::net::SocketAddr;
 use std::sync::atomic::AtomicU64;
 use std::time::{Duration, Instant};
 
-use hickory_resolver::config::ResolverConfig;
-use hickory_resolver::name_server::TokioConnectionProvider;
-use hickory_resolver::{ResolveError, TokioResolver};
+use hickory_resolver::config::{ResolverConfig, CLOUDFLARE};
+use hickory_resolver::net::runtime::TokioRuntimeProvider;
+use hickory_resolver::net::NetError;
+use hickory_resolver::TokioResolver;
 use reqwest::dns::{Addrs, Name, Resolve, Resolving};
 use chrono::NaiveDate;
 
@@ -37,11 +38,15 @@ pub(crate) const PORTS: &[(u16, &str)] = &[
     (389,   "ldap"),
     (636,   "ldaps"),
     (1433,  "mssql"),
+    (8009,  "ajp"),
+    (8983,  "solr"),
+    (8161,  "activemq"),
+    (5984,  "couchdb"),
 ];
 pub(crate) const UDP_PORTS: &[(u16, &str)] = &[
     (161, "snmp"),
 ];
-pub(crate) const BANNER_PORTS: &[u16] = &[21, 22, 23, 25, 587, 3306, 5900, 6379, 9200, 11211, 27017, 2375, 6443, 389, 636, 1433, 161];
+pub(crate) const BANNER_PORTS: &[u16] = &[21, 22, 23, 25, 587, 3306, 5900, 6379, 9200, 11211, 27017, 2375, 6443, 389, 636, 1433, 161, 8009, 8983, 8161, 5984];
 
 // ---- Enums ----
 
@@ -185,19 +190,6 @@ pub(crate) struct PortsRow {
     pub(crate) results: Vec<PortResult>,
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct WhoisRow {
-    pub(crate) domain:           String,
-    pub(crate) registrar:        Option<String>,
-    pub(crate) whois_created:    Option<NaiveDate>,
-    pub(crate) expires_at:       Option<NaiveDate>,
-    pub(crate) status:           Option<String>,
-    pub(crate) dnssec_delegated: Option<bool>,
-    /// True when the TCP connection succeeded and a response was received.
-    /// False means a network/timeout failure — row should not be persisted.
-    pub(crate) connected:        bool,
-}
-
 #[derive(Debug)]
 pub(crate) struct SubdomainRow {
     pub(crate) domain: String,
@@ -255,7 +247,9 @@ impl Resolve for ReqwestHickoryResolver {
 }
 
 pub(crate) fn build_default_resolver() -> TokioResolver {
-    TokioResolver::builder_with_config(ResolverConfig::cloudflare(), TokioConnectionProvider::default()).build()
+    TokioResolver::builder_with_config(ResolverConfig::udp_and_tcp(&CLOUDFLARE), TokioRuntimeProvider::default())
+        .build()
+        .expect("failed to build default DNS resolver")
 }
 
 // ---- SQL helpers ----
@@ -384,7 +378,7 @@ pub(crate) fn non_empty<T: Into<String>>(value: T) -> Option<String> {
     }
 }
 
-pub(crate) fn classify_dns_error(err: &ResolveError) -> ErrorKind {
+pub(crate) fn classify_dns_error(err: &NetError) -> ErrorKind {
     if err.is_nx_domain() || err.is_no_records_found() {
         return ErrorKind::NotFound;
     }

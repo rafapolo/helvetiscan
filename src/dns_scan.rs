@@ -4,8 +4,9 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use anyhow::{anyhow, Context, Result};
+use hickory_resolver::net::NetError;
 use hickory_resolver::proto::rr::{RData, RecordType};
-use hickory_resolver::{ResolveError, TokioResolver};
+use hickory_resolver::TokioResolver;
 use tokio::sync::{mpsc, Semaphore};
 use tokio::task::JoinSet;
 
@@ -314,16 +315,17 @@ pub(crate) async fn collect_lookup_strings(
     resolver: &TokioResolver,
     domain: &str,
     record_type: RecordType,
-) -> std::result::Result<Vec<String>, ResolveError> {
+) -> std::result::Result<Vec<String>, NetError> {
     let lookup = resolver.lookup(domain, record_type).await?;
 
     let values = lookup
+        .answers()
         .iter()
-        .map(|record| match record {
+        .map(|record| match &record.data {
             RData::NS(v) => v.to_utf8(),
             RData::CNAME(v) => v.to_utf8(),
-            RData::MX(v) => v.exchange().to_utf8(),
-            _ => record.to_string(),
+            RData::MX(v) => v.exchange.to_utf8(),
+            other => other.to_string(),
         })
         .collect::<Vec<_>>();
     Ok(dedupe_sorted(values))
@@ -333,12 +335,12 @@ pub(crate) async fn collect_ip_strings(
     resolver: &TokioResolver,
     domain: &str,
     record_type: RecordType,
-) -> std::result::Result<Vec<String>, ResolveError> {
+) -> std::result::Result<Vec<String>, NetError> {
     let lookup = resolver.lookup(domain, record_type).await?;
 
     let mut values = Vec::new();
-    for record in lookup.iter() {
-        match record {
+    for record in lookup.answers() {
+        match &record.data {
             RData::A(v) => values.push(v.0.to_string()),
             RData::AAAA(v) => values.push(v.0.to_string()),
             _ => {}
@@ -350,14 +352,14 @@ pub(crate) async fn collect_ip_strings(
 async fn collect_txt_records(
     resolver: &TokioResolver,
     domain: &str,
-) -> std::result::Result<Vec<String>, ResolveError> {
+) -> std::result::Result<Vec<String>, NetError> {
     let lookup = resolver.lookup(domain, RecordType::TXT).await?;
 
     let mut values = Vec::new();
-    for record in lookup.iter() {
-        if let RData::TXT(txt) = record {
+    for record in lookup.answers() {
+        if let RData::TXT(txt) = &record.data {
             let joined = txt
-                .txt_data()
+                .txt_data
                 .iter()
                 .map(|chunk| String::from_utf8_lossy(chunk).to_string())
                 .collect::<String>();
@@ -372,14 +374,15 @@ async fn collect_txt_records(
 async fn collect_caa_records(
     resolver: &TokioResolver,
     domain: &str,
-) -> std::result::Result<Vec<String>, ResolveError> {
+) -> std::result::Result<Vec<String>, NetError> {
     let lookup = resolver.lookup(domain, RecordType::CAA).await?;
     let values = lookup
+        .answers()
         .iter()
         .filter_map(|record| {
-            if let RData::CAA(caa) = record {
-                let value = String::from_utf8_lossy(caa.raw_value()).to_string();
-                Some(format!("{} {} {}", caa.issuer_critical() as u8, caa.tag(), value))
+            if let RData::CAA(caa) = &record.data {
+                let value = String::from_utf8_lossy(&caa.value).to_string();
+                Some(format!("{} {} {}", caa.issuer_critical as u8, caa.tag, value))
             } else {
                 None
             }
@@ -408,7 +411,7 @@ async fn first_ptr_record(
         let Ok(lookup) = resolver.reverse_lookup(ip).await else {
             continue;
         };
-        if let Some(name) = lookup.iter().next() {
+        if let Some(RData::PTR(name)) = lookup.answers().first().map(|record| &record.data) {
             return Some(name.to_utf8());
         }
     }

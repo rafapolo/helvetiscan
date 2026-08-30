@@ -169,9 +169,9 @@ pub(crate) async fn probe_dkim(domain: &str, resolver: &TokioResolver) -> (bool,
     );
 
     let dkim_default = default_res.is_ok_and(|lookup| {
-        lookup.iter().any(|record| {
-            if let RData::TXT(txt) = record {
-                let joined = txt.txt_data().iter()
+        lookup.answers().iter().any(|record| {
+            if let RData::TXT(txt) = &record.data {
+                let joined = txt.txt_data.iter()
                     .map(|c| String::from_utf8_lossy(c).to_string())
                     .collect::<String>();
                 joined.contains("v=DKIM1")
@@ -182,9 +182,9 @@ pub(crate) async fn probe_dkim(domain: &str, resolver: &TokioResolver) -> (bool,
     });
 
     let dkim_google = google_res.is_ok_and(|lookup| {
-        lookup.iter().any(|record| {
-            if let RData::TXT(txt) = record {
-                let joined = txt.txt_data().iter()
+        lookup.answers().iter().any(|record| {
+            if let RData::TXT(txt) = &record.data {
+                let joined = txt.txt_data.iter()
                     .map(|c| String::from_utf8_lossy(c).to_string())
                     .collect::<String>();
                 joined.contains("v=DKIM1")
