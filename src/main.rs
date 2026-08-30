@@ -13,14 +13,18 @@ mod tls_scan;
 mod ports_scan;
 mod smtp_check;
 mod subdomains;
-mod whois;
 mod email_security;
 mod cve;
+mod cve_verify;
+mod feeds;
+mod fingerprint;
 mod classify;
 mod benchmark;
 mod sovereignty;
 mod geocode;
+mod hub_export;
 mod processing;
+mod snapshot;
 #[cfg(test)]
 mod tests;
 
@@ -28,7 +32,7 @@ mod tests;
 
 #[derive(Parser, Debug)]
 #[command(name = "helvetiscan")]
-#[command(about = "Swiss Cyberspace scanner - HTTP, DNS, TLS, HTTP, ports, WHOIS, MX and CVEs")]
+#[command(about = "Swiss Cyberspace scanner - HTTP, DNS, TLS, HTTP, ports, MX and CVEs")]
 #[command(arg_required_else_help = true)]
 struct Cli {
     /// Scan only this single domain.
@@ -62,10 +66,20 @@ enum Command {
     Ports(PortsArgs),
     /// Discover subdomains via DNS zone transfer (AXFR) and NS/MX record harvest.
     Subdomains(SubdomainsArgs),
-    /// Fetch WHOIS registrar and registration date for all domains.
-    Whois(WhoisArgs),
     /// Fetch/refresh the CVE catalog from CISA KEV and seed built-in entries.
     UpdateCves,
+    /// Populate domain_technologies from scan data, then rebuild cve_matches.
+    PopulateTechnologies,
+    /// Re-apply the version filter to an existing cve_matches table (shrinks pre-filter data).
+    RefilterCves(RefilterCvesArgs),
+    /// Enrich the CVE catalog from external feeds (NVD, OSV.dev, GitHub Advisories).
+    FetchFeeds(FetchFeedsArgs),
+    /// Actively probe matched CVEs to confirm whether they are really vulnerable.
+    VerifyCves(VerifyCvesArgs),
+    /// Actively exploit verified (confirmed) CVEs to confirm real-world impact.
+    ExploitCves(ExploitCvesArgs),
+    /// Fingerprint JS libraries, web frameworks, and WordPress plugins from page HTML.
+    Detect(DetectArgs),
     /// List all services and versions detected in port banners.
     ListServices,
     /// Classify domains by industry sector using keyword heuristics.
@@ -74,14 +88,19 @@ enum Command {
     Benchmark(BenchmarkArgs),
     /// Map NS operators by jurisdiction and compute per-domain sovereignty scores.
     Sovereignty(SovereigntyArgs),
-    /// Run the full pipeline: scan → dns → tls → ports → subdomains → whois → cves → classify → sovereignty → benchmark.
+    /// Run the full pipeline: scan → dns → tls → ports → subdomains → cves → classify → sovereignty → benchmark.
     Full(FullArgs),
     /// Enrich domains with hosting country code from GeoLite2-Country.mmdb.
     Geocode(GeocodeArgs),
+    /// Export infrastructure hub graph (NS operators, hosting ASNs) as JSON for the D3 hub map.
+    ExportHubs(HubExportArgs),
     /// Export all (or selected) tables from the SQLite database to Parquet files.
     ExportParquet(ExportParquetArgs),
     /// Import Parquet files from a directory back into the SQLite database.
     ImportParquet(ImportParquetArgs),
+    /// Export a monthly Parquet snapshot of risk/tech/CVE-relevant tables for historical trend
+    /// tracking (run once a month, e.g. via cron).
+    Snapshot(SnapshotArgs),
     /// Show all scanned data tables for a target domain.
     Show(ShowArgs),
 }
@@ -243,28 +262,6 @@ pub(crate) struct SubdomainsArgs {
     pub(crate) retry_errors: Option<String>,
 }
 
-#[derive(Parser, Debug, Clone)]
-pub(crate) struct WhoisArgs {
-    #[arg(long, default_value = "data/domains.db")]
-    pub(crate) db: PathBuf,
-
-    #[arg(long)]
-    pub(crate) domain: Option<String>,
-
-    /// Keep concurrency low — whois.nic.ch rate-limits aggressively.
-    #[arg(long, default_value_t = 5)]
-    pub(crate) concurrency: usize,
-
-    #[arg(long, default_value = "5s", value_parser = shared::parse_duration)]
-    pub(crate) connect_timeout: Duration,
-
-    #[arg(long, help = "Suppress progress bar output")]
-    pub(crate) quiet: bool,
-
-    #[arg(long, help = "Re-scan domains whose error_kind matches this value (e.g. 'timeout')")]
-    pub(crate) retry_errors: Option<String>,
-}
-
 #[derive(Parser, Debug)]
 pub(crate) struct ClassifyArgs {
     #[arg(long, default_value = "data/domains.db")]
@@ -303,6 +300,30 @@ pub(crate) struct GeocodeArgs {
 }
 
 #[derive(Parser, Debug)]
+pub(crate) struct HubExportArgs {
+    #[arg(long, default_value = "data/domains.db")]
+    pub(crate) db: PathBuf,
+
+    /// Path to GeoLite2-ASN.mmdb (offline ASN lookup for hosting IPs).
+    #[arg(long, default_value = "data/GeoLite2-ASN.mmdb")]
+    pub(crate) asn_mmdb: PathBuf,
+
+    /// Path to GeoLite2-Country.mmdb (offline country lookup for hosting IPs).
+    #[arg(long, default_value = "data/GeoLite2-Country.mmdb")]
+    pub(crate) country_mmdb: PathBuf,
+
+    /// Minimum domain_count for a hub to be kept (filters long-tail single-domain noise).
+    #[arg(long, default_value_t = 5)]
+    pub(crate) min_domains: u32,
+
+    #[arg(long, default_value = "web/hub_nodes.json")]
+    pub(crate) nodes_out: PathBuf,
+
+    #[arg(long, default_value = "web/hub_edges.json")]
+    pub(crate) edges_out: PathBuf,
+}
+
+#[derive(Parser, Debug)]
 pub(crate) struct ExportParquetArgs {
     #[arg(long, default_value = "data/domains.db")]
     pub(crate) db: PathBuf,
@@ -314,6 +335,31 @@ pub(crate) struct ExportParquetArgs {
     /// Tables to skip (can be repeated: --exclude foo --exclude bar).
     #[arg(long)]
     pub(crate) exclude: Vec<String>,
+}
+
+#[derive(Parser, Debug)]
+pub(crate) struct SnapshotArgs {
+    #[arg(long, default_value = "data/domains.db")]
+    pub(crate) db: PathBuf,
+
+    /// Month to snapshot, as 'YYYY-MM'. Defaults to the current month.
+    #[arg(long)]
+    pub(crate) month: Option<String>,
+
+    /// Base directory; the snapshot is written to <output_dir>/month=<YYYY-MM>/*.parquet.
+    #[arg(long, default_value = "data/snapshots")]
+    pub(crate) output_dir: PathBuf,
+
+    /// Refuse to write the snapshot if any module's scan coverage falls below this percentage
+    /// (0-100) — a missing month is more honest than a silently under-scanned one. Unset means
+    /// coverage is always recorded (and low coverage warned about) but never blocks a run.
+    #[arg(long)]
+    pub(crate) min_coverage: Option<f64>,
+
+    /// Re-check an already-written month's checksums against its manifest instead of exporting
+    /// a new one — cheap corruption detection for data that can't be re-scanned to check.
+    #[arg(long)]
+    pub(crate) verify: bool,
 }
 
 #[derive(Parser, Debug)]
@@ -332,6 +378,105 @@ pub(crate) struct ImportParquetArgs {
     /// How to handle conflicts: replace (default), ignore, or abort.
     #[arg(long, default_value = "replace")]
     pub(crate) on_conflict: String,
+}
+
+#[derive(clap::Args, Debug)]
+pub(crate) struct RefilterCvesArgs {
+    /// Preview the keep/drop counts without modifying the database.
+    #[arg(long)]
+    pub(crate) preview: bool,
+}
+
+#[derive(Parser, Debug)]
+pub(crate) struct VerifyCvesArgs {
+    #[arg(long, default_value = "data/domains.db")]
+    pub(crate) db: PathBuf,
+
+    #[arg(long, default_value_t = 100)]
+    pub(crate) concurrency: usize,
+
+    #[arg(long)]
+    pub(crate) limit: Option<usize>,
+
+    /// Print what would be probed without actually probing.
+    #[arg(long)]
+    pub(crate) dry_run: bool,
+
+    /// Enable intrusive active checks (ProFTPD mod_copy, vsftpd backdoor trigger).
+    /// Off by default: `full` never runs these against third-party hosts.
+    #[arg(long)]
+    pub(crate) aggressive: bool,
+
+    /// Re-probe every matched pair regardless of prior verification age.
+    #[arg(long)]
+    pub(crate) retry: bool,
+
+    /// Re-verify pairs whose last check is older than this many days.
+    #[arg(long, default_value_t = 30)]
+    pub(crate) max_age_days: i64,
+
+    /// Only verify CVEs with an EPSS score >= this (0.0 = no filter). Probes are also
+    /// ordered by EPSS descending, so the most-exploited CVEs are checked first.
+    #[arg(long, default_value_t = 0.0)]
+    pub(crate) min_epss: f64,
+}
+
+#[derive(Parser, Debug)]
+pub(crate) struct FetchFeedsArgs {
+    #[arg(long, default_value = "data/domains.db")]
+    pub(crate) db: PathBuf,
+
+    /// Query the NVD API (rate-limited; ~6s between requests).
+    #[arg(long)]
+    pub(crate) nvd: bool,
+
+    /// Query OSV.dev for open-source package advisories.
+    #[arg(long)]
+    pub(crate) osv: bool,
+
+    /// Query the GitHub Advisory Database (requires GITHUB_TOKEN).
+    #[arg(long)]
+    pub(crate) ghsa: bool,
+
+    /// Enable all feeds (equivalent to --nvd --osv --ghsa).
+    #[arg(long)]
+    pub(crate) all: bool,
+}
+
+#[derive(Parser, Debug)]
+pub(crate) struct ExploitCvesArgs {
+    #[arg(long, default_value = "data/domains.db")]
+    pub(crate) db: PathBuf,
+
+    #[arg(long, default_value_t = 50)]
+    pub(crate) concurrency: usize,
+
+    #[arg(long)]
+    pub(crate) limit: Option<usize>,
+
+    /// Print what would be exploited without actually probing.
+    #[arg(long)]
+    pub(crate) dry_run: bool,
+
+    /// Re-exploit every verified=1 pair regardless of prior exploit age.
+    #[arg(long)]
+    pub(crate) retry: bool,
+
+    /// Re-check pairs whose last exploit check is older than this many days.
+    #[arg(long, default_value_t = 7)]
+    pub(crate) max_age_days: i64,
+}
+
+#[derive(Parser, Debug)]
+pub(crate) struct DetectArgs {
+    #[arg(long, default_value = "data/domains.db")]
+    pub(crate) db: PathBuf,
+
+    #[arg(long, default_value_t = 100)]
+    pub(crate) concurrency: usize,
+
+    #[arg(long)]
+    pub(crate) limit: Option<usize>,
 }
 
 #[derive(Parser, Debug)]
@@ -373,19 +518,6 @@ pub(crate) struct FullArgs {
     /// Cancel a module when its error rate exceeds this fraction (0.0-1.0, default: 0.5).
     #[arg(long, default_value_t = 0.5)]
     pub(crate) error_threshold: f64,
-}
-
-impl Default for WhoisArgs {
-    fn default() -> Self {
-        Self {
-            db: PathBuf::from("data/domains.db"),
-            domain: None,
-            concurrency: 5,
-            connect_timeout: Duration::from_secs(5),
-            quiet: false,
-            retry_errors: None,
-        }
-    }
 }
 
 impl Default for ScanArgs {
@@ -513,7 +645,6 @@ async fn main() -> Result<()> {
                 Command::Ports(mut a) => { if a.domain.is_none() { a.domain = Some(domain); } if a.retry_errors.is_none() { a.retry_errors = retry_errors; } ports_scan::cmd_ports(a, None, None).await }
                 Command::SmtpCheck(mut a) => { if a.domain.is_none() { a.domain = Some(domain); } smtp_check::cmd_smtp_check(a, None, None).await }
                 Command::Subdomains(mut a) => { if a.domain.is_none() { a.domain = Some(domain); } subdomains::cmd_subdomains(a, None, None).await }
-                Command::Whois(mut a) => { if a.domain.is_none() { a.domain = Some(domain); } whois::cmd_whois(a, None, None).await }
                 _ => Err(anyhow!("--domain is not supported with this subcommand")),
             }
         }
@@ -527,8 +658,16 @@ async fn main() -> Result<()> {
                 Command::Ports(mut a) => { if a.retry_errors.is_none() { a.retry_errors = retry_errors; } ports_scan::cmd_ports(a, None, None).await }
                 Command::SmtpCheck(a) => smtp_check::cmd_smtp_check(a, None, None).await,
                 Command::Subdomains(a) => subdomains::cmd_subdomains(a, None, None).await,
-                Command::Whois(a) => whois::cmd_whois(a, None, None).await,
                 Command::UpdateCves => cve::cmd_update_cves(db).await,
+                Command::PopulateTechnologies => cve::cmd_populate_technologies(db).await,
+                Command::RefilterCves(a) => if a.preview { cve::cmd_refilter_cves_preview(db) } else { cve::cmd_refilter_cves(db) },
+                Command::FetchFeeds(a) => {
+                    let (nvd, osv, ghsa) = (a.nvd || a.all, a.osv || a.all, a.ghsa || a.all);
+                    feeds::cmd_fetch_feeds(a.db, nvd, osv, ghsa).await
+                }
+                Command::VerifyCves(a) => cve_verify::cmd_verify_cves(a.db, a.concurrency, a.limit, a.dry_run, a.aggressive, a.retry, a.max_age_days, a.min_epss).await,
+                Command::ExploitCves(a) => cve_verify::cmd_exploit_cves(a.db, a.concurrency, a.limit, a.dry_run, a.retry, a.max_age_days).await,
+                Command::Detect(a) => fingerprint::cmd_detect(a.db, a.concurrency, a.limit).await,
                 Command::ListServices => cve::cmd_list_services(db),
                 Command::Classify(a) => classify::cmd_classify(a.db).await,
                 Command::Benchmark(a) => benchmark::cmd_benchmark(a.db).await,
@@ -538,12 +677,14 @@ async fn main() -> Result<()> {
                     db: a.db,
                     country_mmdb: a.country_mmdb,
                 }),
+                Command::ExportHubs(a) => hub_export::cmd_export_hubs(a),
                 Command::ExportParquet(a) => {
                     processing::export_as_parquet::cmd_export_parquet(a)
                 }
                 Command::ImportParquet(a) => {
                     processing::import_from_parquet::cmd_import_parquet(a)
                 }
+                Command::Snapshot(a) => snapshot::cmd_snapshot(a),
                 Command::Show(a) => cmd_show(a),
             }
         }
@@ -620,8 +761,6 @@ fn cmd_show(args: ShowArgs) -> Result<()> {
         "SELECT * FROM ports_info WHERE domain = ?1");
     print_table!("subdomains",
         "SELECT * FROM subdomains WHERE domain = ?1");
-    print_table!("whois_info",
-        "SELECT * FROM whois_info WHERE domain = ?1");
     print_table!("http_headers",
         "SELECT * FROM http_headers WHERE domain = ?1");
     print_table!("email_security",
@@ -630,6 +769,8 @@ fn cmd_show(args: ShowArgs) -> Result<()> {
         "SELECT * FROM domain_classification WHERE domain = ?1");
     print_table!("cve_matches",
         "SELECT * FROM cve_matches WHERE domain = ?1");
+    print_table!("cve_verifications",
+        "SELECT * FROM cve_verifications WHERE domain = ?1");
     print_table!("smtp_tls_check",
         "SELECT * FROM smtp_tls_check WHERE domain = ?1");
 
@@ -714,11 +855,10 @@ async fn cmd_full_pipeline(args: FullArgs) -> Result<()> {
     let (tls_ctx,    tls_crx)    = tokio::sync::watch::channel(false);
     let (ports_ctx,  ports_crx)  = tokio::sync::watch::channel(false);
     let (sub_ctx,    sub_crx)    = tokio::sync::watch::channel(false);
-    let (whois_ctx,  whois_crx)  = tokio::sync::watch::channel(false);
 
     forward_global(vec![
         http_ctx.clone(), dns_ctx.clone(), tls_ctx.clone(),
-        ports_ctx.clone(), sub_ctx.clone(), whois_ctx.clone(),
+        ports_ctx.clone(), sub_ctx.clone(),
     ]);
 
     // Per-module progress trackers
@@ -727,7 +867,6 @@ async fn cmd_full_pipeline(args: FullArgs) -> Result<()> {
     let tls_prog   = Arc::new(crate::shared::Progress::new(0, "valid TLS",  "errors"));
     let ports_prog = Arc::new(crate::shared::Progress::new(0, "open ports", "no resolve"));
     let sub_prog   = Arc::new(crate::shared::Progress::new(0, "found",      "no result"));
-    let whois_prog = Arc::new(crate::shared::Progress::new(0, "registrar",  "unknown"));
 
     // Concurrencies (each module's natural default / parallel_divisor)
     let http_conc  = (500_usize / div).max(1);
@@ -800,18 +939,6 @@ async fn cmd_full_pipeline(args: FullArgs) -> Result<()> {
         }
     });
 
-    phase1.spawn({
-        let prog = whois_prog.clone();
-        let crx = whois_crx;
-        let db = db.clone();
-        async move {
-            let r = whois::cmd_whois(WhoisArgs {
-                db, ..WhoisArgs::default()
-            }, Some(crx), Some(prog)).await;
-            ("whois", r)
-        }
-    });
-
     // Multi-line progress reporter for phase 1
     let (p1_done_tx, p1_done_rx) = tokio::sync::oneshot::channel::<()>();
     let reporter = tokio::spawn(crate::shared::multi_progress_reporter(
@@ -821,7 +948,6 @@ async fn cmd_full_pipeline(args: FullArgs) -> Result<()> {
             ("tls",       tls_prog.clone()),
             ("ports",     ports_prog.clone()),
             ("subdomains",sub_prog.clone()),
-            ("whois",     whois_prog.clone()),
         ],
         std::time::Duration::from_secs(1),
         p1_done_rx,
@@ -835,7 +961,6 @@ async fn cmd_full_pipeline(args: FullArgs) -> Result<()> {
             ("tls",       tls_prog.clone(),   tls_ctx),
             ("ports",     ports_prog.clone(), ports_ctx),
             ("subdomains",sub_prog.clone(),   sub_ctx),
-            ("whois",     whois_prog.clone(), whois_ctx),
         ],
         error_threshold,
         100,
@@ -891,7 +1016,9 @@ async fn cmd_full_pipeline(args: FullArgs) -> Result<()> {
     step2!("smtp-check",  smtp_check::cmd_smtp_check(SmtpCheckArgs {
         db: db.clone(), ..SmtpCheckArgs::default()
     }, None, None).await);
+    step2!("detect",      fingerprint::cmd_detect(db.clone(), 100, None).await);
     step2!("update-cves", cve::cmd_update_cves(db.clone()).await);
+    step2!("verify-cves", cve_verify::cmd_verify_cves(db.clone(), 100, None, false, false, false, 30, 0.0).await);
     step2!("classify",    classify::cmd_classify(db.clone()).await);
     step2!("sovereignty", sovereignty::cmd_sovereignty(SovereigntyArgs {
         db: db.clone(),
@@ -955,10 +1082,6 @@ async fn cmd_single_all(db: PathBuf, domain: &str, retry_errors: Option<String>)
     step!("subdomains", subdomains::cmd_subdomains(SubdomainsArgs {
         db: db.clone(), domain: Some(domain.clone()), quiet: false,
         retry_errors: retry_errors.clone(), ..SubdomainsArgs::default()
-    }, None, None).await);
-    step!("whois",      whois::cmd_whois(WhoisArgs {
-        db: db.clone(), domain: Some(domain.clone()), quiet: false,
-        retry_errors: retry_errors.clone(), ..WhoisArgs::default()
     }, None, None).await);
     step!("smtp-check", smtp_check::cmd_smtp_check(SmtpCheckArgs {
         db: db.clone(), domain: Some(domain.clone()), quiet: false, ..SmtpCheckArgs::default()

@@ -21,7 +21,7 @@ pub(crate) fn cmd_geocode(args: GeoCodeArgs) -> Result<()> {
     let total: u64 = conn.query_row(
         "SELECT COUNT(*) FROM domains WHERE ip IS NOT NULL AND country_code IS NULL",
         [],
-        |r| r.get(0),
+        |r| r.get::<_, i64>(0).map(|v| v as u64),
     )?;
 
     if total == 0 {

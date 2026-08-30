@@ -305,7 +305,10 @@ async fn fetch_tls_info(connector: &TlsConnector, resolver: &TokioResolver, doma
         return row;
     };
 
-    let fingerprint = format!("{:x}", Sha256::digest(peer_cert.as_ref()));
+    let fingerprint = Sha256::digest(peer_cert.as_ref())
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<String>();
     if let Ok((_, cert)) = X509Certificate::from_der(peer_cert.as_ref()) {
         populate_tls_cert_fields(&mut row, &cert, fingerprint);
         row.status = ScanStatus::Ok;

@@ -28,12 +28,6 @@ Questions answerable from a populated helvetiscan database. Each maps to one or 
 - Which sector has the most domains scoring below 50/100? → `risk_score` + `domain_classification`
 - How does the government sector compare to retail on every risk flag? → `risk_score` + `domain_classification`
 
-### Domain lifecycle
-- How many .ch domains expire in the next 30 days? → `whois_info.expires_at`
-- Which registrar has the most domains about to expire? → `whois_info`
-- Are there high-value domains (many subdomains, classified sector) expiring soon? → `whois_info` + `subdomains` + `domain_classification`
-- What is the average age of .ch domains by registrar? → `whois_info.whois_created`
-
 ### CMS and server landscape
 - Which CMS is most popular in each industry sector? → `domains.cms` + `domain_classification`
 
@@ -49,11 +43,6 @@ Questions answerable from a populated helvetiscan database. Each maps to one or 
 
 ### DNS hygiene
 - Which .ch domains lack CAA records but have active TLS certificates? → `dns_info.caa` + `tls_info`
-
-### Registrar landscape
-- Which registrars hold the most .ch domains? → `whois_info.registrar`
-- Is there a correlation between registrar and security posture? → `whois_info` + `risk_score`
-- Which registrars have the most domains with DNSSEC delegated? → `whois_info.dnssec_delegated`
 
 ---
 
@@ -81,8 +70,6 @@ Questions answerable from a populated helvetiscan database. Each maps to one or 
 **Hub resilience** (→ task 21 / `hub_resilience` table): cascading failure scenarios — minimum operator set whose removal takes 10%/25%/50% of .ch offline. Extends DNS concentration into a quantified infrastructure risk statement.
 
 **Sector-differentiated risk** (→ `domain_classification` + `risk_score`): healthcare vs finance vs government security posture. Which sector has the most domains below 50/100? Which has the worst DMARC enforcement? High publication value.
-
-**Domain expiry risk** (→ `whois_info.expires_at`): how many .ch domains expire in the next 30/90 days, and are any high-value (many subdomains, classified sector)?
 
 **Subdomain takeover surface** (→ `subdomains` + DNS): orphaned CNAMEs pointing to decommissioned services. Not yet computed.
 

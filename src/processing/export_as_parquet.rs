@@ -86,17 +86,52 @@ pub(crate) fn cmd_export_parquet(args: ExportParquetArgs) -> Result<()> {
         args.output_dir.display()
     );
 
-    for table in &tables {
-        export_table(&conn, table, &args.output_dir)?;
-    }
+    export_tables(&conn, &tables, &args.output_dir, None)?;
 
     eprintln!("export-parquet: done");
     Ok(())
 }
 
+/// One table's export result — used by callers (e.g. the `snapshot` command) that need to
+/// record what was exported: row count for coverage bookkeeping, column list so a reader can
+/// detect schema drift across runs without opening every file (task 26).
+pub(crate) struct TableExport {
+    pub(crate) table: String,
+    pub(crate) row_count: i64,
+    pub(crate) columns: Vec<String>,
+}
+
+/// Export a fixed, caller-chosen list of tables (or views) to `<output_dir>/<table>.parquet`.
+/// `extra_col`, when set, appends a literal `(name, value)` text column to every row of every
+/// table — used by `snapshot` to stamp an explicit `month` column into each file, so it
+/// survives a file being copied out of its hive-partitioned `month=YYYY-MM/` directory.
+pub(crate) fn export_tables(
+    conn: &Connection,
+    tables: &[String],
+    output_dir: &PathBuf,
+    extra_col: Option<(&str, &str)>,
+) -> Result<Vec<TableExport>> {
+    tables
+        .iter()
+        .map(|table| {
+            let (row_count, columns) = export_table(conn, table, output_dir, extra_col)?;
+            Ok(TableExport {
+                table: table.clone(),
+                row_count,
+                columns,
+            })
+        })
+        .collect()
+}
+
 // ---- per-table export ----
 
-fn export_table(conn: &Connection, table: &str, output_dir: &PathBuf) -> Result<()> {
+fn export_table(
+    conn: &Connection,
+    table: &str,
+    output_dir: &PathBuf,
+    extra_col: Option<(&str, &str)>,
+) -> Result<(i64, Vec<String>)> {
     // Introspect columns via PRAGMA (cid, name, type, notnull, dflt_value, pk)
     let mut col_stmt = conn.prepare(&format!("PRAGMA table_info(\"{}\")", table))?;
     let cols: Vec<ColInfo> = col_stmt
@@ -114,7 +149,7 @@ fn export_table(conn: &Connection, table: &str, output_dir: &PathBuf) -> Result<
 
     if cols.is_empty() {
         eprintln!("  {table}: no columns, skipping");
-        return Ok(());
+        return Ok((0, Vec::new()));
     }
 
     let row_count: i64 = conn.query_row(
@@ -125,18 +160,33 @@ fn export_table(conn: &Connection, table: &str, output_dir: &PathBuf) -> Result<
 
     eprint!("  {table}: {row_count} rows … ");
 
-    // Build Arrow schema (all columns nullable)
+    // Build Arrow schema (all columns nullable) — the base schema mirrors the SQL columns
+    // exactly; `extra_col`, if set, is appended as one more nullable Utf8 field carrying a
+    // constant value stamped onto every row (used for the snapshot's `month` column).
     let schema = Arc::new(Schema::new(
         cols.iter()
             .map(|c| Field::new(&c.name, kind_to_arrow(&c.kind), true))
             .collect::<Vec<_>>(),
     ));
+    let full_schema = match extra_col {
+        Some((name, _)) => {
+            let mut fields: Vec<Field> = schema.fields().iter().map(|f| (**f).clone()).collect();
+            fields.push(Field::new(name, DataType::Utf8, true));
+            Arc::new(Schema::new(fields))
+        }
+        None => schema.clone(),
+    };
+    let column_names: Vec<String> = full_schema
+        .fields()
+        .iter()
+        .map(|f| f.name().clone())
+        .collect();
 
     let out_path = output_dir.join(format!("{table}.parquet"));
     let file =
         fs::File::create(&out_path).with_context(|| format!("creating {:?}", out_path))?;
     let props = WriterProperties::builder().build();
-    let mut writer = ArrowWriter::try_new(file, schema.clone(), Some(props))
+    let mut writer = ArrowWriter::try_new(file, full_schema.clone(), Some(props))
         .context("creating parquet writer")?;
 
     // Paginate to avoid loading the full table into memory
@@ -170,6 +220,19 @@ fn export_table(conn: &Connection, table: &str, output_dir: &PathBuf) -> Result<
 
         let fetched = rows.len();
         let batch = build_record_batch(&schema, &cols, &rows)?;
+        let batch = match extra_col {
+            Some((_, value)) => {
+                let mut arrays = batch.columns().to_vec();
+                let mut b = StringBuilder::with_capacity(fetched, fetched * value.len().max(1));
+                for _ in 0..fetched {
+                    b.append_value(value);
+                }
+                arrays.push(Arc::new(b.finish()));
+                RecordBatch::try_new(full_schema.clone(), arrays)
+                    .context("appending extra column to record batch")?
+            }
+            None => batch,
+        };
         writer.write(&batch).context("writing parquet batch")?;
 
         offset += fetched as i64;
@@ -180,7 +243,7 @@ fn export_table(conn: &Connection, table: &str, output_dir: &PathBuf) -> Result<
 
     writer.close().context("closing parquet writer")?;
     eprintln!("ok → {}", out_path.display());
-    Ok(())
+    Ok((row_count, column_names))
 }
 
 // ---- record batch builder ----

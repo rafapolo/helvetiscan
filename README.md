@@ -31,7 +31,6 @@ Commands:
   tls          Scan TLS metadata for all domains missing a tls_info row
   ports        Scan a small fixed set of TCP ports for all domains missing a ports_info row
   subdomains   Discover subdomains via DNS zone transfer (AXFR) and NS/MX record harvest
-  whois        Fetch WHOIS registrar and registration date for all domains
   update-cves  Fetch/refresh the CVE catalog from CISA KEV and seed built-in entries
   classify     Classify domains by industry sector using keyword heuristics
   benchmark    Compute sector-level risk benchmarks across classified domains
@@ -42,6 +41,51 @@ Options:
       --domain <DOMAIN>              Scan only this single domain
       --retry-errors <RETRY_ERRORS>  Re-scan domains whose error_kind matches this value (e.g. 'timeout')
 ```
+
+---
+
+## Monthly Snapshots
+
+`helvetiscan snapshot` freezes the current state of the ten highest-signal tables (plus the
+`risk_score` view) to hive-partitioned Parquet, so CVE matches, detected technologies, and
+overall scan posture can be tracked over time — outside SQLite, with Polars — without the DB
+growing without bound. See `docs/SCHEMA.md#snapshots` for what's recorded and
+`tasks/done/task_23_monthly_snapshots.md` for the design rationale.
+
+Run once a month via cron/launchd (no in-binary scheduler); `scripts/monthly.sh` wraps the full
+scan + snapshot chain and is the intended cron target:
+
+```
+0 3 1 * * /root/helvetiscan/scripts/monthly.sh
+```
+
+Each month lands in `data/snapshots/month=YYYY-MM/*.parquet`, written atomically (temp dir +
+rename, so a reader never sees a half-written month) with a `manifest.json` completeness
+marker. Read multiple months back with Polars using this exact combination of flags — schema
+drift across months (a column added by a later migration) is expected, not exceptional, and the
+first two flags below are why an unqualified `pl.scan_parquet("snapshots/**/domains.parquet")`
+breaks the moment it lands:
+
+```python
+import polars as pl
+
+df = pl.scan_parquet(
+    "data/snapshots/month=*/domains.parquet",
+    hive_partitioning=True,     # derives the `month` column from the directory name
+    extra_columns="ignore",     # a newer month's added column doesn't blow up older months
+    missing_columns="insert",   # ...and vice versa, backfilled as null
+).collect()
+```
+
+`scripts/snapshot_trend.py` builds on this (`verify`, `cve-diff`, `domains-diff` subcommands) —
+run `verify` right after any snapshot to catch a format regression immediately. `helvetiscan
+snapshot --min-coverage <pct>` refuses to write a month whose scan coverage for any module falls
+below the threshold; `helvetiscan snapshot --verify --month YYYY-MM` re-checks an already-written
+month's files against its manifest checksums. Retention: keep every month (~1.3GB/month
+measured on the real dataset, well under 200GB even over a decade — see
+`tasks/todo/task_30_snapshot_retention_and_durability.md`). An off-machine backup of
+`data/snapshots/` (the one part of this project's data that re-scanning can't rebuild) is not
+yet set up — that task file has the open decision.
 
 ---
 

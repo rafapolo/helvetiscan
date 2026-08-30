@@ -21,8 +21,6 @@ pub(crate) fn ensure_schema(conn: &rusqlite::Connection) -> Result<()> {
             updated_at       TEXT,
             server           TEXT,
             powered_by       TEXT,
-            whois_registrar  TEXT,
-            whois_created    TEXT,
             redirect_chain   TEXT,
             cms              TEXT,
             sovereignty_score INTEGER,
@@ -82,16 +80,6 @@ pub(crate) fn ensure_schema(conn: &rusqlite::Connection) -> Result<()> {
             PRIMARY KEY (domain, subdomain)
         );
 
-        CREATE TABLE IF NOT EXISTS whois_info (
-            domain           TEXT PRIMARY KEY,
-            registrar        TEXT,
-            whois_created    TEXT,
-            expires_at       TEXT,
-            status           TEXT,
-            dnssec_delegated INTEGER,
-            queried_at       TEXT
-        );
-
         CREATE TABLE IF NOT EXISTS http_headers (
             domain                 TEXT PRIMARY KEY,
             hsts                   TEXT,
@@ -113,7 +101,19 @@ pub(crate) fn ensure_schema(conn: &rusqlite::Connection) -> Result<()> {
             cvss_score    REAL,
             in_kev        INTEGER DEFAULT 0,
             summary       TEXT,
-            published_at  TEXT
+            published_at  TEXT,
+            epss_score       REAL,
+            epss_percentile  REAL
+        );
+
+        CREATE TABLE IF NOT EXISTS domain_technologies (
+            domain        TEXT NOT NULL,
+            technology    TEXT NOT NULL,
+            version       TEXT,
+            detected_at   TEXT DEFAULT (datetime('now')),
+            last_seen     TEXT DEFAULT (datetime('now')),
+            source        TEXT,
+            PRIMARY KEY (domain, technology)
         );
 
         CREATE TABLE IF NOT EXISTS cve_matches (
@@ -127,6 +127,25 @@ pub(crate) fn ensure_schema(conn: &rusqlite::Connection) -> Result<()> {
             published_at  TEXT,
             matched_at    TEXT DEFAULT (datetime('now')),
             PRIMARY KEY (domain, cve_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS cve_verifications (
+            domain        TEXT NOT NULL,
+            cve_id        TEXT NOT NULL,
+            verified      INTEGER NOT NULL DEFAULT 0,
+            checked_at    TEXT,
+            check_method  TEXT,
+            proof         TEXT,
+            PRIMARY KEY (domain, cve_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS software_detections (
+            domain       TEXT NOT NULL,
+            kind         TEXT NOT NULL,   -- 'js_lib' | 'framework' | 'wp_plugin'
+            name         TEXT NOT NULL,
+            version      TEXT,
+            detected_at  TEXT DEFAULT (datetime('now')),
+            PRIMARY KEY (domain, kind, name)
         );
 
         CREATE TABLE IF NOT EXISTS email_security (
@@ -186,6 +205,15 @@ pub(crate) fn ensure_schema(conn: &rusqlite::Connection) -> Result<()> {
             jurisdiction TEXT NOT NULL DEFAULT 'OTHER',
             updated_at   TEXT DEFAULT (datetime('now'))
         );
+
+        CREATE TABLE IF NOT EXISTS snapshot_runs (
+            snapshot_month  TEXT PRIMARY KEY,   -- 'YYYY-MM'
+            started_at      TEXT,
+            finished_at     TEXT,
+            output_dir      TEXT,
+            tables_json     TEXT,               -- JSON array of table/view names exported
+            row_counts_json TEXT                -- JSON object {table: row_count}
+        );
     ",
     )?;
     migrate_ports_info(conn)?;
@@ -193,6 +221,13 @@ pub(crate) fn ensure_schema(conn: &rusqlite::Connection) -> Result<()> {
     migrate_domains_country_code(conn)?;
     migrate_ports_ip_from_domains(conn)?;
     migrate_ports_targeted_at(conn)?;
+    migrate_snapshot_runs_status_coverage(conn)?;
+
+    migrate_cve_catalog_epss(conn)?;
+
+    // The risk_score view below references smtp_tls_check, so that table must exist for
+    // any consumer of ensure_schema (not just the smtp-check command).
+    ensure_smtp_tls_check_schema(conn)?;
 
     conn.execute_batch("DROP VIEW IF EXISTS risk_score;")?;
     conn.execute_batch("
@@ -209,7 +244,6 @@ pub(crate) fn ensure_schema(conn: &rusqlite::Connection) -> Result<()> {
             (CASE WHEN es.domain IS NOT NULL
                   THEN (COALESCE(es.dmarc_policy,'') = 'none' OR NOT COALESCE(es.dmarc_present, 0))
                   ELSE (dns.txt_dmarc IS NULL) END)                                     AS dmarc_weak,
-            (w.expires_at < date('now', '+30 days'))                                    AS domain_expiring,
             EXISTS(
                 SELECT 1 FROM ports_info p
                 WHERE p.domain = d.domain
@@ -263,7 +297,6 @@ pub(crate) fn ensure_schema(conn: &rusqlite::Connection) -> Result<()> {
                 - CASE WHEN (CASE WHEN es.domain IS NOT NULL
                                   THEN (COALESCE(es.dmarc_policy,'') = 'none' OR NOT COALESCE(es.dmarc_present, 0))
                                   ELSE (dns.txt_dmarc IS NULL) END)                       THEN  7 ELSE 0 END
-                - CASE WHEN w.expires_at < date('now', '+30 days')                        THEN  5 ELSE 0 END
                 - CASE WHEN EXISTS(
                       SELECT 1 FROM ports_info p
                       WHERE p.domain = d.domain
@@ -309,7 +342,6 @@ pub(crate) fn ensure_schema(conn: &rusqlite::Connection) -> Result<()> {
         LEFT JOIN http_headers  h   ON h.domain   = d.domain
         LEFT JOIN dns_info      dns ON dns.domain  = d.domain
         LEFT JOIN tls_info      t   ON t.domain    = d.domain
-        LEFT JOIN whois_info    w   ON w.domain    = d.domain
         LEFT JOIN email_security es ON es.domain   = d.domain;
     ")?;
 
@@ -331,14 +363,20 @@ pub(crate) fn ensure_schema(conn: &rusqlite::Connection) -> Result<()> {
     conn.execute_batch("
         CREATE VIEW ns_concentration AS
         SELECT
-            ns_operator,
+            operator                                                                       AS ns_operator,
             COUNT(DISTINCT domain)                                                         AS domain_count,
             ROUND(100.0 * COUNT(DISTINCT domain)
                 / (SELECT COUNT(*) FROM domains WHERE status = 'ok'), 2)                  AS pct_of_ch
-        FROM ns_operators
-        GROUP BY ns_operator
+        FROM ns_staging
+        GROUP BY operator
         ORDER BY domain_count DESC;
     ")?;
+
+    // Must run after every view above is (re)defined: SQLite's ALTER TABLE DROP COLUMN
+    // validates all dependent views before dropping a column, so it fails outright if any
+    // view elsewhere in the schema has a stale/broken definition (e.g. one still being fixed
+    // up by an earlier migration in this same function run).
+    migrate_drop_whois(conn)?;
     Ok(())
 }
 
@@ -350,6 +388,23 @@ pub(crate) fn migrate_domains_country_code(conn: &rusqlite::Connection) -> Resul
     ).unwrap_or(false);
     if !has_col {
         conn.execute_batch("ALTER TABLE domains ADD COLUMN country_code TEXT;")?;
+    }
+    Ok(())
+}
+
+/// WHOIS lookups were removed (whois.nic.ch centralizes and rate-limit-blocks bulk
+/// queries, so the data was never reliably populated) — drop the table and the
+/// denormalized domains columns on any pre-existing database.
+pub(crate) fn migrate_drop_whois(conn: &rusqlite::Connection) -> Result<()> {
+    conn.execute_batch("DROP TABLE IF EXISTS whois_info;")?;
+    let has_col: bool = conn.query_row(
+        "SELECT COUNT(*) > 0 FROM pragma_table_info('domains') WHERE name = 'whois_registrar'",
+        [],
+        |r| r.get(0),
+    ).unwrap_or(false);
+    if has_col {
+        conn.execute_batch("ALTER TABLE domains DROP COLUMN whois_registrar;")?;
+        conn.execute_batch("ALTER TABLE domains DROP COLUMN whois_created;")?;
     }
     Ok(())
 }
@@ -377,6 +432,7 @@ pub(crate) fn migrate_ports_info(conn: &rusqlite::Connection) -> Result<()> {
             scanned_at TEXT,
             PRIMARY KEY (domain, port)
         );
+        CREATE INDEX IF NOT EXISTS idx_ports_info_port ON ports_info(port);
     ")?;
 
     if has_legacy {
@@ -495,6 +551,23 @@ pub(crate) fn ensure_smtp_tls_check_schema(conn: &rusqlite::Connection) -> Resul
     Ok(())
 }
 
+fn migrate_cve_catalog_epss(conn: &rusqlite::Connection) -> Result<()> {
+    let has_epss: bool = conn
+        .query_row(
+            "SELECT COUNT(*) > 0 FROM pragma_table_info('cve_catalog') WHERE name = 'epss_score'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(false);
+    if !has_epss {
+        conn.execute_batch(
+            "ALTER TABLE cve_catalog ADD COLUMN epss_score REAL;
+             ALTER TABLE cve_catalog ADD COLUMN epss_percentile REAL;",
+        )?;
+    }
+    Ok(())
+}
+
 fn migrate_smtp_tls_check(conn: &rusqlite::Connection) -> Result<()> {
     let has_auth: bool = conn
         .query_row(
@@ -525,6 +598,30 @@ pub(crate) fn migrate_ports_targeted_at(conn: &rusqlite::Connection) -> Result<(
     Ok(())
 }
 
+/// tasks/done/task_27_snapshot_export_atomicity.md + task_28_snapshot_coverage_metrics.md:
+/// track whether a snapshot run actually completed (rather than inferring it from row
+/// presence), what failed if it didn't, per-table column lists (so a reader can detect
+/// schema drift without opening every file — task 26), and per-module scan coverage so a
+/// month with a cut-short scan doesn't read as a silent dip in a later trend.
+pub(crate) fn migrate_snapshot_runs_status_coverage(conn: &rusqlite::Connection) -> Result<()> {
+    let has_col: bool = conn.query_row(
+        "SELECT COUNT(*) > 0 FROM pragma_table_info('snapshot_runs') WHERE name = 'status'",
+        [],
+        |r| r.get(0),
+    ).unwrap_or(false);
+    if !has_col {
+        conn.execute_batch(
+            "
+            ALTER TABLE snapshot_runs ADD COLUMN status TEXT;        -- 'running' | 'ok' | 'failed'
+            ALTER TABLE snapshot_runs ADD COLUMN error TEXT;         -- error message when status='failed'
+            ALTER TABLE snapshot_runs ADD COLUMN columns_json TEXT;  -- JSON object {table: [col, ...]}
+            ALTER TABLE snapshot_runs ADD COLUMN coverage_json TEXT; -- JSON object {module: {...}} (task 28)
+            ",
+        )?;
+    }
+    Ok(())
+}
+
 pub(crate) fn ensure_domain_exists(db: &PathBuf, domain: &str) -> Result<String> {
     let domain = sanitize_domain(domain).ok_or_else(|| anyhow!("invalid domain: {domain}"))?;
     let conn = crate::shared::open_db(db).with_context(|| format!("open db {:?}", db))?;
@@ -548,8 +645,11 @@ pub(crate) fn cmd_init(args: InitArgs) -> Result<()> {
 
     let existing: i64 = conn.query_row("SELECT COUNT(*) FROM domains", [], |r| r.get(0))?;
     if existing > 0 {
-        eprintln!("init: table already has {existing} rows, skipping load.");
-        return Ok(());
+        eprintln!(
+            "init: table already has {existing} rows — loading any new domains from {:?} \
+             (existing rows are left untouched, INSERT OR IGNORE)",
+            args.input
+        );
     }
 
     let file =
@@ -557,7 +657,8 @@ pub(crate) fn cmd_init(args: InitArgs) -> Result<()> {
     let reader = std::io::BufReader::new(file);
 
     use std::io::BufRead;
-    let mut count: u64 = 0;
+    let mut seen: u64 = 0;
+    let mut inserted: u64 = 0;
     let mut buf: Vec<String> = Vec::with_capacity(100_000);
 
     for line in reader.lines() {
@@ -565,30 +666,32 @@ pub(crate) fn cmd_init(args: InitArgs) -> Result<()> {
         if let Some(domain) = sanitize_domain(&line) {
             buf.push(domain);
             if buf.len() >= 100_000 {
-                flush_domain_init_batch(&conn, &buf)?;
-                count += buf.len() as u64;
-                eprintln!("init: {count} domains loaded...");
+                inserted += flush_domain_init_batch(&conn, &buf)?;
+                seen += buf.len() as u64;
+                eprintln!("init: {seen} domains processed ({inserted} new)...");
                 buf.clear();
             }
         }
     }
     if !buf.is_empty() {
-        flush_domain_init_batch(&conn, &buf)?;
-        count += buf.len() as u64;
+        inserted += flush_domain_init_batch(&conn, &buf)?;
+        seen += buf.len() as u64;
     }
 
-    eprintln!("init: done - {count} domains inserted.");
+    eprintln!("init: done - {inserted} new domain(s) inserted ({seen} processed).");
     Ok(())
 }
 
-fn flush_domain_init_batch(conn: &rusqlite::Connection, domains: &[String]) -> Result<()> {
+/// Returns the number of rows actually inserted (0 for domains already present).
+fn flush_domain_init_batch(conn: &rusqlite::Connection, domains: &[String]) -> Result<u64> {
     conn.execute_batch("BEGIN")?;
+    let mut inserted = 0u64;
     {
         let mut stmt = conn.prepare("INSERT OR IGNORE INTO domains (domain) VALUES (?1)")?;
         for domain in domains {
-            stmt.execute(rusqlite::params![domain.as_str()])?;
+            inserted += stmt.execute(rusqlite::params![domain.as_str()])? as u64;
         }
     }
     conn.execute_batch("COMMIT")?;
-    Ok(())
+    Ok(inserted)
 }

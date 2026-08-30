@@ -1,6 +1,6 @@
 # Database Schema
 
-`helvetiscan` writes into twelve SQLite tables and exposes one computed view.
+`helvetiscan` writes into eleven SQLite tables and exposes one computed view.
 
 ## ER Diagram
 
@@ -18,8 +18,6 @@ erDiagram
         VARCHAR   ip
         VARCHAR   server
         VARCHAR   powered_by
-        VARCHAR   whois_registrar
-        DATE      whois_created
         VARCHAR[] redirect_chain
         VARCHAR   cms
         INTEGER   sovereignty_score
@@ -96,16 +94,6 @@ erDiagram
         VARCHAR   permissions_policy
         TIMESTAMP scanned_at
     }
-    whois_info {
-        VARCHAR   domain PK
-        VARCHAR   registrar
-        DATE      whois_created
-        DATE      expires_at
-        VARCHAR   status
-        BOOLEAN   dnssec_delegated
-        TIMESTAMP queried_at
-    }
-
     cve_catalog {
         VARCHAR   cve_id PK
         VARCHAR   technology
@@ -116,6 +104,15 @@ erDiagram
         BOOLEAN   in_kev
         VARCHAR   summary
         DATE      published_at
+        DOUBLE    epss_score
+        DOUBLE    epss_percentile
+    }
+    software_detections {
+        VARCHAR   domain PK
+        VARCHAR   kind PK
+        VARCHAR   name PK
+        VARCHAR   version
+        TIMESTAMP detected_at
     }
     cve_matches {
         VARCHAR   domain PK
@@ -171,8 +168,8 @@ erDiagram
     domains ||--o{ ports_info             : "domain"
     domains ||--o{ subdomains             : "domain"
     domains ||--o| http_headers           : "domain"
-    domains ||--o| whois_info             : "domain"
     domains ||--o{ cve_matches            : "domain"
+    domains ||--o{ software_detections    : "domain"
     domains ||--o| email_security         : "domain"
     domains ||--o| domain_classification  : "domain"
     domain_classification ||--o{ sector_benchmarks : "sector"
@@ -199,8 +196,6 @@ Populated by `helvetiscan scan`. One row per input domain.
 | `ip` | VARCHAR | Resolved IP used for the request |
 | `server` | VARCHAR | `Server:` response header |
 | `powered_by` | VARCHAR | `X-Powered-By:` response header |
-| `whois_registrar` | VARCHAR | Registrar name (denormalised from `whois_info`) |
-| `whois_created` | DATE | First registration date (denormalised from `whois_info`) |
 | `redirect_chain` | VARCHAR[] | Starting URL(s) when a redirect occurred |
 | `cms` | VARCHAR | Detected CMS (WordPress, Drupal, Joomla, TYPO3, Wix) |
 | `sovereignty_score` | INTEGER | DNS sovereignty tier: 0=CH, 1=EU, 2=non-EU foreign, 3=US |
@@ -304,20 +299,6 @@ Populated by `helvetiscan scan` — extracted from the same HTTP response, zero 
 | `permissions_policy` | VARCHAR | `Permissions-Policy` header value |
 | `scanned_at` | TIMESTAMP | |
 
-### `whois_info`
-
-Populated by `helvetiscan whois`. TCP query to `whois.nic.ch:43`.
-
-| Column | Type | Notes |
-|---|---|---|
-| `domain` | VARCHAR PK | |
-| `registrar` | VARCHAR | Registrar name |
-| `whois_created` | DATE | First registration date |
-| `expires_at` | DATE | Expiration date — compute days live: `expires_at - CURRENT_DATE` |
-| `status` | VARCHAR | Domain state, e.g. `Active` |
-| `dnssec_delegated` | BOOLEAN | True if `DNSSEC: signed delegation` |
-| `queried_at` | TIMESTAMP | |
-
 ### `cve_catalog`
 
 Populated by `helvetiscan update-cves`. Local CVE database seeded from the CISA Known Exploited Vulnerabilities (KEV) feed. One row per CVE entry per technology.
@@ -333,6 +314,26 @@ Populated by `helvetiscan update-cves`. Local CVE database seeded from the CISA 
 | `in_kev` | BOOLEAN | True if listed in CISA KEV catalog |
 | `summary` | VARCHAR | Short description |
 | `published_at` | DATE | NVD publication date |
+| `epss_score` | DOUBLE | FIRST EPSS probability of exploitation in the next 30 days (0–1) |
+| `epss_percentile` | DOUBLE | EPSS percentile rank among all CVEs (0–1) |
+
+Enriched by `helvetiscan update-cves` (seeds + CISA KEV + EPSS scores) and, optionally, by
+`helvetiscan fetch-feeds --nvd --osv --ghsa`, which adds CPE/package version ranges from the
+NVD API, OSV.dev, and the GitHub Advisory Database.
+
+### `software_detections`
+
+Populated by `helvetiscan detect` (also run inside the `full` pipeline before `update-cves`).
+Passive fingerprints of client- and server-side software found in a page's HTML and headers,
+matched against `cve_catalog` by `name = technology`. Composite primary key `(domain, kind, name)`.
+
+| Column | Type | Notes |
+|---|---|---|
+| `domain` | VARCHAR PK | |
+| `kind` | VARCHAR PK | `js_lib`, `framework`, or `wp_plugin` |
+| `name` | VARCHAR PK | e.g. `jquery`, `laravel`, `contact-form-7` |
+| `version` | VARCHAR | Detected version, when present in the asset URL |
+| `detected_at` | TIMESTAMP | Time of detection |
 
 ### `cve_matches`
 
@@ -356,6 +357,35 @@ SELECT domain, technology, version, cve_id, cvss_score
 FROM cve_matches
 WHERE in_kev = true AND severity = 'CRITICAL'
 ORDER BY cvss_score DESC;
+```
+
+### `cve_verifications`
+
+Populated by `helvetiscan verify-cves` (or as part of the `full` pipeline after `update-cves`). Probes each
+domain-CVE match from `cve_matches` to confirm whether the vulnerability is actually reachable. Port-banner
+services get a protocol-level probe; HTTP-detected software (web servers, CMSes, plugins) gets a real HTTP(S)
+request and is **never** confirmed from a bare port-80 probe. Where a live version can be read it is re-checked
+against the CVE's affected range, so a probe can *refute* a stale match. One probe runs per `(domain, technology)`
+and is evaluated against every CVE in that group. Re-verification is time-based (`--max-age-days`, default 30;
+`--retry` forces a re-probe). Intrusive active checks (ProFTPD mod_copy, vsftpd backdoor trigger) run only under
+`--aggressive` and are off in the `full` pipeline.
+
+| Column | Type | Notes |
+|---|---|---|
+| `domain` | VARCHAR PK | |
+| `cve_id` | VARCHAR PK | |
+| `verified` | INTEGER | `0` = unchecked (schema default), `1` = confirmed (version matches affected range or presence confirmed), `2` = refuted (reachable but wrong service/out of range), `3` = unreachable, `4` = exploited (active PoC demonstrated vulnerable behavior — e.g. Docker API access, triggered backdoor, mod_copy CPFR/CPTO, etc.) |
+| `checked_at` | TIMESTAMP | Time of the last probe |
+| `check_method` | VARCHAR | Probe type, e.g. `http_server_header`, `http_body_fingerprint`, `docker_api_probe`, `redis_info`, `mysql_handshake`, `ssh_banner`, `pg_ssl_request`, `vnc_banner`, `proftpd_site_cpfr`, `vsftpd_backdoor`, `rdp_probe`, `tcp_probe` |
+| `proof` | VARCHAR | Evidence text returned by the probe (banner, response, version verdict, or error) |
+
+```sql
+-- Domains with confirmed (verified) critical CVEs
+SELECT v.domain, v.cve_id, c.cvss_score, v.proof
+FROM cve_verifications v
+JOIN cve_catalog c ON c.cve_id = v.cve_id
+WHERE v.verified = 1 AND c.severity = 'CRITICAL'
+ORDER BY c.cvss_score DESC;
 ```
 
 ### `email_security`
@@ -451,7 +481,6 @@ SELECT * FROM risk_score LIMIT 10;
 | `cert_expired` | BOOLEAN | Certificate past `valid_to` |
 | `cert_expiring` | BOOLEAN | `days_remaining` between 0 and 29 |
 | `no_dnssec` | BOOLEAN | No DNSKEY/DS records |
-| `domain_expiring` | BOOLEAN | Domain expires within 30 days |
 | `exposed_db_port` | BOOLEAN | Open port in (3306, 5432, 6379, 9200, 27017, 11211) |
 | `exposed_risky_port` | BOOLEAN | Open port in (445, 23, 3389, 5900) |
 | `exposed_ftp` | BOOLEAN | Port 21 open — plaintext file transfer reachable from internet |
@@ -464,7 +493,7 @@ SELECT * FROM risk_score LIMIT 10;
 | `sovereignty_penalty` | INTEGER | Score deduction from sovereignty tier (0, −1, −3, or −5) |
 | `score` | INTEGER | 0–100; starts at 100, deducted per flag |
 
-Score deductions: missing_hsts −10, missing_csp −10, missing_caa −8, weak_tls −10, cert_expired −20, cert_expiring −15, no_dnssec −5, no_dmarc −7, domain_expiring −5, exposed_db_port −10, exposed_risky_port −10, exposed_ftp −10, exposed_docker_api −10, has_critical_cve −15, spf_permissive −7, dmarc_weak −7 (replaces no_dmarc when email_security exists), no_dkim −5, sovereignty EU −1 / non-EU −3 / US −5.
+Score deductions: missing_hsts −10, missing_csp −10, missing_caa −8, weak_tls −10, cert_expired −20, cert_expiring −15, no_dnssec −5, no_dmarc −7, exposed_db_port −10, exposed_risky_port −10, exposed_ftp −10, exposed_docker_api −10, has_critical_cve −15, spf_permissive −7, dmarc_weak −7 (replaces no_dmarc when email_security exists), no_dkim −5, sovereignty EU −1 / non-EU −3 / US −5.
 
 
 ## `domain_percentile` View
@@ -495,11 +524,11 @@ SELECT * FROM ns_concentration LIMIT 20;
 
 | Column | Type | Notes |
 |---|---|---|
-| `ns_operator` | TEXT | Operator name (from `ns_operators`) |
+| `ns_operator` | TEXT | Operator name (from `ns_staging.operator`) |
 | `domain_count` | INTEGER | Number of distinct domains using this operator |
 | `pct_of_ch` | REAL | Percentage of all successfully scanned domains |
 
-Requires the `ns_operators` table to be populated via the `sovereignty` command. Useful for DNS concentration and hub resilience analysis — e.g., which single provider failure would affect the most .ch domains.
+Requires the `ns_staging` table to be populated via the `sovereignty` command. Useful for DNS concentration and hub resilience analysis — e.g., which single provider failure would affect the most .ch domains.
 
 ```sql
 -- Domains where a single NS operator controls >10% of .ch
@@ -545,6 +574,39 @@ SELECT jurisdiction, COUNT(DISTINCT ns.domain) AS domains,
 FROM ns_staging ns
 JOIN ns_operators o ON ns.operator = o.operator
 GROUP BY jurisdiction ORDER BY domains DESC;
+```
+
+## Snapshots
+
+### `snapshot_runs`
+
+Populated by `helvetiscan snapshot`. One row per calendar month, tracking a monthly export of
+the tables below to hive-partitioned Parquet (`data/snapshots/month=YYYY-MM/*.parquet`) for
+trend analysis outside SQLite — see `scripts/snapshot_trend.py` and
+tasks/done/task_23_monthly_snapshots.md. Not domain-keyed, so it has no FK relationship to the
+rest of the schema; omitted from the ER diagram below for that reason.
+
+| Column | Type | Notes |
+|---|---|---|
+| `snapshot_month` | VARCHAR PK | `'YYYY-MM'` |
+| `started_at` | TIMESTAMP | |
+| `finished_at` | TIMESTAMP | NULL while `status = 'running'` |
+| `output_dir` | VARCHAR | `data/snapshots/month=YYYY-MM` |
+| `status` | VARCHAR | `running` \| `ok` \| `failed` — a snapshot is exported to a sibling temp dir and atomically renamed into place, so a reader never sees a partial month; this column is the DB-side record of whether that succeeded |
+| `error` | VARCHAR | Error message when `status = 'failed'` |
+| `tables_json` | VARCHAR | JSON array of table/view names exported |
+| `row_counts_json` | VARCHAR | JSON object `{table: row_count}` |
+| `columns_json` | VARCHAR | JSON object `{table: [col, ...]}` — lets a reader detect schema drift across months without opening every file |
+| `coverage_json` | VARCHAR | JSON object `{module: {scanned, total, coverage_pct, errors, freshest_at, stalest_at}}` — per-module scan coverage at snapshot time (`--min-coverage <pct>` can refuse the run below a threshold) |
+
+Each month's directory also carries a self-contained `manifest.json` (table list, row counts,
+columns, per-file SHA-256 checksum, tool version, and this same coverage block) — a mirror of
+this row's data readable without opening SQLite at all. `helvetiscan snapshot --verify --month
+YYYY-MM` recomputes each file's checksum against it.
+
+```sql
+-- Snapshot history
+SELECT snapshot_month, status, started_at, finished_at FROM snapshot_runs ORDER BY snapshot_month;
 ```
 
 ## Error Kinds

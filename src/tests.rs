@@ -7,7 +7,7 @@ use clap::Parser;
 
 use crate::schema::{ensure_schema, cmd_init, migrate_domains_country_code};
 use crate::shared::{
-    dedupe_sorted, sanitize_domain, Row, HttpHeadersRow, WhoisRow, ScanStatus,
+    dedupe_sorted, sanitize_domain, Row, HttpHeadersRow, ScanStatus,
 };
 use crate::http_scan::{
     flush_batch, flush_http_headers_batch, detect_cms,
@@ -18,7 +18,6 @@ use crate::email_security::{parse_spf, parse_dmarc};
 use crate::classify::classify_by_keywords;
 use crate::tls_scan::cmd_tls;
 use crate::ports_scan::{grab_banner, grab_mysql_banner, grab_memcached_banner, grab_redis_banner, cmd_ports};
-use crate::whois::parse_whois_response;
 use crate::{InitArgs, ScanArgs, DnsArgs, TlsArgs, PortsArgs};
 
 #[test]
@@ -535,60 +534,6 @@ fn flush_http_headers_roundtrip() {
         .query_row("SELECT hsts FROM http_headers WHERE domain='test.ch'", [], |r| r.get(0))
         .unwrap();
     assert!(hsts_after.is_none(), "ON CONFLICT UPDATE should have overwritten hsts with NULL");
-}
-
-// ---- parse_whois_response ----
-
-fn make_whois_lines(text: &str) -> Vec<String> {
-    text.lines().map(|l| l.to_string()).collect()
-}
-
-#[test]
-fn parses_registrar() {
-    let lines = make_whois_lines("Registrar: Switch\nFirst Registration Date: 2001-01-01\n");
-    let mut row = WhoisRow { domain: "x.ch".into(), registrar: None, whois_created: None, expires_at: None, status: None, dnssec_delegated: None, connected: false };
-    parse_whois_response(&mut row, &lines);
-    assert_eq!(row.registrar, Some("Switch".into()));
-}
-
-#[test]
-fn parses_registered_date() {
-    let lines = make_whois_lines("First Registration Date: 2001-01-01\n");
-    let mut row = WhoisRow { domain: "x.ch".into(), registrar: None, whois_created: None, expires_at: None, status: None, dnssec_delegated: None, connected: false };
-    parse_whois_response(&mut row, &lines);
-    assert_eq!(row.whois_created, Some(chrono::NaiveDate::from_ymd_opt(2001, 1, 1).unwrap()));
-}
-
-#[test]
-fn parses_expiration_date() {
-    let lines = make_whois_lines("Expiration Date: 2030-06-15\n");
-    let mut row = WhoisRow { domain: "x.ch".into(), registrar: None, whois_created: None, expires_at: None, status: None, dnssec_delegated: None, connected: false };
-    parse_whois_response(&mut row, &lines);
-    assert_eq!(row.expires_at, Some(chrono::NaiveDate::from_ymd_opt(2030, 6, 15).unwrap()));
-}
-
-#[test]
-fn parses_state() {
-    let lines = make_whois_lines("State: active\n");
-    let mut row = WhoisRow { domain: "x.ch".into(), registrar: None, whois_created: None, expires_at: None, status: None, dnssec_delegated: None, connected: false };
-    parse_whois_response(&mut row, &lines);
-    assert_eq!(row.status, Some("active".into()));
-}
-
-#[test]
-fn dnssec_signed_delegation() {
-    let lines = make_whois_lines("DNSSEC: Signed Delegation\n");
-    let mut row = WhoisRow { domain: "x.ch".into(), registrar: None, whois_created: None, expires_at: None, status: None, dnssec_delegated: None, connected: false };
-    parse_whois_response(&mut row, &lines);
-    assert_eq!(row.dnssec_delegated, Some(true));
-}
-
-#[test]
-fn dnssec_unsigned() {
-    let lines = make_whois_lines("DNSSEC: unsigned delegation\n");
-    let mut row = WhoisRow { domain: "x.ch".into(), registrar: None, whois_created: None, expires_at: None, status: None, dnssec_delegated: None, connected: false };
-    parse_whois_response(&mut row, &lines);
-    assert_eq!(row.dnssec_delegated, Some(false));
 }
 
 // ---- grab_banner ----
@@ -1121,9 +1066,3 @@ fn test_cli_subdomains_quiet_and_retry() {
     assert_eq!(args.retry_errors.as_deref(), Some("nxdomain"), "--retry-errors should parse");
 }
 
-#[test]
-fn test_cli_whois_quiet_and_retry() {
-    let args = crate::WhoisArgs::parse_from(["whois", "--quiet", "--retry-errors", "throttled"]);
-    assert!(args.quiet, "--quiet should be true");
-    assert_eq!(args.retry_errors.as_deref(), Some("throttled"), "--retry-errors should parse");
-}
