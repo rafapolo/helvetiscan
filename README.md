@@ -49,8 +49,9 @@ Options:
 `helvetiscan snapshot` freezes the current state of the ten highest-signal tables (plus the
 `risk_score` view) to hive-partitioned Parquet, so CVE matches, detected technologies, and
 overall scan posture can be tracked over time — outside SQLite, with Polars — without the DB
-growing without bound. See `docs/SCHEMA.md#snapshots` for what's recorded and
-`tasks/done/task_23_monthly_snapshots.md` for the design rationale.
+growing without bound. See `docs/SNAPSHOTS.md` for the full design/workflow writeup,
+`docs/SCHEMA.md#snapshots` for what's recorded, and `tasks/done/task_23_monthly_snapshots.md`
+for the original design rationale.
 
 Run once a month via cron/launchd (no in-binary scheduler); `scripts/monthly.sh` wraps the full
 scan + snapshot chain and is the intended cron target:

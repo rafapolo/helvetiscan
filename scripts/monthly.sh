@@ -16,6 +16,7 @@ BIN=./target/release/helvetiscan
 DB=data/domains.db
 DOMAINS_LIST="${DOMAINS_LIST:-data/sorted_domains.txt}"
 OUTPUT_DIR=data/snapshots
+PARALLEL_DIVISOR="${PARALLEL_DIVISOR:-3}"
 STAMP=$(date +%Y-%m)
 LOG_DIR=logs
 BENCH_LOG="$LOG_DIR/benchmark-$STAMP.log"
@@ -35,7 +36,7 @@ stage() {
 }
 
 stage init        "$BIN" init --input "$DOMAINS_LIST" --db "$DB"
-stage full         "$BIN" full --db "$DB"
+stage full         "$BIN" full --db "$DB" --parallel-divisor "$PARALLEL_DIVISOR"
 stage fetch-feeds "$BIN" fetch-feeds --all --db "$DB"
 stage snapshot     "$BIN" snapshot --db "$DB" --month "$STAMP" --output-dir "$OUTPUT_DIR"
 
