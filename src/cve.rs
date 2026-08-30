@@ -38,6 +38,8 @@ const SEED_CVES: &[(&str, &str, &str, f64, &str, &str, &str)] = &[
     ("wordpress", "CVE-2022-21661", "HIGH", 8.8, "5.6", "5.8.3", "WordPress SQL injection via WP_Query"),
     ("wordpress", "CVE-2021-44223", "CRITICAL", 9.8, "0", "5.8", "WordPress Gutenberg plugin arbitrary file upload"),
     ("wordpress", "CVE-2019-17671", "HIGH", 7.5, "0", "5.2.3", "WordPress unauthenticated view of private posts"),
+    ("wordpress", "CVE-2026-60137", "HIGH", 8.8, "6.8.0", "7.0.1", "WordPress WP2Shell facilitated SQL injection via author__not_in in WP_Query — combined with batch-route confusion leads to RCE"),
+    ("wordpress", "CVE-2026-63030", "CRITICAL", 9.8, "6.9.0", "7.0.1", "WordPress WP2Shell REST API batch-route confusion + SQLi leading to pre-auth RCE — actively exploited in the wild"),
     // Drupal
     ("drupal", "CVE-2018-7600", "CRITICAL", 9.8, "7.0", "8.5.1", "Drupalgeddon2 — remote code execution"),
     ("drupal", "CVE-2018-7602", "CRITICAL", 9.8, "7.0", "7.59", "Drupalgeddon2 SA-CORE-2018-004 follow-up"),
@@ -141,6 +143,95 @@ const SEED_CVES: &[(&str, &str, &str, f64, &str, &str, &str)] = &[
     ("roundcube", "CVE-2023-5631", "HIGH", 8.8, "0", "1.6.3", "Roundcube stored XSS via HTML-formatted email (KEV)"),
     ("roundcube", "CVE-2023-43770", "MEDIUM", 6.1, "0", "1.4.14", "Roundcube XSS via plaintext email linkreference"),
     ("roundcube", "CVE-2024-37383", "MEDIUM", 6.1, "0", "1.5.7", "Roundcube XSS via SVG animate attributes in HTML email"),
+    // MongoDB (port 27017 — presence/exposure based, no readable version)
+    ("mongodb", "CVE-2019-2386", "MEDIUM", 5.9, "0", "4.0.9", "MongoDB user session not invalidated after user deletion"),
+    ("mongodb", "CVE-2021-20329", "MEDIUM", 6.5, "0", "3.6.13", "MongoDB BSON type confusion allowing injection"),
+    ("mongodb", "CVE-2020-7921", "MEDIUM", 5.3, "0", "4.4.0", "MongoDB improper serialization of authorization info"),
+    // PostgreSQL (port 5432)
+    ("postgresql", "CVE-2019-9193", "HIGH", 8.8, "9.3", "11.2", "PostgreSQL COPY TO/FROM PROGRAM arbitrary command execution"),
+    ("postgresql", "CVE-2018-1058", "HIGH", 8.8, "0", "10.2", "PostgreSQL search_path schema hijacking"),
+    ("postgresql", "CVE-2021-23214", "HIGH", 8.1, "0", "13.5", "PostgreSQL processes unencrypted bytes from man-in-the-middle"),
+    // VNC / RFB (port 5900 — presence based)
+    ("vnc", "CVE-2018-7225", "CRITICAL", 9.8, "0", "999", "LibVNCServer rfbProcessClientNormalMessage out-of-bounds access"),
+    ("vnc", "CVE-2019-15681", "HIGH", 7.5, "0", "999", "LibVNC server memory leak information disclosure"),
+    ("vnc", "CVE-2019-8287", "HIGH", 8.8, "0", "999", "TightVNC heap buffer overflow in HandleCoRREBBP"),
+    // JavaScript libraries (detected from page assets, versioned)
+    ("jquery", "CVE-2020-11022", "MEDIUM", 6.1, "1.2", "3.5.0", "jQuery cross-site scripting via HTML from untrusted sources"),
+    ("jquery", "CVE-2019-11358", "MEDIUM", 6.1, "0", "3.4.0", "jQuery prototype pollution via jQuery.extend"),
+    ("jquery", "CVE-2015-9251", "MEDIUM", 6.1, "0", "3.0.0", "jQuery cross-site scripting via cross-domain ajax"),
+    ("bootstrap", "CVE-2019-8331", "MEDIUM", 6.1, "0", "3.4.1", "Bootstrap XSS in tooltip/popover data-template"),
+    ("bootstrap", "CVE-2018-14041", "MEDIUM", 6.1, "4.0.0", "4.1.2", "Bootstrap XSS in data-target property of scrollspy"),
+    ("angular", "CVE-2020-7676", "MEDIUM", 6.1, "0", "1.8.0", "AngularJS XSS via SVG usage in ng-bind-html"),
+    ("angular", "CVE-2019-10768", "HIGH", 7.5, "0", "1.7.9", "AngularJS prototype pollution in merge"),
+    ("lodash", "CVE-2019-10744", "CRITICAL", 9.1, "0", "4.17.12", "Lodash prototype pollution via defaultsDeep"),
+    ("lodash", "CVE-2021-23337", "HIGH", 7.2, "0", "4.17.21", "Lodash command injection via template"),
+    ("moment", "CVE-2022-31129", "HIGH", 7.5, "0", "2.29.4", "Moment.js ReDoS in string-to-date parsing"),
+    // Web frameworks (detected from headers/cookies, presence based)
+    ("laravel", "CVE-2021-3129", "CRITICAL", 9.8, "0", "8.4.2", "Laravel Ignition debug-mode remote code execution"),
+    ("express", "CVE-2024-29041", "MEDIUM", 6.1, "0", "4.19.1", "Express open redirect via malformed URLs in response.location"),
+    // WordPress plugins (detected from /wp-content/plugins/<slug>/)
+    ("contact-form-7", "CVE-2020-35489", "CRITICAL", 9.8, "0", "5.3.1", "Contact Form 7 unrestricted file upload"),
+    ("elementor", "CVE-2022-1329", "HIGH", 8.8, "0", "3.6.3", "Elementor authenticated remote code execution via file upload"),
+    // Apache Struts (detected via response patterns / .action/.do endpoints)
+    ("apache-struts", "CVE-2017-5638", "CRITICAL", 9.8, "0", "2.3.32", "Apache Struts2 RCE via Content-Type header (Equifax breach)"),
+    ("apache-struts", "CVE-2018-11776", "CRITICAL", 9.8, "0", "2.3.34", "Apache Struts2 RCE via namespace/result with no namespace"),
+    ("apache-struts", "CVE-2017-9805", "CRITICAL", 9.8, "0", "2.3.33", "Apache Struts2 REST plugin XStream deserialization RCE"),
+    ("apache-struts", "CVE-2017-9791", "CRITICAL", 9.8, "0", "2.3.32", "Apache Struts2 devMode OGNL injection"),
+    ("apache-struts", "CVE-2013-2251", "CRITICAL", 9.8, "0", "2.3.15", "Apache Struts2 DMI method invocation RCE"),
+    ("apache-struts", "CVE-2012-0394", "HIGH", 8.8, "0", "2.3.8", "Apache Struts2 ParameterInterceptor class loader manipulation"),
+    ("apache-struts", "CVE-2006-1547", "HIGH", 7.5, "0", "1.2.9", "Apache Struts form validation bypass"),
+    ("apache-struts", "CVE-2020-17530", "CRITICAL", 9.8, "0", "2.5.25", "Apache Struts2 forced double OGNL evaluation"),
+    // Apache Log4j (detected via JNDI injection probe or Server header patterns)
+    ("apache-log4j", "CVE-2021-44228", "CRITICAL", 10.0, "2.0", "2.14.1", "Log4Shell — JNDI injection RCE via logged user input (KEV)"),
+    ("apache-log4j", "CVE-2021-45046", "CRITICAL", 10.0, "2.0", "2.16.0", "Log4j2 incomplete fix for CVE-2021-44228 — RCE via thread context map pattern lookup"),
+    // Apache Shiro (detected via rememberMe cookie)
+    ("apache-shiro", "CVE-2016-4437", "CRITICAL", 10.0, "1.2.4", "1.2.5", "Apache Shiro default AES key allows deserialization RCE via rememberMe cookie (KEV)"),
+    // Apache Solr (port 8983 HTTP API)
+    ("apache-solr", "CVE-2019-0193", "CRITICAL", 9.8, "5.0", "5.5.5", "Apache Solr DataImportHandler RCE via custom request parameters"),
+    ("apache-solr", "CVE-2019-17558", "CRITICAL", 9.8, "5.0", "8.3.1", "Apache Solr velocity template injection RCE via params.resource.loader.enabled"),
+    // Apache ActiveMQ (port 8161 admin console)
+    ("apache-activemq", "CVE-2023-46604", "CRITICAL", 10.0, "5.0", "5.18.2", "Apache ActiveMQ RCE via ClassInfo in OpenWire protocol (KEV)"),
+    ("apache-activemq", "CVE-2016-3088", "CRITICAL", 10.0, "5.0", "5.13.2", "Apache ActiveMQ file-based message store RCE via web console"),
+    ("apache-activemq", "CVE-2026-34197", "CRITICAL", 9.8, "0", "6.1.6", "Apache ActiveMQ unauthorized Jolokia endpoint access leading to RCE"),
+    // Apache RocketMQ
+    ("apache-rocketmq", "CVE-2023-33246", "CRITICAL", 9.8, "0", "5.1.1", "Apache RocketMQ remote command execution via broker configuration update"),
+    // Apache Spark
+    ("apache-spark", "CVE-2022-33891", "CRITICAL", 9.8, "0", "3.2.1", "Apache Spark shell command injection via Spark-Submit UI"),
+    // Apache Flink
+    ("apache-flink", "CVE-2020-17519", "CRITICAL", 9.8, "0", "1.12.0", "Apache Flink SQL client OS command injection via JAR upload"),
+    // Apache Superset
+    ("apache-superset", "CVE-2023-27524", "CRITICAL", 9.8, "0", "2.0.0", "Apache Superset default SECRET_KEY allows admin session takeover"),
+    // Apache OfBiz
+    ("apache-ofbiz", "CVE-2024-32113", "CRITICAL", 9.8, "0", "18.12.14", "Apache OFBiz pre-auth RCE via deserialization vulnerability"),
+    ("apache-ofbiz", "CVE-2024-38856", "CRITICAL", 9.8, "0", "18.12.15", "Apache OFBiz view-entity SQL injection leading to RCE"),
+    ("apache-ofbiz", "CVE-2024-45195", "CRITICAL", 9.8, "0", "18.12.16", "Apache OFBiz screen rendering SSRF to RCE"),
+    // Apache CouchDB (port 5984)
+    ("apache-couchdb", "CVE-2022-24706", "CRITICAL", 10.0, "0", "3.2.2", "Apache CouchDB default admin password in setup wizard leading to RCE (KEV)"),
+    // Apache HugeGraph
+    ("apache-hugegraph", "CVE-2024-27348", "CRITICAL", 9.8, "0", "1.3.0", "Apache HugeGraph Groovy script injection RCE via Gremlin API"),
+    // Apache Kylin
+    ("apache-kylin", "CVE-2020-1956", "CRITICAL", 9.8, "0", "3.0.1", "Apache Kylin command injection via diagnostic API"),
+    // Apache Airflow
+    ("apache-airflow", "CVE-2020-11978", "CRITICAL", 9.8, "0", "1.10.10", "Apache Airflow command injection via example DAGs"),
+    ("apache-airflow", "CVE-2020-13927", "CRITICAL", 9.8, "0", "1.10.10", "Apache Airflow unauthenticated REST API allowing remote command execution"),
+    // Apache APISIX
+    ("apache-apisix", "CVE-2022-24112", "CRITICAL", 9.8, "0", "2.13.0", "Apache APISIX batch-requests plugin RCE via SSRF"),
+    // Magento additional CVEs
+    ("magento", "CVE-2024-34102", "CRITICAL", 9.8, "2.4.0", "2.4.6", "Magento/Adobe Commerce XML external entity injection leading to RCE"),
+    // Roundcube additional CVEs
+    ("roundcube", "CVE-2024-42009", "CRITICAL", 9.8, "0", "1.6.9", "Roundcube XSS via crafted HTML email leading to session hijack"),
+    ("roundcube", "CVE-2025-49113", "CRITICAL", 9.8, "0", "1.6.11", "Roundcube server-side template injection via email body rendering"),
+    // Drupal additional
+    ("drupal", "CVE-2026-9082", "CRITICAL", 9.8, "0", "999", "Drupal SQL injection via filter module leading to privilege escalation"),
+    ("drupal", "CVE-2020-13671", "CRITICAL", 9.8, "0", "9.0.15", "Drupal sanitization bypass allowing file extension exploitation"),
+    // Joomla additional
+    ("joomla", "CVE-2026-48907", "CRITICAL", 9.8, "0", "6.0.0", "Joomla Widget Factory plugin access control bypass"),
+    ("joomla", "CVE-2026-56290", "CRITICAL", 9.8, "0", "6.0.0", "Joomla Page Builder access control bypass"),
+    // Litespeed additional
+    ("litespeed", "CVE-2026-48172", "CRITICAL", 9.8, "0", "6.6", "LiteSpeed Web Server path traversal RCE via .htaccess bypass"),
+    ("litespeed", "CVE-2026-54420", "CRITICAL", 9.8, "0", "6.7", "LiteSpeed Web Server HTTP request smuggling leading to RCE"),
+    // WordPress additional
+    ("wordpress", "CVE-2026-41940", "CRITICAL", 9.8, "0", "999", "WebPros cPanel/WHM and WP2 authentication bypass via login flow"),
 ];
 
 // ---- Version helpers ----
@@ -224,7 +315,7 @@ pub(crate) fn extract_version(banner: &str, technology: &str) -> Option<String> 
             if version.is_empty() { None } else { Some(version) }
         }
         "elasticsearch" => {
-            // Banner format: "Elasticsearch 7.13.3"
+            // Banner format: "Elasticsearch 7.13.3" or "Elasticsearch 8.14.0"
             let pos = lower.find("elasticsearch ")?;
             let after = &banner[pos + 14..];
             let ver_start = after.find(|c: char| c.is_ascii_digit())?;
@@ -239,6 +330,39 @@ pub(crate) fn extract_version(banner: &str, technology: &str) -> Option<String> 
             let upper = banner.to_ascii_uppercase();
             let pos = upper.find("VERSION ")?;
             let after = &banner[pos + 8..];
+            let ver_start = after.find(|c: char| c.is_ascii_digit())?;
+            let version: String = after[ver_start..]
+                .chars()
+                .take_while(|c| c.is_ascii_digit() || *c == '.')
+                .collect();
+            if version.is_empty() { None } else { Some(version) }
+        }
+        "solr" => {
+            // Banner format: "Solr/Lucene 9.3.0" or "Solr 9.3.0"
+            let pos = lower.find("solr").or_else(|| lower.find("lucene"))?;
+            let after = &banner[pos..];
+            let ver_start = after.find(|c: char| c.is_ascii_digit())?;
+            let version: String = after[ver_start..]
+                .chars()
+                .take_while(|c| c.is_ascii_digit() || *c == '.')
+                .collect();
+            if version.is_empty() { None } else { Some(version) }
+        }
+        "activemq" => {
+            // Banner format: "ActiveMQ 5.18.2" or "Apache ActiveMQ 5.18.2"
+            let pos = lower.find("activemq")?;
+            let after = &banner[pos + 8..];
+            let ver_start = after.find(|c: char| c.is_ascii_digit())?;
+            let version: String = after[ver_start..]
+                .chars()
+                .take_while(|c| c.is_ascii_digit() || *c == '.')
+                .collect();
+            if version.is_empty() { None } else { Some(version) }
+        }
+        "couchdb" => {
+            // Banner format: "CouchDB 3.2.2"
+            let pos = lower.find("couchdb")?;
+            let after = &banner[pos + 7..];
             let ver_start = after.find(|c: char| c.is_ascii_digit())?;
             let version: String = after[ver_start..]
                 .chars()
@@ -273,9 +397,66 @@ pub(crate) fn extract_version(banner: &str, technology: &str) -> Option<String> 
     }
 }
 
+/// Find the first dotted-numeric version that appears *after* a marker substring
+/// (case-insensitive). Used by both banner and HTTP-header parsers, e.g.
+/// `dotted_version_after("Server: nginx/1.20.1", "nginx/")` -> `Some("1.20.1")`.
+pub(crate) fn dotted_version_after(haystack: &str, marker: &str) -> Option<String> {
+    let hay_lower = haystack.to_ascii_lowercase();
+    let marker_lower = marker.to_ascii_lowercase();
+    let pos = hay_lower.find(&marker_lower)?;
+    let rest = &haystack[pos + marker.len()..];
+    let start = rest.find(|c: char| c.is_ascii_digit())?;
+    let v: String = rest[start..]
+        .chars()
+        .take_while(|c| c.is_ascii_digit() || *c == '.')
+        .collect();
+    // Reject a bare number with no dot when it is obviously not a version (single digit
+    // like "nginx/1" is still valid, so only reject empty).
+    if v.is_empty() { None } else { Some(v.trim_end_matches('.').to_string()) }
+}
+
+/// Extract a version from an HTTP `Server` / `X-Powered-By` header value for a known
+/// technology tag (e.g. "apache" from "Apache/2.4.58 (Ubuntu)").
+pub(crate) fn extract_http_version(header: &str, technology: &str) -> Option<String> {
+    let marker = match technology {
+        "apache" => "apache/",
+        "nginx" => "nginx/",
+        "iis" => "microsoft-iis/",
+        "tomcat" => "tomcat/",
+        "php" => "php/",
+        "litespeed" => "litespeed/",
+        "openssl" => "openssl/",
+        _ => return None,
+    };
+    dotted_version_after(header, marker)
+}
+
+/// Generic fallback version parser: returns the first dotted-numeric token in a banner
+/// (at least `major.minor`). Used when no technology-specific parser applies.
+pub(crate) fn extract_version_generic(banner: &str) -> Option<String> {
+    let bytes: Vec<char> = banner.chars().collect();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i].is_ascii_digit() {
+            let start = i;
+            while i < bytes.len() && (bytes[i].is_ascii_digit() || bytes[i] == '.') {
+                i += 1;
+            }
+            let token: String = bytes[start..i].iter().collect();
+            let token = token.trim_end_matches('.');
+            if token.contains('.') && token.split('.').all(|p| !p.is_empty()) {
+                return Some(token.to_string());
+            }
+        } else {
+            i += 1;
+        }
+    }
+    None
+}
+
 /// Compare dotted-numeric version strings. Ignores non-digit suffixes on each component
 /// (e.g. "9.3p1" treats the "p1" component as "3", "8.5p1" as "8.5").
-fn cmp_version(a: &str, b: &str) -> std::cmp::Ordering {
+pub(crate) fn cmp_version(a: &str, b: &str) -> std::cmp::Ordering {
     let parts = |s: &str| -> Vec<u64> {
         s.split('.')
             .map(|p| {
@@ -302,7 +483,7 @@ fn cmp_version(a: &str, b: &str) -> std::cmp::Ordering {
 /// - Both None → always matches (no range constraint)
 /// - Unparseable version (no digits) → matches (fail open)
 /// - "0" from and "999" to are natural sentinels handled by numeric comparison
-fn version_in_range(version: &str, from: Option<&str>, to: Option<&str>) -> bool {
+pub(crate) fn version_in_range(version: &str, from: Option<&str>, to: Option<&str>) -> bool {
     if from.is_none() && to.is_none() {
         return true;
     }
@@ -464,6 +645,7 @@ pub(crate) async fn cmd_update_cves(db: PathBuf) -> Result<()> {
         Ok(j) => j,
         Err(e) => {
             eprintln!("cve: WARNING — could not fetch CISA KEV feed ({e:#}); using hardcoded entries only");
+            populate_domain_technologies(&conn)?;
             run_cve_matching(&conn)?;
             return Ok(());
         }
@@ -473,7 +655,7 @@ pub(crate) async fn cmd_update_cves(db: PathBuf) -> Result<()> {
         .as_array()
         .context("missing vulnerabilities array")?;
 
-    let relevant_vendors = &["wordpress", "drupal", "joomla", "apache", "nginx", "openssl", "php", "typo3", "craft cms", "tomcat", "litespeed", "mysql", "mariadb", "proftpd", "openssh", "iis", "exchange", "magento", "prestashop", "roundcube", "mssql", "sql server"];
+    let relevant_vendors = &["wordpress", "drupal", "joomla", "apache", "nginx", "openssl", "php", "typo3", "craft cms", "tomcat", "litespeed", "mysql", "mariadb", "proftpd", "openssh", "iis", "exchange", "magento", "prestashop", "roundcube", "mssql", "sql server", "mongodb", "postgresql", "postgres", "vnc"];
 
     let mut inserted = 0usize;
     for entry in vulnerabilities {
@@ -486,6 +668,7 @@ pub(crate) async fn cmd_update_cves(db: PathBuf) -> Result<()> {
         let technology = match technology_base {
             "apache"   => map_apache_product(&product).unwrap_or("apache"),
             "sql server" => "mssql",
+            "postgres" => "postgresql",
             t          => t,
         };
 
@@ -516,13 +699,101 @@ pub(crate) async fn cmd_update_cves(db: PathBuf) -> Result<()> {
 
     eprintln!("cve: inserted/updated {inserted} KEV entries");
 
+    match fetch_and_apply_epss(&conn).await {
+        Ok(n) => eprintln!("cve: applied EPSS scores to {n} catalog entries"),
+        Err(e) => eprintln!("cve: WARNING — could not apply EPSS scores ({e:#})"),
+    }
+
+    populate_domain_technologies(&conn)?;
     let matched = run_cve_matching(&conn)?;
     eprintln!("cve: {matched} domain-CVE matches recorded");
 
     Ok(())
 }
 
-fn seed_hardcoded_cves(conn: &rusqlite::Connection) -> Result<usize> {
+/// Parse the FIRST EPSS CSV. Lines are `cve,epss,percentile`; a leading `#model_version`
+/// comment line and the `cve,epss,percentile` header are skipped. Malformed rows are
+/// ignored. Returns `(cve_id, epss, percentile)` triples.
+pub(crate) fn parse_epss_csv(text: &str) -> Vec<(String, f64, f64)> {
+    let mut out = Vec::new();
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') || line.starts_with("cve,") {
+            continue;
+        }
+        let mut cols = line.split(',');
+        let (Some(cve), Some(epss), Some(pct)) = (cols.next(), cols.next(), cols.next()) else {
+            continue;
+        };
+        if !cve.starts_with("CVE-") {
+            continue;
+        }
+        let (Ok(epss), Ok(pct)) = (epss.trim().parse::<f64>(), pct.trim().parse::<f64>()) else {
+            continue;
+        };
+        out.push((cve.to_string(), epss, pct));
+    }
+    out
+}
+
+/// Fetch the current EPSS score set and write scores onto catalog entries we already know
+/// about. Only existing `cve_catalog` rows are updated — we do not import the full ~250k
+/// EPSS corpus. Returns the number of catalog rows updated.
+async fn fetch_and_apply_epss(conn: &rusqlite::Connection) -> Result<usize> {
+    use std::io::Read;
+
+    let known: std::collections::HashSet<String> = {
+        let mut stmt = conn.prepare("SELECT cve_id FROM cve_catalog")?;
+        let ids: Vec<String> = stmt
+            .query_map([], |r| r.get::<_, String>(0))?
+            .filter_map(|r| r.ok())
+            .collect();
+        ids.into_iter().collect()
+    };
+    if known.is_empty() {
+        return Ok(0);
+    }
+
+    let url = "https://epss.cyentia.com/epss_scores-current.csv.gz";
+    eprintln!("cve: fetching EPSS scores from {url}");
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(60))
+        .build()
+        .context("building EPSS HTTP client")?;
+    let bytes = client.get(url).send().await.context("fetching EPSS feed")?
+        .bytes().await.context("reading EPSS body")?;
+
+    let mut gz = flate2::read::GzDecoder::new(&bytes[..]);
+    let mut text = String::new();
+    gz.read_to_string(&mut text).context("gunzip EPSS csv")?;
+
+    let rows = parse_epss_csv(&text);
+    apply_epss_rows(conn, &rows, &known)
+}
+
+/// Write EPSS scores onto existing catalog rows. Only CVEs present in `known` are touched.
+pub(crate) fn apply_epss_rows(
+    conn: &rusqlite::Connection,
+    rows: &[(String, f64, f64)],
+    known: &std::collections::HashSet<String>,
+) -> Result<usize> {
+    let mut updated = 0usize;
+    let tx = conn.unchecked_transaction()?;
+    {
+        let mut stmt = tx.prepare(
+            "UPDATE cve_catalog SET epss_score = ?1, epss_percentile = ?2 WHERE cve_id = ?3",
+        )?;
+        for (cve, epss, pct) in rows {
+            if known.contains(cve) {
+                updated += stmt.execute(rusqlite::params![epss, pct, cve])?;
+            }
+        }
+    }
+    tx.commit()?;
+    Ok(updated)
+}
+
+pub(crate) fn seed_hardcoded_cves(conn: &rusqlite::Connection) -> Result<usize> {
     let mut count = 0usize;
     for &(technology, cve_id, severity, cvss_score, affected_from, affected_to, summary) in SEED_CVES {
         conn.execute(
@@ -550,99 +821,319 @@ fn seed_hardcoded_cves(conn: &rusqlite::Connection) -> Result<usize> {
     Ok(count)
 }
 
-pub(crate) fn run_cve_matching(conn: &rusqlite::Connection) -> Result<usize> {
-    conn.execute("DELETE FROM cve_matches", [])?;
+/// Register SQLite scalar functions backing the version parsing/comparison logic, so the
+/// filter steps run set-based in the engine instead of as millions of per-row round-trips
+/// from Rust (which, at full scale with version-ranged CVEs, generated a multi-GB WAL).
+fn register_match_functions(conn: &rusqlite::Connection) -> Result<()> {
+    use rusqlite::functions::FunctionFlags;
+    let flags = FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC;
+
+    conn.create_scalar_function("hs_ver_in_range", 3, flags, |ctx| {
+        let version: Option<String> = ctx.get(0)?;
+        let from: Option<String> = ctx.get(1)?;
+        let to: Option<String> = ctx.get(2)?;
+        let ok = match version {
+            Some(v) => version_in_range(&v, from.as_deref(), to.as_deref()),
+            None => true,
+        };
+        Ok(if ok { 1i64 } else { 0i64 })
+    })?;
+
+    conn.create_scalar_function("hs_http_version", 2, flags, |ctx| {
+        let header: Option<String> = ctx.get(0)?;
+        let tech: Option<String> = ctx.get(1)?;
+        let (Some(header), Some(tech)) = (header, tech) else { return Ok(None) };
+        Ok(extract_http_version(&header, &tech).or_else(|| extract_version_generic(&header)))
+    })?;
+
+    conn.create_scalar_function("hs_banner_version", 2, flags, |ctx| {
+        let banner: Option<String> = ctx.get(0)?;
+        let tech: Option<String> = ctx.get(1)?;
+        let (Some(banner), Some(tech)) = (banner, tech) else { return Ok(None) };
+        Ok(extract_version(&banner, &tech))
+    })?;
+    Ok(())
+}
+
+
+/// Populate `domain_technologies` from all available scan data sources.
+/// Replaces the old per-technology LIKE-scan pattern with a single scan that
+/// stores one row per (domain, technology, version). Safe to re-run:
+/// uses INSERT OR REPLACE to update the version/last_seen on re-detection.
+pub(crate) fn populate_domain_technologies(conn: &rusqlite::Connection) -> Result<usize> {
+    conn.execute("DELETE FROM domain_technologies", [])?;
+
+    // 1. HTTP server/powered_by headers (domains table)
     conn.execute_batch(
-        "INSERT INTO cve_matches (domain, technology, version, cve_id, severity, cvss_score, in_kev, published_at)
-         -- CMS / server / powered_by header matching
-         SELECT d.domain, c.technology,
-                -- Extract version from server header: e.g. 'Apache/2.4.58 (FreeBSD)' → '2.4.58'
-                CASE
-                  WHEN lower(coalesce(d.server, '')) LIKE '%' || c.technology || '/%'
-                  THEN (
-                    WITH after_slash(s) AS (
-                      SELECT substr(lower(d.server),
-                               instr(lower(d.server), c.technology || '/') + length(c.technology) + 1)
-                    )
-                    SELECT CASE
-                             WHEN instr(s, ' ') > 0 THEN substr(s, 1, instr(s, ' ') - 1)
-                             ELSE s
-                           END
-                    FROM after_slash
-                  )
-                  ELSE NULL
-                END,
-                c.cve_id, c.severity, c.cvss_score, c.in_kev, c.published_at
-         FROM domains d
-         JOIN cve_catalog c ON lower(coalesce(d.cms, '')) = c.technology
-                            OR lower(coalesce(d.server, '')) LIKE '%' || c.technology || '%'
-                            OR lower(coalesce(d.powered_by, '')) LIKE '%' || c.technology || '%'
-         WHERE d.cms IS NOT NULL OR d.server IS NOT NULL OR d.powered_by IS NOT NULL
-         UNION
-         -- MySQL / MariaDB banner on port 3306
-         SELECT p.domain, c.technology, NULL, c.cve_id, c.severity, c.cvss_score, c.in_kev, c.published_at
-         FROM ports_info p
-         JOIN cve_catalog c ON c.technology = 'mysql'
-         WHERE p.port = 3306 AND lower(coalesce(p.banner, '')) LIKE '%mysql%'
-         UNION
-         -- ProFTPD banner on port 21
-         SELECT p.domain, c.technology, NULL, c.cve_id, c.severity, c.cvss_score, c.in_kev, c.published_at
-         FROM ports_info p
-         JOIN cve_catalog c ON c.technology = 'proftpd'
-         WHERE p.port = 21 AND lower(coalesce(p.banner, '')) LIKE '%proftpd%'
-         UNION
-         -- vsftpd banner on port 21
-         SELECT p.domain, c.technology, NULL, c.cve_id, c.severity, c.cvss_score, c.in_kev, c.published_at
-         FROM ports_info p
-         JOIN cve_catalog c ON c.technology = 'vsftpd'
-         WHERE p.port = 21 AND lower(coalesce(p.banner, '')) LIKE '%vsftpd%'
-         UNION
-         -- OpenSSH banner on port 22
-         SELECT p.domain, c.technology, NULL, c.cve_id, c.severity, c.cvss_score, c.in_kev, c.published_at
-         FROM ports_info p
-         JOIN cve_catalog c ON c.technology = 'openssh'
-         WHERE p.port = 22 AND lower(coalesce(p.banner, '')) LIKE '%openssh%'
-         UNION
-         -- RDP presence-only on port 3389 (no readable banner)
-         SELECT p.domain, c.technology, NULL, c.cve_id, c.severity, c.cvss_score, c.in_kev, c.published_at
-         FROM ports_info p
-         JOIN cve_catalog c ON c.technology = 'rdp'
-         WHERE p.port = 3389
-         UNION
-         -- Redis banner on port 6379
-         SELECT p.domain, c.technology, NULL, c.cve_id, c.severity, c.cvss_score, c.in_kev, c.published_at
-         FROM ports_info p
-         JOIN cve_catalog c ON c.technology = 'redis'
-         WHERE p.port = 6379 AND lower(coalesce(p.banner, '')) LIKE '%redis%'
-         UNION
-         -- Elasticsearch banner on port 9200
-         SELECT p.domain, c.technology, NULL, c.cve_id, c.severity, c.cvss_score, c.in_kev, c.published_at
-         FROM ports_info p
-         JOIN cve_catalog c ON c.technology = 'elasticsearch'
-         WHERE p.port = 9200 AND lower(coalesce(p.banner, '')) LIKE '%elasticsearch%'
-         UNION
-         -- Memcached banner on port 11211
-         SELECT p.domain, c.technology, NULL, c.cve_id, c.severity, c.cvss_score, c.in_kev, c.published_at
-         FROM ports_info p
-         JOIN cve_catalog c ON c.technology = 'memcached'
-         WHERE p.port = 11211 AND lower(coalesce(p.banner, '')) LIKE '%memcached%'
-         UNION
-         -- Docker API presence on port 2375 (unauthenticated socket)
-         SELECT p.domain, c.technology, NULL, c.cve_id, c.severity, c.cvss_score, c.in_kev, c.published_at
-         FROM ports_info p
-         JOIN cve_catalog c ON c.technology = 'docker'
-         WHERE p.port = 2375
-         UNION
-         -- MSSQL banner on port 1433
-         SELECT p.domain, c.technology, NULL, c.cve_id, c.severity, c.cvss_score, c.in_kev, c.published_at
-         FROM ports_info p
-         JOIN cve_catalog c ON c.technology = 'mssql'
-         WHERE p.port = 1433 AND lower(coalesce(p.banner, '')) LIKE '%mssql%'
-         ON CONFLICT (domain, cve_id) DO UPDATE SET matched_at = datetime('now')",
+        "INSERT OR REPLACE INTO domain_technologies (domain, technology, version, source)
+         SELECT domain, 'apache',
+                CASE WHEN lower(coalesce(server, '')) LIKE 'apache/%'
+                     THEN substr(lower(server), instr(lower(server), 'apache/') + 7) END,
+                'http_header'
+         FROM domains WHERE lower(coalesce(server, '')) LIKE '%apache%';
+
+         INSERT OR REPLACE INTO domain_technologies (domain, technology, version, source)
+         SELECT domain, 'nginx',
+                CASE WHEN lower(coalesce(server, '')) LIKE 'nginx/%'
+                     THEN substr(lower(server), instr(lower(server), 'nginx/') + 6) END,
+                'http_header'
+         FROM domains WHERE lower(coalesce(server, '')) LIKE '%nginx%';
+
+         INSERT OR REPLACE INTO domain_technologies (domain, technology, version, source)
+         SELECT domain, 'tomcat', NULL, 'http_header'
+         FROM domains WHERE lower(coalesce(server, '')) LIKE '%coyote%' OR lower(coalesce(server, '')) LIKE '%tomcat%';
+
+         INSERT OR REPLACE INTO domain_technologies (domain, technology, version, source)
+         SELECT domain, 'iis',
+                CASE WHEN lower(coalesce(server, '')) LIKE 'microsoft-iis/%'
+                     THEN substr(lower(server), instr(lower(server), 'microsoft-iis/') + 14) END,
+                'http_header'
+         FROM domains WHERE lower(coalesce(server, '')) LIKE '%microsoft-iis%';
+
+         INSERT OR REPLACE INTO domain_technologies (domain, technology, version, source)
+         SELECT domain, 'litespeed',
+                CASE WHEN lower(coalesce(server, '')) LIKE 'litespeed/%'
+                     THEN substr(lower(server), instr(lower(server), 'litespeed/') + 10) END,
+                'http_header'
+         FROM domains WHERE lower(coalesce(server, '')) LIKE '%litespeed%';
+
+         INSERT OR REPLACE INTO domain_technologies (domain, technology, version, source)
+         SELECT domain, 'php',
+                CASE WHEN lower(coalesce(powered_by, '')) LIKE 'php/%'
+                     THEN substr(lower(powered_by), instr(lower(powered_by), 'php/') + 4)
+                     WHEN lower(coalesce(server, '')) LIKE 'apache/%' THEN NULL END,
+                'http_header'
+         FROM domains WHERE lower(coalesce(powered_by, '')) LIKE '%php%';
+
+         INSERT OR REPLACE INTO domain_technologies (domain, technology, version, source)
+         SELECT domain, 'openssl',
+                CASE WHEN lower(coalesce(server, '')) LIKE 'apache/%'
+                     THEN NULL
+                     WHEN lower(coalesce(server, '')) LIKE 'nginx/%'
+                     THEN NULL END,
+                'http_header'
+         FROM domains WHERE lower(coalesce(server, '')) LIKE 'apache%' OR lower(coalesce(server, '')) LIKE 'nginx%';")?;
+
+    // 2. CMS detections from domains.cms column
+    let cms_techs = ["wordpress", "drupal", "joomla", "typo3", "exchange",
+                      "magento", "prestashop", "roundcube", "craft cms", "laravel"];
+    for tech in &cms_techs {
+        let sql = format!(
+            "INSERT OR REPLACE INTO domain_technologies (domain, technology, version, source)
+             SELECT domain, '{tech}', NULL, 'cms_tag'
+             FROM domains WHERE lower(coalesce(cms, '')) = '{tech}'",
+            tech = tech
+        );
+        conn.execute_batch(&sql)?;
+    }
+
+    // 3. Port banners
+    conn.execute_batch(
+        "INSERT OR REPLACE INTO domain_technologies (domain, technology, version, source)
+         SELECT p.domain, 'mysql', NULL, 'port_banner'
+         FROM ports_info p WHERE lower(coalesce(p.banner, '')) LIKE '%mysql%';
+
+         INSERT OR REPLACE INTO domain_technologies (domain, technology, version, source)
+         SELECT p.domain, 'proftpd',
+                CASE WHEN lower(coalesce(p.banner, '')) LIKE 'proftpd %'
+                     THEN substr(lower(p.banner), 9) END,
+                'port_banner'
+         FROM ports_info p WHERE lower(coalesce(p.banner, '')) LIKE '%proftpd%';
+
+         INSERT OR REPLACE INTO domain_technologies (domain, technology, version, source)
+         SELECT p.domain, 'vsftpd',
+                CASE WHEN lower(coalesce(p.banner, '')) LIKE '%vsftpd%'
+                     THEN substr(lower(p.banner), instr(lower(p.banner), 'vsftpd') + 7) END,
+                'port_banner'
+         FROM ports_info p WHERE lower(coalesce(p.banner, '')) LIKE '%vsftpd%';
+
+         INSERT OR REPLACE INTO domain_technologies (domain, technology, version, source)
+         SELECT p.domain, 'openssh',
+                CASE WHEN lower(coalesce(p.banner, '')) LIKE 'ssh-%'
+                     THEN substr(lower(p.banner), 5) END,
+                'port_banner'
+         FROM ports_info p WHERE lower(coalesce(p.banner, '')) LIKE '%ssh%';
+
+         INSERT OR REPLACE INTO domain_technologies (domain, technology, version, source)
+         SELECT p.domain, 'redis', NULL, 'port_banner'
+         FROM ports_info p WHERE lower(coalesce(p.banner, '')) LIKE '%redis%';
+
+         INSERT OR REPLACE INTO domain_technologies (domain, technology, version, source)
+         SELECT p.domain, 'elasticsearch', NULL, 'port_banner'
+         FROM ports_info p WHERE p.port = 9200 AND (lower(coalesce(p.banner, '')) LIKE '%elasticsearch%' OR lower(coalesce(p.banner, '')) LIKE '%lucene%');
+
+         INSERT OR REPLACE INTO domain_technologies (domain, technology, version, source)
+         SELECT p.domain, 'memcached', NULL, 'port_banner'
+         FROM ports_info p WHERE p.port = 11211 AND (lower(coalesce(p.banner, '')) LIKE 'version %' OR lower(coalesce(p.banner, '')) LIKE '%memcached%');
+
+         INSERT OR REPLACE INTO domain_technologies (domain, technology, version, source)
+         SELECT p.domain, 'mssql', NULL, 'port_banner'
+         FROM ports_info p WHERE lower(coalesce(p.banner, '')) LIKE '%mssql%';
+
+         INSERT OR REPLACE INTO domain_technologies (domain, technology, version, source)
+         SELECT p.domain, 'docker', NULL, 'port_detection'
+         FROM ports_info p WHERE p.port = 2375;
+    ")?;
+
+    // 4. Known port-based detections (no banner needed)
+    conn.execute_batch(
+        "INSERT OR REPLACE INTO domain_technologies (domain, technology, version, source)
+         SELECT DISTINCT p.domain, 'rdp', NULL, 'port_detection'
+         FROM ports_info p WHERE p.port = 3389;
+
+         INSERT OR REPLACE INTO domain_technologies (domain, technology, version, source)
+         SELECT DISTINCT p.domain, 'mongodb', NULL, 'port_detection'
+         FROM ports_info p WHERE p.port = 27017;
+
+         INSERT OR REPLACE INTO domain_technologies (domain, technology, version, source)
+         SELECT DISTINCT p.domain, 'postgresql', NULL, 'port_detection'
+         FROM ports_info p WHERE p.port = 5432;
+
+         INSERT OR REPLACE INTO domain_technologies (domain, technology, version, source)
+         SELECT DISTINCT p.domain, 'vnc', NULL, 'port_detection'
+         FROM ports_info p WHERE p.port = 5900;
+
+         INSERT OR REPLACE INTO domain_technologies (domain, technology, version, source)
+         SELECT DISTINCT p.domain, 'tomcat', NULL, 'port_detection'
+         FROM ports_info p WHERE p.port = 8009 AND lower(coalesce(p.banner, '')) LIKE '%ajp%';
+
+         INSERT OR REPLACE INTO domain_technologies (domain, technology, version, source)
+         SELECT DISTINCT p.domain, 'apache-solr', NULL, 'port_detection'
+         FROM ports_info p WHERE p.port = 8983 AND (lower(coalesce(p.banner, '')) LIKE '%solr%' OR lower(coalesce(p.banner, '')) LIKE '%lucene%');
+
+         INSERT OR REPLACE INTO domain_technologies (domain, technology, version, source)
+         SELECT DISTINCT p.domain, 'apache-activemq', NULL, 'port_detection'
+         FROM ports_info p WHERE p.port = 8161 AND lower(coalesce(p.banner, '')) LIKE '%activemq%';
+
+         INSERT OR REPLACE INTO domain_technologies (domain, technology, version, source)
+         SELECT DISTINCT p.domain, 'apache-couchdb', NULL, 'port_detection'
+         FROM ports_info p WHERE p.port = 5984 AND lower(coalesce(p.banner, '')) LIKE '%couchdb%';"
     )?;
 
+    // 5. Java frameworks detection (from server headers indicating Java runtime)
+    conn.execute_batch(
+        "INSERT OR REPLACE INTO domain_technologies (domain, technology, version, source)
+         SELECT DISTINCT d.domain, 'apache-struts', NULL, 'java_runtime'
+         FROM domains d
+         WHERE lower(coalesce(d.server, '')) LIKE '%coyote%'
+            OR lower(coalesce(d.server, '')) LIKE '%tomcat%'
+            OR lower(coalesce(d.server, '')) LIKE '%jboss%'
+            OR lower(coalesce(d.server, '')) LIKE '%wildfly%'
+            OR lower(coalesce(d.server, '')) LIKE '%java%'
+            OR lower(coalesce(d.powered_by, '')) LIKE '%java%'
+            OR lower(coalesce(d.powered_by, '')) LIKE '%servlet%'
+            OR lower(coalesce(d.powered_by, '')) LIKE '%jsp%';
+
+         INSERT OR REPLACE INTO domain_technologies (domain, technology, version, source)
+         SELECT DISTINCT d.domain, 'apache-log4j', NULL, 'java_runtime'
+         FROM domains d
+         WHERE lower(coalesce(d.server, '')) LIKE '%coyote%'
+            OR lower(coalesce(d.server, '')) LIKE '%tomcat%'
+            OR lower(coalesce(d.powered_by, '')) LIKE '%java%';
+
+         INSERT OR REPLACE INTO domain_technologies (domain, technology, version, source)
+         SELECT DISTINCT d.domain, 'apache-shiro', NULL, 'java_runtime'
+         FROM domains d
+         WHERE lower(coalesce(d.server, '')) LIKE '%coyote%'
+            OR lower(coalesce(d.server, '')) LIKE '%tomcat%'
+            OR lower(coalesce(d.powered_by, '')) LIKE '%java%';"
+    )?;
+
+    // 6. Software detections
+    conn.execute_batch(
+        "INSERT OR REPLACE INTO domain_technologies (domain, technology, version, source)
+         SELECT sd.domain, sd.name, sd.version, 'software_detection'
+         FROM software_detections sd;"
+    )?;
+
+    // 7. Merge version from port banners into existing rows (fill in missing versions)
+    conn.execute_batch(
+        "UPDATE domain_technologies SET version = (
+            SELECT CASE WHEN lower(coalesce(p.banner, '')) LIKE '%' || domain_technologies.technology || '/%'
+                        THEN substr(lower(p.banner),
+                             instr(lower(p.banner), domain_technologies.technology || '/')
+                             + length(domain_technologies.technology) + 1)
+                        ELSE NULL END
+            FROM ports_info p
+            WHERE p.domain = domain_technologies.domain
+              AND lower(coalesce(p.banner, '')) LIKE '%' || domain_technologies.technology || '/%'
+            LIMIT 1
+        ) WHERE version IS NULL AND source = 'port_banner';"
+    )?;
+
+    let count: i64 = conn.query_row("SELECT COUNT(*) FROM domain_technologies", [], |r| r.get(0))?;
+    Ok(count as usize)
+}
+
+pub(crate) async fn cmd_populate_technologies(db: PathBuf) -> Result<()> {
+    let conn = crate::shared::open_db(&db)
+        .with_context(|| format!("open db {:?}", db))?;
+    crate::schema::ensure_schema(&conn)?;
+    let n = populate_domain_technologies(&conn)?;
+    eprintln!("domain_technologies: populated {n} rows");
+    let m = run_cve_matching(&conn)?;
+    eprintln!("cve_matches: rebuilt with {m} rows");
+    Ok(())
+}
+
+/// Rebuild `cve_matches` from `domain_technologies` + `cve_catalog`, then apply version
+/// filtering. This replaces 20+ per-technology LIKE scans with a single JOIN — the old
+/// approach required a separate INSERT per technology and scanned 8M domain rows 20+ times.
+/// Now `populate_domain_technologies` scans the data sources once, then this function
+/// uses the compact `domain_technologies` table to derive CVE matches in a single pass.
+pub(crate) fn run_cve_matching(conn: &rusqlite::Connection) -> Result<usize> {
+    register_match_functions(conn)?;
+
+    conn.execute("DELETE FROM cve_matches", [])?;
+
+    // Per-technology INSERTs: bake in the version-filter logic so we don't insert rows that
+    // apply_version_filter would immediately delete.  For VERSIONED_TECHS (apache, nginx, php,
+    // openssh, etc.) unversioned non-KEV CVEs are skipped — they were generating ~100M+ rows
+    // per technology that got immediately deleted, causing the INSERT to timeout.
+    let mut total = 0usize;
+    let mut stmt = conn.prepare("SELECT DISTINCT technology FROM domain_technologies ORDER BY technology")?;
+    let techs: Vec<String> = stmt.query_map([], |r| r.get(0))?.filter_map(|r| r.ok()).collect();
+    drop(stmt);
+    let insert_sql = format!(
+        "INSERT OR IGNORE INTO cve_matches (domain, technology, version, cve_id, severity, cvss_score, in_kev, published_at)
+         SELECT dt.domain, dt.technology, dt.version, cc.cve_id, cc.severity, cc.cvss_score, cc.in_kev, cc.published_at
+         FROM domain_technologies dt
+         JOIN cve_catalog cc ON cc.technology = dt.technology
+         WHERE dt.technology = ?1
+           AND (
+             (cc.affected_from IS NULL
+              AND (dt.technology NOT IN {vt} OR cc.in_kev = 1))
+             OR (cc.affected_from IS NOT NULL
+                 AND dt.technology NOT IN {vt})
+             OR (dt.version IS NOT NULL
+                 AND cc.affected_from IS NOT NULL
+                 AND hs_ver_in_range(dt.version, cc.affected_from, cc.affected_to) = 1)
+           )",
+        vt = VERSIONED_TECHS
+    );
+    let mut insert_stmt = conn.prepare(&insert_sql)?;
+    let mut checkpoint_n = 0usize;
+    for tech in &techs {
+        let rows = insert_stmt.execute([tech])?;
+        total += rows;
+        eprintln!("  {}: +{rows} rows", tech);
+        checkpoint_n += 1;
+        if checkpoint_n % 5 == 0 {
+            let _ = conn.execute_batch("PRAGMA wal_checkpoint(PASSIVE)");
+        }
+    }
+    drop(insert_stmt);
+    eprintln!("cve_matches: inserted {total} rows across {} technologies", techs.len());
+
+    // Remove client‑only CVEs
+    conn.execute_batch("DELETE FROM cve_matches WHERE cve_id IN ('CVE-2016-1908','CVE-2023-28531')")?;
+    let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)");
+
     apply_port_versions(conn)?;
+    apply_http_versions(conn)?;
+    let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)");
     apply_version_filter(conn)?;
+    let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)");
 
     let count: i64 = conn.query_row(
         "SELECT COUNT(*) FROM cve_matches",
@@ -655,71 +1146,192 @@ pub(crate) fn run_cve_matching(conn: &rusqlite::Connection) -> Result<usize> {
 
 /// For each port banner that carries a version string, update `cve_matches.version`
 /// so the version filter has something to compare against.
+/// Set the version on port-banner matches from `ports_info`, using the `hs_banner_version`
+/// SQL function. One statement — no per-row round-trips.
 fn apply_port_versions(conn: &rusqlite::Connection) -> Result<()> {
-    let mut stmt = conn.prepare(
-        "SELECT DISTINCT p.domain,
-            CASE
-                WHEN p.port = 3306  AND lower(p.banner) LIKE '%mysql%'         THEN 'mysql'
-                WHEN p.port = 21    AND lower(p.banner) LIKE '%proftpd%'        THEN 'proftpd'
-                WHEN p.port = 21    AND lower(p.banner) LIKE '%vsftpd%'         THEN 'vsftpd'
-                WHEN p.port = 22    AND lower(p.banner) LIKE '%openssh%'        THEN 'openssh'
-                WHEN p.port = 6379  AND lower(p.banner) LIKE '%redis%'          THEN 'redis'
-                WHEN p.port = 9200  AND lower(p.banner) LIKE '%elasticsearch%'  THEN 'elasticsearch'
-                WHEN p.port = 11211 AND lower(p.banner) LIKE '%memcached%'      THEN 'memcached'
-                WHEN p.port = 1433  AND lower(p.banner) LIKE '%mssql%'          THEN 'mssql'
-            END AS technology,
-            p.banner
-         FROM ports_info p
-         WHERE p.banner IS NOT NULL
-           AND (   (p.port = 3306  AND lower(p.banner) LIKE '%mysql%')
-                OR (p.port = 21    AND lower(p.banner) LIKE '%proftpd%')
-                OR (p.port = 21    AND lower(p.banner) LIKE '%vsftpd%')
-                OR (p.port = 22    AND lower(p.banner) LIKE '%openssh%')
-                OR (p.port = 6379  AND lower(p.banner) LIKE '%redis%')
-                OR (p.port = 9200  AND lower(p.banner) LIKE '%elasticsearch%')
-                OR (p.port = 11211 AND lower(p.banner) LIKE '%memcached%')
-                OR (p.port = 1433  AND lower(p.banner) LIKE '%mssql%'))",
+    conn.execute_batch(
+        "UPDATE cve_matches
+         SET version = (
+           SELECT hs_banner_version(p.banner, cve_matches.technology)
+           FROM ports_info p
+           WHERE p.domain = cve_matches.domain
+             AND p.banner IS NOT NULL
+             AND lower(p.banner) LIKE '%' || cve_matches.technology || '%'
+           ORDER BY p.port
+           LIMIT 1
+         )
+         WHERE cve_matches.version IS NULL
+           AND cve_matches.technology IN
+               ('mysql','proftpd','vsftpd','openssh','redis','elasticsearch','memcached','mssql',
+                'solr','activemq','couchdb');",
     )?;
-
-    let rows: Vec<(String, String, String)> = stmt
-        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
-        .filter_map(|r| r.ok())
-        .collect();
-
-    for (domain, technology, banner) in rows {
-        if let Some(version) = extract_version(&banner, &technology) {
-            conn.execute(
-                "UPDATE cve_matches SET version = ?1 WHERE domain = ?2 AND technology = ?3",
-                rusqlite::params![version, domain, technology],
-            )?;
-        }
-    }
     Ok(())
 }
 
-/// Delete `cve_matches` rows whose extracted version falls outside the CVE's affected range.
-fn apply_version_filter(conn: &rusqlite::Connection) -> Result<()> {
-    let mut stmt = conn.prepare(
-        "SELECT cm.domain, cm.cve_id, cm.version, cc.affected_from, cc.affected_to
-         FROM cve_matches cm
-         JOIN cve_catalog cc ON cc.cve_id = cm.cve_id
-         WHERE cm.version IS NOT NULL
-           AND (cc.affected_from IS NOT NULL OR cc.affected_to IS NOT NULL)",
+/// Set the version on HTTP-detected matches from the `Server` / `X-Powered-By` headers, so
+/// the version filter applies to web-server/PHP CVEs too. One statement via `hs_http_version`.
+fn apply_http_versions(conn: &rusqlite::Connection) -> Result<()> {
+    conn.execute_batch(
+        "UPDATE cve_matches
+         SET version = (
+           SELECT hs_http_version(
+                    CASE WHEN cve_matches.technology = 'php'
+                         THEN COALESCE(d.powered_by, d.server, '')
+                         ELSE COALESCE(d.server, '') END,
+                    cve_matches.technology)
+           FROM domains d WHERE d.domain = cve_matches.domain
+         )
+         WHERE cve_matches.version IS NULL
+           AND cve_matches.technology IN ('apache','nginx','iis','tomcat','php','litespeed','openssl');",
+    )?;
+    Ok(())
+}
+
+/// The `cve_matches.technology` values that advertise a concrete version in a banner or HTTP
+/// header. For these, a match is only asserted when a live version was read *and* falls in a
+/// CVE's affected range. Everything else (CMS, port-only, and presence/behaviour services such
+/// as wordpress, redis, mongodb, rdp, vnc, ...) matches on presence and is always kept.
+const VERSIONED_TECHS: &str =
+    "('apache','nginx','iis','tomcat','php','litespeed','openssl',\
+      'mysql','openssh','proftpd','vsftpd','mssql',\
+      'elasticsearch','memcached','solr','activemq','couchdb')";
+
+/// SQL predicate (over aliases `cm` = cve_matches, `cc` = cve_catalog) that is true for a row
+/// the version filter should **drop**. Two independent reasons:
+///
+///   1. **Out-of-range known version, any technology.** If we read a concrete version and the
+///      CVE has a real range that excludes it, it is not vulnerable — e.g. a patched jQuery/
+///      lodash from `software_detections`.
+///   2. **Unconfirmed match on a version-advertising product** (`technology IN VERSIONED_TECHS`).
+///      Those products only count when a live version was read *and* is in range; unknown-version
+///      hosts and range-less KEV entries on them are dropped. This is what prevents the ~300M-row
+///      blow-up. Presence-based services (CMS, ports, RDP/VNC/Mongo, ...) are not in the set and
+///      match on presence.
+///
+/// Requires `hs_ver_in_range` to be registered and `cc` to come from a LEFT JOIN so range-less /
+/// uncatalogued rows are covered.
+fn version_filter_drop_predicate() -> String {
+    format!(
+        "(cm.version IS NOT NULL
+          AND cc.affected_to IS NOT NULL AND cc.affected_to <> '999'
+          AND hs_ver_in_range(cm.version, cc.affected_from, cc.affected_to) = 0)
+         OR (cm.technology IN {V}
+             AND (cc.in_kev IS NULL OR cc.in_kev = 0)
+             AND NOT (
+               cm.version IS NOT NULL
+               AND cc.affected_to IS NOT NULL AND cc.affected_to <> '999'
+               AND hs_ver_in_range(cm.version, cc.affected_from, cc.affected_to) = 1
+             ))",
+        V = VERSIONED_TECHS
+    )
+}
+
+/// Preview what the version filter ([`apply_version_filter`]) would remove from an existing
+/// `cve_matches` table, **without mutating anything**. Prints the keep/drop split. Read-only:
+/// no writes, no WAL growth. Use this before `refilter-cves` to see the resulting size up front.
+pub(crate) fn cmd_refilter_cves_preview(db: PathBuf) -> Result<()> {
+    let conn = crate::shared::open_db(&db)
+        .with_context(|| format!("open db {:?}", db))?;
+    register_match_functions(&conn)?;
+    let drop = version_filter_drop_predicate();
+
+    let before: i64 = conn.query_row("SELECT COUNT(*) FROM cve_matches", [], |r| r.get(0))?;
+    let dropped: i64 = conn.query_row(
+        &format!(
+            "SELECT COUNT(*) FROM cve_matches cm
+             LEFT JOIN cve_catalog cc ON cc.cve_id = cm.cve_id
+             WHERE {drop}"
+        ),
+        [],
+        |r| r.get(0),
     )?;
 
-    let candidates: Vec<(String, String, String, Option<String>, Option<String>)> = stmt
-        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)))?
-        .filter_map(|r| r.ok())
-        .collect();
+    eprintln!("cve: refilter preview (no changes written)");
+    eprintln!("  total rows : {before}");
+    eprintln!("  would drop : {dropped}");
+    eprintln!("  would keep : {}", before - dropped);
+    Ok(())
+}
 
-    for (domain, cve_id, version, from, to) in candidates {
-        if !version_in_range(&version, from.as_deref(), to.as_deref()) {
-            conn.execute(
-                "DELETE FROM cve_matches WHERE domain = ?1 AND cve_id = ?2",
-                rusqlite::params![domain, cve_id],
-            )?;
-        }
-    }
+/// Shrink an existing `cve_matches` table by applying the version filter
+/// ([`apply_version_filter`]) to data generated before that filter existed (the ~300M-row
+/// blow-up). Copies only the *kept* rows into a fresh table and swaps it in, so the WAL only
+/// holds the surviving set rather than the whole rewrite of a giant in-place `DELETE`. No
+/// network, no re-matching; run `VACUUM` afterwards to return freed pages to the filesystem.
+pub(crate) fn cmd_refilter_cves(db: PathBuf) -> Result<()> {
+    let conn = crate::shared::open_db(&db)
+        .with_context(|| format!("open db {:?}", db))?;
+    register_match_functions(&conn)?;
+    let drop = version_filter_drop_predicate();
+
+    let before: i64 = conn.query_row("SELECT COUNT(*) FROM cve_matches", [], |r| r.get(0))?;
+    eprintln!("cve: refilter starting from {before} rows");
+
+    conn.execute_batch("DROP TABLE IF EXISTS cve_matches_refiltered;")?;
+    conn.execute_batch(
+        "CREATE TABLE cve_matches_refiltered (
+            domain        TEXT NOT NULL,
+            technology    TEXT NOT NULL,
+            version       TEXT,
+            cve_id        TEXT NOT NULL,
+            severity      TEXT,
+            cvss_score    REAL,
+            in_kev        INTEGER,
+            published_at  TEXT,
+            matched_at    TEXT DEFAULT (datetime('now')),
+            PRIMARY KEY (domain, cve_id)
+        );",
+    )?;
+
+    // Keep every row the filter would not drop. LEFT JOIN so range-less / uncatalogued rows are
+    // evaluated by the same predicate the DELETE uses.
+    conn.execute_batch(&format!(
+        "INSERT INTO cve_matches_refiltered
+            (domain, technology, version, cve_id, severity, cvss_score, in_kev, published_at, matched_at)
+         SELECT cm.domain, cm.technology, cm.version, cm.cve_id, cm.severity, cm.cvss_score,
+                cm.in_kev, cm.published_at, cm.matched_at
+         FROM cve_matches cm
+         LEFT JOIN cve_catalog cc ON cc.cve_id = cm.cve_id
+         WHERE NOT ({drop});"
+    ))?;
+    conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
+
+    // `legacy_alter_table=ON` stops the RENAME from validating dependent objects mid-swap: the
+    // `risk_score` view references `cve_matches`, which is momentarily absent between the DROP
+    // and the RENAME, and the modern ALTER path would otherwise abort on it.
+    conn.execute_batch(
+        "PRAGMA legacy_alter_table=ON;
+         DROP TABLE cve_matches;
+         ALTER TABLE cve_matches_refiltered RENAME TO cve_matches;
+         PRAGMA legacy_alter_table=OFF;",
+    )?;
+    conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
+
+    let after: i64 = conn.query_row("SELECT COUNT(*) FROM cve_matches", [], |r| r.get(0))?;
+    eprintln!(
+        "cve: refilter kept {after} rows (removed {}); run `VACUUM` to reclaim disk space",
+        before - after
+    );
+    Ok(())
+}
+
+/// Version filtering. A match against a version-advertising product (web servers, PHP, SSH, DB
+/// banners — see [`VERSIONED_TECHS`]) is asserted only when a live version was read *and* falls
+/// inside a CVE's affected range. Out-of-range versions, unknown versions, and range-less KEV
+/// entries on those products are all dropped — otherwise every host matched every KEV CVE for
+/// its product regardless of version, which blew the table up to ~300M rows. CMS, port-only,
+/// and presence/behaviour services (wordpress, redis, mongodb, rdp, vnc, ...) are not in the
+/// version-advertising set and match on presence. One set-based DELETE via `hs_ver_in_range`.
+fn apply_version_filter(conn: &rusqlite::Connection) -> Result<()> {
+    conn.execute_batch(&format!(
+        "DELETE FROM cve_matches
+         WHERE rowid IN (
+           SELECT cm.rowid FROM cve_matches cm
+           LEFT JOIN cve_catalog cc ON cc.cve_id = cm.cve_id
+           WHERE {}
+         );",
+        version_filter_drop_predicate()
+    ))?;
     Ok(())
 }
 
@@ -876,6 +1488,85 @@ mod tests {
             )
             .unwrap();
         assert!(n > 0, "expected OpenSSH CVE match from port 22 banner");
+    }
+
+    #[test]
+    fn run_cve_matching_matches_and_filters_detected_software() {
+        let conn = in_memory_db();
+        seed_hardcoded_cves(&conn).unwrap();
+        conn.execute_batch(
+            "INSERT INTO domains (domain) VALUES ('shop.ch');
+             -- vulnerable jQuery (3.4.1 is within CVE-2020-11022 range 1.2..3.5.0)
+             INSERT INTO software_detections (domain, kind, name, version) VALUES ('shop.ch','js_lib','jquery','3.4.1');
+             -- patched lodash (4.17.21 is above CVE-2019-10744 upper bound 4.17.12)
+             INSERT INTO software_detections (domain, kind, name, version) VALUES ('shop.ch','js_lib','lodash','4.17.21');
+             -- WP plugin, presence based (no version)
+             INSERT INTO software_detections (domain, kind, name, version) VALUES ('shop.ch','wp_plugin','contact-form-7',NULL);",
+        ).unwrap();
+        run_cve_matching(&conn).unwrap();
+
+        let jq: i64 = conn.query_row("SELECT COUNT(*) FROM cve_matches WHERE domain='shop.ch' AND cve_id='CVE-2020-11022'", [], |r| r.get(0)).unwrap();
+        assert_eq!(jq, 1, "vulnerable jQuery 3.4.1 must match");
+        let lodash: i64 = conn.query_row("SELECT COUNT(*) FROM cve_matches WHERE domain='shop.ch' AND cve_id='CVE-2019-10744'", [], |r| r.get(0)).unwrap();
+        assert_eq!(lodash, 0, "patched lodash 4.17.21 must be filtered out");
+        let cf7: i64 = conn.query_row("SELECT COUNT(*) FROM cve_matches WHERE domain='shop.ch' AND cve_id='CVE-2020-35489'", [], |r| r.get(0)).unwrap();
+        assert_eq!(cf7, 1, "contact-form-7 plugin must match on presence");
+    }
+
+    #[test]
+    fn run_cve_matching_matches_new_service_ports() {
+        let conn = in_memory_db();
+        seed_hardcoded_cves(&conn).unwrap();
+        conn.execute_batch(
+            "INSERT INTO domains (domain) VALUES ('svc.ch');
+             INSERT INTO ports_info (domain, port, service) VALUES ('svc.ch', 27017, 'mongodb');
+             INSERT INTO ports_info (domain, port, service) VALUES ('svc.ch', 5432, 'postgresql');
+             INSERT INTO ports_info (domain, port, service) VALUES ('svc.ch', 5900, 'vnc');",
+        ).unwrap();
+        run_cve_matching(&conn).unwrap();
+        for tech in ["mongodb", "postgresql", "vnc"] {
+            let n: i64 = conn
+                .query_row("SELECT COUNT(*) FROM cve_matches WHERE domain='svc.ch' AND technology=?1", [tech], |r| r.get(0))
+                .unwrap();
+            assert!(n > 0, "expected {tech} CVE matches from port presence");
+        }
+    }
+
+    // ---- EPSS ----
+
+    #[test]
+    fn parse_epss_csv_skips_comments_and_header() {
+        let csv = "#model_version:v2024.01.01,score_date:2024-07-01T00:00:00Z\n\
+                   cve,epss,percentile\n\
+                   CVE-2021-44228,0.97544,0.99995\n\
+                   CVE-2018-7600,0.94210,0.99900\n\
+                   garbage,line,here\n\
+                   CVE-2020-0000,notanumber,0.5\n";
+        let rows = parse_epss_csv(csv);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].0, "CVE-2021-44228");
+        assert!((rows[0].1 - 0.97544).abs() < 1e-9);
+        assert!((rows[1].2 - 0.99900).abs() < 1e-9);
+    }
+
+    #[test]
+    fn apply_epss_rows_only_updates_known_cves() {
+        let conn = in_memory_db();
+        seed_hardcoded_cves(&conn).unwrap();
+        let known: std::collections::HashSet<String> = {
+            let mut stmt = conn.prepare("SELECT cve_id FROM cve_catalog").unwrap();
+            stmt.query_map([], |r| r.get::<_, String>(0)).unwrap().filter_map(|r| r.ok()).collect()
+        };
+        let rows = vec![
+            ("CVE-2018-7600".to_string(), 0.942, 0.999),   // known (Drupalgeddon2)
+            ("CVE-9999-0001".to_string(), 0.5, 0.5),        // unknown → ignored
+        ];
+        let n = apply_epss_rows(&conn, &rows, &known).unwrap();
+        assert_eq!(n, 1);
+        let score: f64 = conn
+            .query_row("SELECT epss_score FROM cve_catalog WHERE cve_id='CVE-2018-7600'", [], |r| r.get(0))
+            .unwrap();
+        assert!((score - 0.942).abs() < 1e-9);
     }
 
     #[test]
@@ -1062,6 +1753,60 @@ mod tests {
             )
             .unwrap();
         assert_eq!(n, 0, "CVE-2023-21980 must not match MySQL 8.0.33");
+    }
+
+    // ---- generic / HTTP version parsing ----
+
+    #[test]
+    fn generic_version_parser_finds_dotted_token() {
+        assert_eq!(extract_version_generic("Server v1.2.3 ready"), Some("1.2.3".into()));
+        assert_eq!(extract_version_generic("build 2019 patch"), None); // no dot → not a version
+        assert_eq!(extract_version_generic("nothing here"), None);
+    }
+
+    #[test]
+    fn http_version_extractor_handles_common_headers() {
+        assert_eq!(extract_http_version("Apache/2.4.58 (Ubuntu)", "apache"), Some("2.4.58".into()));
+        assert_eq!(extract_http_version("nginx/1.20.1", "nginx"), Some("1.20.1".into()));
+        assert_eq!(extract_http_version("Microsoft-IIS/10.0", "iis"), Some("10.0".into()));
+        assert_eq!(extract_http_version("PHP/8.1.2", "php"), Some("8.1.2".into()));
+        assert_eq!(extract_http_version("nginx/1.20.1", "apache"), None);
+    }
+
+    #[test]
+    fn dotted_version_after_marker() {
+        assert_eq!(dotted_version_after("redis_version:6.2.6\r\n", "redis_version:"), Some("6.2.6".into()));
+        assert_eq!(dotted_version_after("\"number\" : \"7.13.3\"", "\"number\""), Some("7.13.3".into()));
+        assert_eq!(dotted_version_after("no version", "marker"), None);
+    }
+
+    #[test]
+    fn http_version_filter_removes_out_of_range_apache() {
+        // CVE-2021-41773 affects only 2.4.49; a live Apache/2.4.58 must not match.
+        let conn = in_memory_db();
+        seed_hardcoded_cves(&conn).unwrap();
+        conn.execute_batch(
+            "INSERT INTO domains (domain, server) VALUES ('web.ch', 'Apache/2.4.58 (Ubuntu)');",
+        ).unwrap();
+        run_cve_matching(&conn).unwrap();
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM cve_matches WHERE domain='web.ch' AND cve_id='CVE-2021-41773'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 0, "Apache 2.4.58 must not match a 2.4.49-only CVE");
+    }
+
+    #[test]
+    fn http_version_filter_keeps_in_range_apache() {
+        let conn = in_memory_db();
+        seed_hardcoded_cves(&conn).unwrap();
+        conn.execute_batch(
+            "INSERT INTO domains (domain, server) VALUES ('web.ch', 'Apache/2.4.49 (Unix)');",
+        ).unwrap();
+        run_cve_matching(&conn).unwrap();
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM cve_matches WHERE domain='web.ch' AND cve_id='CVE-2021-41773'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 1, "Apache 2.4.49 must match CVE-2021-41773");
     }
 
     #[test]

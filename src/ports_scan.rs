@@ -383,6 +383,10 @@ async fn grab_banner_for_port(ip: IpAddr, port: u16) -> Option<String> {
         389      => grab_ldap_banner(ip, port).await,
         1433     => grab_mssql_banner(ip, port).await,
         161      => grab_snmp_banner(ip, port).await,
+        8009     => grab_ajp_banner(ip, port).await,
+        8983     => grab_solr_banner(ip, port).await,
+        8161     => grab_activemq_banner(ip, port).await,
+        5984     => grab_couchdb_banner(ip, port).await,
         _        => grab_banner(ip, port).await,
     }
 }
@@ -950,6 +954,122 @@ pub(crate) async fn grab_snmp_banner(ip: IpAddr, port: u16) -> Option<String> {
         .map(|&b| b as char)
         .collect();
     if desc.is_empty() { Some("SNMP".to_string()) } else { Some(desc) }
+}
+
+pub(crate) async fn grab_ajp_banner(ip: IpAddr, port: u16) -> Option<String> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let timeout = Duration::from_millis(1000);
+    let addr = SocketAddr::new(ip, port);
+    let mut stream = tokio::time::timeout(timeout, TcpStream::connect(addr))
+        .await.ok()?.ok()?;
+    // AJP13 CPING packet (type=0x02, data_len=0x0000)
+    let cping: &[u8] = &[
+        0x02, 0x12, 0x00, 0x02, 0x0a, 0x00, 0x01, 0x00,
+        0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
+        0x00, 0x00,
+    ];
+    let _ = tokio::time::timeout(timeout, stream.write_all(cping)).await.ok()?;
+    let mut buf = [0u8; 512];
+    let n = tokio::time::timeout(timeout, stream.read(&mut buf)).await.ok()?.ok()?;
+    if n < 2 { return None; }
+    // AJP13 CPONG response starts with 0x04
+    if buf[0] != 0x04 { return None; }
+    Some("AJP13 Tomcat".to_string())
+}
+
+pub(crate) async fn grab_solr_banner(ip: IpAddr, port: u16) -> Option<String> {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    let timeout = Duration::from_millis(1500);
+    let addr = SocketAddr::new(ip, port);
+    let mut stream = tokio::time::timeout(timeout, TcpStream::connect(addr))
+        .await.ok()?.ok()?;
+    let req = format!("GET /solr/admin/info/system HTTP/1.0\r\nHost: {ip}\r\n\r\n");
+    let _ = tokio::time::timeout(timeout, stream.write_all(req.as_bytes())).await.ok()?;
+    let mut body = String::new();
+    let mut lines = BufReader::new(stream).lines();
+    while let Ok(Some(line)) = tokio::time::timeout(timeout, lines.next_line()).await.ok()? {
+        body.push_str(&line);
+        if body.len() > 8192 { break; }
+    }
+    let lower = body.to_ascii_lowercase();
+    if lower.contains("solr") || lower.contains("lucene") {
+        // Extract "lucene-spec-version":"9.x.y" or "solr-spec-version":"9.x.y"
+        let version = extract_json_str(&body, "lucene-spec-version")
+            .or_else(|| extract_json_str(&body, "solr-spec-version"));
+        match version {
+            Some(v) => Some(format!("Solr/Lucene {v}")),
+            None => Some("Apache Solr".to_string()),
+        }
+    } else {
+        None
+    }
+}
+
+pub(crate) async fn grab_activemq_banner(ip: IpAddr, port: u16) -> Option<String> {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    let timeout = Duration::from_millis(1500);
+    let addr = SocketAddr::new(ip, port);
+    let mut stream = tokio::time::timeout(timeout, TcpStream::connect(addr))
+        .await.ok()?.ok()?;
+    let req = format!("GET / HTTP/1.0\r\nHost: {ip}\r\n\r\n");
+    let _ = tokio::time::timeout(timeout, stream.write_all(req.as_bytes())).await.ok()?;
+    let mut body = String::new();
+    let mut lines = BufReader::new(stream).lines();
+    while let Ok(Some(line)) = tokio::time::timeout(timeout, lines.next_line()).await.ok()? {
+        body.push_str(&line);
+        if body.len() > 8192 { break; }
+    }
+    let lower = body.to_ascii_lowercase();
+    if lower.contains("activemq") || lower.contains("apache activemq") {
+        let version = extract_json_str(&body, "version")
+            .or_else(|| {
+                // Try "ActiveMQ VERSION x.y.z" pattern
+                let idx = lower.find("activemq")?;
+                let after = &body[idx..];
+                let vidx = after.to_ascii_lowercase().find("version")?;
+                Some(after[vidx + 7..].chars().take_while(|c| c.is_ascii_digit() || *c == '.').collect::<String>())
+            });
+        match version {
+            Some(v) if !v.is_empty() => Some(format!("ActiveMQ {v}")),
+            _ => Some("Apache ActiveMQ".to_string()),
+        }
+    } else {
+        None
+    }
+}
+
+pub(crate) async fn grab_couchdb_banner(ip: IpAddr, port: u16) -> Option<String> {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    let timeout = Duration::from_millis(1500);
+    let addr = SocketAddr::new(ip, port);
+    let mut stream = tokio::time::timeout(timeout, TcpStream::connect(addr))
+        .await.ok()?.ok()?;
+    let req = format!("GET / HTTP/1.0\r\nHost: {ip}\r\n\r\n");
+    let _ = tokio::time::timeout(timeout, stream.write_all(req.as_bytes())).await.ok()?;
+    let mut body = String::new();
+    let mut lines = BufReader::new(stream).lines();
+    while let Ok(Some(line)) = tokio::time::timeout(timeout, lines.next_line()).await.ok()? {
+        body.push_str(&line);
+        if body.len() > 4096 { break; }
+    }
+    let lower = body.to_ascii_lowercase();
+    if lower.contains("couchdb") || lower.contains("couch") {
+        let version = extract_json_str(&body, "version");
+        match version {
+            Some(v) => Some(format!("CouchDB {v}")),
+            None => Some("Apache CouchDB".to_string()),
+        }
+    } else {
+        None
+    }
+}
+
+fn extract_json_str(body: &str, key: &str) -> Option<String> {
+    let pattern = format!("\"{}\":\"", key);
+    let start = body.find(&pattern)? + pattern.len();
+    let end = body[start..].find('"')? + start;
+    let val = body[start..end].trim();
+    if val.is_empty() { None } else { Some(val.to_string()) }
 }
 
 fn writer_loop_ports(

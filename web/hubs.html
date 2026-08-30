@@ -1,0 +1,1447 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>helvetiscan — infrastructure hubs</title>
+        <link rel="icon" href="data:," />
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <link href="https://fonts.googleapis.com/css2?family=Monda:wght@400;700&display=swap" rel="stylesheet" />
+        <link rel="preconnect" href="https://esm.sh" crossorigin />
+        <style>
+            :root {
+                --panel-bg: #030f25;
+                --panel-border: rgba(255, 255, 255, 0.22);
+                --dim-border: rgba(255, 255, 255, 0.1);
+                --accent: #4488ff;
+                --accent-hi: #00ff88;
+                --color-ch: #e63946;
+                --color-eu: #4488ff;
+                --color-us: #ffa500;
+                --color-other: #7f8c9a;
+            }
+
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+
+            .visually-hidden {
+                position: absolute;
+                width: 1px;
+                height: 1px;
+                overflow: hidden;
+                clip: rect(0, 0, 0, 0);
+                white-space: nowrap;
+                border: 0;
+            }
+
+            button:focus-visible,
+            input:focus-visible {
+                outline: 2px solid var(--accent);
+                outline-offset: 2px;
+            }
+
+            body {
+                font-family: "Monda", ui-sans-serif, system-ui, sans-serif;
+                background: #0a0e14;
+                color: #fff;
+                overflow: hidden;
+                height: 100vh;
+                width: 100vw;
+            }
+
+            .container {
+                position: relative;
+                width: 100vw;
+                height: 100vh;
+            }
+
+            #stage {
+                position: absolute;
+                inset: 0;
+                background: radial-gradient(circle, #071736, #0f0d0d);
+                touch-action: none;
+                overscroll-behavior: none;
+            }
+
+            canvas {
+                display: block;
+                width: 100%;
+                height: 100%;
+            }
+
+            /* ---------- left panel ---------- */
+
+            .panel-toggle {
+                display: none;
+                position: fixed;
+                top: 20px;
+                left: 20px;
+                width: 44px;
+                height: 44px;
+                background: var(--panel-bg);
+                border: 1px solid var(--panel-border);
+                border-radius: 10px;
+                cursor: pointer;
+                align-items: center;
+                justify-content: center;
+                z-index: 1001;
+                font-size: 20px;
+                color: #fff;
+            }
+
+            .left-panel {
+                position: absolute;
+                top: 20px;
+                left: 20px;
+                z-index: 1000;
+                display: flex;
+                flex-direction: column;
+                gap: 10px;
+                max-height: calc(100vh - 40px);
+                width: 360px;
+            }
+
+            .top-controls {
+                background-color: var(--panel-bg);
+                padding: 18px;
+                border-radius: 10px;
+                backdrop-filter: blur(10px);
+                -webkit-backdrop-filter: blur(10px);
+                border: 1px solid var(--panel-border);
+                flex-shrink: 0;
+            }
+
+            .top-controls h1 {
+                margin: 0;
+                font-size: 22px;
+                font-weight: 700;
+                color: #fff;
+                text-align: center;
+                text-wrap: balance;
+            }
+
+            .top-controls h3 {
+                margin: 4px 0 14px;
+                font-size: 13px;
+                color: rgba(255, 255, 255, 0.65);
+                font-weight: 400;
+                text-align: center;
+            }
+
+            .search-wrapper {
+                border-top: 1px solid var(--dim-border);
+                padding: 14px 0 4px;
+            }
+
+            .search-row {
+                position: relative;
+            }
+
+            input[type="text"] {
+                background: rgba(255, 255, 255, 0.1);
+                color: #fff;
+                border: 1px solid rgba(255, 255, 255, 0.2);
+                padding: 9px 12px;
+                border-radius: 6px;
+                width: 100%;
+                font-size: 13px;
+                font-family: "Monda", sans-serif;
+            }
+
+            input[type="text"]:focus {
+                outline: none;
+                border-color: rgba(255, 255, 255, 0.4);
+                background: rgba(255, 255, 255, 0.15);
+            }
+
+            input[type="text"]::placeholder {
+                color: rgba(255, 255, 255, 0.5);
+            }
+
+            .search-clear {
+                position: absolute;
+                right: 12px;
+                top: 50%;
+                transform: translateY(-50%);
+                background: none;
+                border: none;
+                color: #aaa;
+                font-size: 17px;
+                line-height: 1;
+                cursor: pointer;
+                padding: 0 4px;
+                display: none;
+            }
+
+            .search-clear:hover {
+                color: #fff;
+            }
+
+            .search-wrapper.has-value .search-clear {
+                display: block;
+            }
+
+            .control-label {
+                font-size: 10.5px;
+                font-weight: 700;
+                color: rgba(255, 255, 255, 0.35);
+                letter-spacing: 0.08em;
+                text-transform: uppercase;
+                margin: 12px 0 6px;
+            }
+
+            .mode-toggles {
+                display: flex;
+                gap: 4px;
+                margin-top: 12px;
+                border-top: 1px solid var(--dim-border);
+                padding-top: 12px;
+            }
+
+            .mode-toggles + .control-label {
+                border-top: 1px solid var(--dim-border);
+                padding-top: 12px;
+                margin-top: 12px;
+            }
+
+            .mode-btn {
+                flex: 1;
+                padding: 7px 6px;
+                border-radius: 8px;
+                border: 1px solid rgba(255, 255, 255, 0.18);
+                background: transparent;
+                color: rgba(255, 255, 255, 0.65);
+                cursor: pointer;
+                font-size: 11.5px;
+                font-weight: 600;
+                font-family: inherit;
+                transition: background 0.15s, color 0.15s, border-color 0.15s;
+            }
+
+            .mode-btn:hover {
+                background: rgba(255, 255, 255, 0.06);
+            }
+
+            .mode-btn.active {
+                background: rgba(68, 136, 255, 0.22);
+                border-color: rgba(68, 136, 255, 0.55);
+                color: #fff;
+            }
+
+            .toggle-container {
+                margin-top: 12px;
+                border-top: 1px solid var(--dim-border);
+                padding-top: 12px;
+            }
+
+            .toggle-label {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                cursor: pointer;
+                font-size: 12.5px;
+                color: rgba(255, 255, 255, 0.8);
+            }
+
+            .toggle-label input[type="checkbox"] {
+                display: none;
+            }
+
+            .toggle-switch {
+                position: relative;
+                width: 30px;
+                height: 16px;
+                background: rgba(255, 255, 255, 0.15);
+                border-radius: 8px;
+                flex-shrink: 0;
+                transition: background 0.2s;
+            }
+
+            .toggle-switch::after {
+                content: "";
+                position: absolute;
+                top: 2px;
+                left: 2px;
+                width: 12px;
+                height: 12px;
+                background: rgba(255, 255, 255, 0.5);
+                border-radius: 50%;
+                transition:
+                    transform 0.2s,
+                    background 0.2s;
+            }
+
+            .toggle-label input[type="checkbox"]:checked + .toggle-switch {
+                background: var(--accent);
+            }
+
+            .toggle-label input[type="checkbox"]:checked + .toggle-switch::after {
+                transform: translateX(14px);
+                background: #fff;
+            }
+
+            .legend {
+                margin-top: 12px;
+                border-top: 1px solid var(--dim-border);
+            }
+
+            .legend-item {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                margin: 7px 0;
+                font-size: 12.5px;
+                color: rgba(255, 255, 255, 0.8);
+            }
+
+            .legend-item-left {
+                display: flex;
+                align-items: center;
+                min-width: 0;
+            }
+
+            .legend-item-left span {
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+
+            .legend-color {
+                width: 11px;
+                height: 11px;
+                border-radius: 50%;
+                margin-right: 8px;
+                flex-shrink: 0;
+            }
+
+            .legend-count {
+                color: #fff;
+                font-family: "Monda", monospace;
+                font-size: 12.5px;
+                min-width: 40px;
+                text-align: right;
+                flex-shrink: 0;
+                font-variant-numeric: tabular-nums;
+            }
+
+            .rank-panel {
+                background-color: var(--panel-bg);
+                border: 1px solid var(--panel-border);
+                border-radius: 10px;
+                backdrop-filter: blur(10px);
+                -webkit-backdrop-filter: blur(10px);
+                overflow: hidden;
+                display: flex;
+                flex-direction: column;
+                min-height: 0;
+                flex: 1;
+            }
+
+            .rank-panel-header {
+                padding: 10px 16px;
+                font-size: 11px;
+                font-weight: 700;
+                color: rgba(255, 255, 255, 0.4);
+                letter-spacing: 0.1em;
+                text-transform: uppercase;
+                border-bottom: 1px solid var(--dim-border);
+                flex-shrink: 0;
+            }
+
+            .rank-list {
+                overflow-y: auto;
+                flex: 1;
+                padding: 6px 0;
+                scrollbar-width: thin;
+                scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+            }
+
+            .rank-list::-webkit-scrollbar {
+                width: 4px;
+            }
+
+            .rank-list::-webkit-scrollbar-thumb {
+                background: rgba(255, 255, 255, 0.2);
+                border-radius: 2px;
+            }
+
+            .rank-row {
+                padding: 5px 10px;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                cursor: pointer;
+                transition: background 0.15s;
+                border-radius: 4px;
+                margin: 1px 6px;
+                border-left: 3px solid transparent;
+            }
+
+            .rank-row:hover {
+                background: rgba(255, 255, 255, 0.06);
+            }
+
+            .rank-dot {
+                width: 8px;
+                height: 8px;
+                border-radius: 50%;
+                flex-shrink: 0;
+            }
+
+            .rank-desc {
+                font-size: 12.5px;
+                color: #fff;
+                flex: 1;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+
+            .rank-count {
+                font-size: 11px;
+                color: rgba(255, 255, 255, 0.45);
+                font-variant-numeric: tabular-nums;
+                flex-shrink: 0;
+            }
+
+            /* ---------- right details panel ---------- */
+
+            .node-info {
+                position: absolute;
+                top: 20px;
+                right: 20px;
+                bottom: 20px;
+                width: 360px;
+                background-color: var(--panel-bg);
+                border: 1px solid var(--panel-border);
+                border-radius: 10px;
+                backdrop-filter: blur(10px);
+                -webkit-backdrop-filter: blur(10px);
+                z-index: 1002;
+                overflow: hidden;
+                display: none;
+                flex-direction: column;
+            }
+
+            .node-info.open {
+                display: flex;
+            }
+
+            .node-info-header {
+                display: grid;
+                grid-template-columns: 1fr auto 1fr;
+                align-items: center;
+                padding: 8px 16px;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+                background: rgba(255, 255, 255, 0.05);
+                flex-shrink: 0;
+            }
+
+            .node-info-header h3 {
+                margin: 0;
+                font-size: 14px;
+                color: rgba(255, 255, 255, 0.55);
+                font-weight: 700;
+                text-align: center;
+                letter-spacing: 0.06em;
+                text-transform: uppercase;
+            }
+
+            .node-nav-btns {
+                display: flex;
+                gap: 2px;
+            }
+
+            .node-nav-btns button,
+            #closeNodeInfo {
+                background: none;
+                border: none;
+                color: rgba(255, 255, 255, 0.6);
+                font-size: 16px;
+                cursor: pointer;
+                padding: 0;
+                width: 28px;
+                height: 28px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                border-radius: 50%;
+                transition: all 0.15s;
+            }
+
+            .node-nav-btns button:hover:not(:disabled),
+            #closeNodeInfo:hover {
+                background: rgba(255, 255, 255, 0.1);
+                color: #fff;
+            }
+
+            .node-nav-btns button:disabled {
+                opacity: 0.25;
+                cursor: default;
+            }
+
+            #closeNodeInfo {
+                font-size: 22px;
+                justify-self: end;
+            }
+
+            #nodeInfoContent {
+                padding: 18px;
+                flex: 1;
+                display: flex;
+                flex-direction: column;
+                overflow: hidden;
+                font-size: 14px;
+                line-height: 1.5;
+                color: rgba(255, 255, 255, 0.9);
+                min-height: 0;
+            }
+
+            .placeholder {
+                color: rgba(255, 255, 255, 0.4);
+                font-size: 13px;
+                margin: auto;
+                text-align: center;
+                padding: 0 20px;
+            }
+
+            .node-name {
+                font-size: 17px;
+                font-weight: 700;
+                color: #fff;
+                margin-bottom: 10px;
+                word-break: break-word;
+            }
+
+            .badge-row {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 6px;
+                margin-bottom: 14px;
+                border-top: 1px solid var(--dim-border);
+                padding-top: 12px;
+            }
+
+            .badge {
+                display: inline-block;
+                padding: 3px 8px;
+                border-radius: 12px;
+                font-size: 11.5px;
+                font-weight: 500;
+                background: rgba(255, 255, 255, 0.08);
+                color: rgba(255, 255, 255, 0.75);
+                border: 1px solid rgba(255, 255, 255, 0.15);
+                white-space: nowrap;
+            }
+
+            .badge.jur-CH {
+                background: rgba(230, 57, 70, 0.18);
+                color: var(--color-ch);
+                border-color: rgba(230, 57, 70, 0.4);
+            }
+            .badge.jur-EU {
+                background: rgba(68, 136, 255, 0.18);
+                color: var(--color-eu);
+                border-color: rgba(68, 136, 255, 0.4);
+            }
+            .badge.jur-US {
+                background: rgba(255, 165, 0, 0.18);
+                color: var(--color-us);
+                border-color: rgba(255, 165, 0, 0.4);
+            }
+            .badge.jur-OTHER {
+                background: rgba(127, 140, 154, 0.18);
+                color: var(--color-other);
+                border-color: rgba(127, 140, 154, 0.4);
+            }
+
+            .connections-section {
+                border-top: 1px solid var(--dim-border);
+                padding-top: 10px;
+                flex: 1;
+                display: flex;
+                flex-direction: column;
+                min-height: 0;
+                overflow: hidden;
+            }
+
+            .connections-header {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                font-size: 11px;
+                font-weight: 700;
+                color: rgba(255, 255, 255, 0.4);
+                letter-spacing: 0.08em;
+                text-transform: uppercase;
+                margin-bottom: 8px;
+                flex-shrink: 0;
+            }
+
+            .connection-count {
+                background: rgba(255, 255, 255, 0.1);
+                padding: 1px 7px;
+                border-radius: 10px;
+                font-size: 11.5px;
+                color: rgba(255, 255, 255, 0.8);
+                font-weight: 400;
+                letter-spacing: normal;
+                text-transform: none;
+            }
+
+            .connections-list {
+                flex: 1;
+                overflow-y: auto;
+                scrollbar-width: thin;
+                scrollbar-color: rgba(255, 255, 255, 0.3) transparent;
+                list-style: none;
+                margin: 0 -4px 0 0;
+                padding: 0 4px 8px 0;
+            }
+
+            .connections-list::-webkit-scrollbar {
+                width: 6px;
+            }
+            .connections-list::-webkit-scrollbar-thumb {
+                background: rgba(255, 255, 255, 0.3);
+                border-radius: 3px;
+            }
+
+            .connection-item {
+                padding: 6px 10px;
+                margin: 5px 0;
+                border-radius: 4px;
+                border-left: 3px solid transparent;
+                color: rgba(255, 255, 255, 0.85);
+                font-size: 12.5px;
+                cursor: pointer;
+                transition:
+                    background 0.15s,
+                    color 0.15s;
+                background: rgba(255, 255, 255, 0.02);
+            }
+
+            .connection-item:hover {
+                background: rgba(255, 255, 255, 0.07);
+            }
+
+            .conn-name {
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                display: block;
+            }
+
+            .connection-meta {
+                display: block;
+                font-size: 11px;
+                color: rgba(255, 255, 255, 0.45);
+                margin-top: 2px;
+            }
+
+            .connection-item.jur-CH {
+                border-left-color: var(--color-ch);
+            }
+            .connection-item.jur-EU {
+                border-left-color: var(--color-eu);
+            }
+            .connection-item.jur-US {
+                border-left-color: var(--color-us);
+            }
+            .connection-item.jur-OTHER {
+                border-left-color: var(--color-other);
+            }
+
+            /* ---------- hover tooltip ---------- */
+
+            .node-tooltip {
+                position: fixed;
+                z-index: 2000;
+                background: var(--panel-bg);
+                border: 1px solid var(--panel-border);
+                color: #fff;
+                font-family: "Monda", sans-serif;
+                font-size: 12.5px;
+                padding: 4px 10px;
+                border-radius: 6px;
+                pointer-events: none;
+                white-space: nowrap;
+                opacity: 0;
+                transition: opacity 0.1s;
+            }
+
+            .node-tooltip.visible {
+                opacity: 1;
+            }
+
+            .status {
+                position: fixed;
+                bottom: 20px;
+                left: 50%;
+                transform: translateX(-50%);
+                z-index: 10;
+                padding: 6px 12px;
+                border-radius: 999px;
+                border: 1px solid var(--panel-border);
+                background: var(--panel-bg);
+                font-size: 11.5px;
+                color: rgba(255, 255, 255, 0.6);
+                pointer-events: none;
+            }
+
+            .status.error {
+                color: #ff8a8a;
+                border-color: rgba(230, 57, 70, 0.4);
+            }
+
+            @media (max-width: 768px) {
+                .panel-toggle {
+                    display: flex;
+                }
+
+                .left-panel {
+                    position: fixed !important;
+                    top: auto !important;
+                    left: 0 !important;
+                    right: 0 !important;
+                    bottom: 0 !important;
+                    width: 100% !important;
+                    max-height: 75vh;
+                    border-radius: 16px 16px 0 0;
+                    transform: translateY(100%);
+                    transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+                    overflow-y: auto;
+                }
+
+                .left-panel.open {
+                    transform: translateY(0);
+                }
+
+                .top-controls {
+                    border-radius: 0;
+                    border-left: none;
+                    border-right: none;
+                    border-top: none;
+                }
+
+                .node-info {
+                    position: fixed !important;
+                    top: auto !important;
+                    left: 0 !important;
+                    right: 0 !important;
+                    bottom: 0 !important;
+                    width: 100% !important;
+                    max-height: 75vh;
+                    border-radius: 16px 16px 0 0;
+                    transform: translateY(100%);
+                    transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+                    display: flex !important;
+                }
+
+                .node-info.open {
+                    transform: translateY(0);
+                }
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <button class="panel-toggle" id="toggle-controls" aria-label="Open controls">☰</button>
+            <div class="left-panel" id="left-panel">
+                <div class="top-controls">
+                    <h1>Who controls the .ch internet</h1>
+                    <h3>Nameserver operators &amp; hosting providers behind Swiss domains</h3>
+
+                    <div class="search-wrapper" id="searchWrapper">
+                        <div class="search-row">
+                            <input type="text" id="searchInput" placeholder="Search hubs…" autocomplete="off" />
+                            <button class="search-clear" id="searchClear" aria-label="Clear search">&times;</button>
+                        </div>
+                    </div>
+
+                    <div class="control-label">Color by</div>
+                    <div class="mode-toggles" id="mode-toggles">
+                        <button class="mode-btn active" data-mode="sovereignty">Sovereignty</button>
+                        <button class="mode-btn" data-mode="provider">Provider</button>
+                        <button class="mode-btn" data-mode="risk">Risk</button>
+                    </div>
+
+                    <div class="control-label">Layout</div>
+                    <div class="mode-toggles" id="layout-toggles">
+                        <button class="mode-btn active" data-layout="clustered" title="Group hubs into regions by the current color category">Clustered</button>
+                        <button class="mode-btn" data-layout="radial" title="Rings by domain count — biggest hubs near the center">Radial</button>
+                        <button class="mode-btn" data-layout="organic" title="Pure force-directed layout, no positional bias">Organic</button>
+                    </div>
+
+                    <div class="toggle-container">
+                        <label class="toggle-label">
+                            <input type="checkbox" id="longTailToggle" checked />
+                            <span class="toggle-switch"></span>
+                            <span>Show long tail (unlabeled hubs)</span>
+                        </label>
+                    </div>
+
+                    <div class="legend" id="legend"></div>
+                </div>
+
+                <div class="rank-panel">
+                    <div class="rank-panel-header">Top hubs by domain count</div>
+                    <div class="rank-list" id="rank-list"></div>
+                </div>
+            </div>
+
+            <div class="node-info" id="nodeInfo">
+                <div class="node-info-header">
+                    <div class="node-nav-btns">
+                        <button id="navBack" disabled aria-label="Previous hub">&#8592;</button>
+                        <button id="navFwd" disabled aria-label="Next hub">&#8594;</button>
+                    </div>
+                    <h3>Details</h3>
+                    <button id="closeNodeInfo" aria-label="Close details">×</button>
+                </div>
+                <div id="nodeInfoContent">
+                    <div class="placeholder">Click a hub to see its details and connections.</div>
+                </div>
+            </div>
+
+            <div class="status" id="status"></div>
+            <div id="stage">
+                <canvas id="canvas"></canvas>
+            </div>
+        </div>
+
+        <script type="module">
+            import * as d3 from "https://esm.sh/d3@7";
+
+            const stage = document.getElementById("stage");
+            const canvas = document.getElementById("canvas");
+            const ctx = canvas.getContext("2d");
+            const statusEl = document.getElementById("status");
+            const legendEl = document.getElementById("legend");
+            const rankListEl = document.getElementById("rank-list");
+            const modeToggles = document.getElementById("mode-toggles");
+            const layoutToggles = document.getElementById("layout-toggles");
+            const longTailToggle = document.getElementById("longTailToggle");
+            const searchInput = document.getElementById("searchInput");
+            const searchClear = document.getElementById("searchClear");
+            const searchWrapper = document.getElementById("searchWrapper");
+            const nodeInfo = document.getElementById("nodeInfo");
+            const nodeInfoContent = document.getElementById("nodeInfoContent");
+            const closeNodeInfo = document.getElementById("closeNodeInfo");
+            const navBackBtn = document.getElementById("navBack");
+            const navFwdBtn = document.getElementById("navFwd");
+            const leftPanel = document.getElementById("left-panel");
+            const toggleControlsBtn = document.getElementById("toggle-controls");
+
+            const JURISDICTION_COLORS = { CH: "#e63946", EU: "#4488ff", US: "#ffa500", OTHER: "#7f8c9a" };
+            const RISK_SCALE = d3.scaleSequential(d3.interpolateRdYlGn).domain([30, 90]);
+
+            let mode = "sovereignty";
+            let dispersion = "clustered"; // "clustered" | "radial" | "organic"
+            let showLongTail = true;
+            let nodes = [];
+            let edges = [];
+            let nodeById = new Map();
+            let adjacency = new Map(); // id -> [{neighbor, weight}]
+            let radiusScale = null;
+            let radialTargetScale = null;
+            let providerColor = null;
+            let topProviders = [];
+            let anchors = {};
+            let sim = null;
+            let autoFit = true;
+            let transform = d3.zoomIdentity;
+            let hovered = null;
+            let selectedNode = null;
+            let selectedConnectedIds = new Set();
+            let width = 0;
+            let height = 0;
+            let dpr = Math.max(1, window.devicePixelRatio || 1);
+
+            let navHistory = [];
+            let navIndex = -1;
+
+            const tooltip = document.createElement("div");
+            tooltip.className = "node-tooltip";
+            document.body.appendChild(tooltip);
+
+            // ---------- clustering (see prior iteration's rationale) ----------
+
+            function categoriesFor(m) {
+                if (m === "sovereignty") return ["CH", "EU", "US", "OTHER"];
+                if (m === "provider") return [...topProviders, "Other"];
+                return ["risky (<50)", "elevated (50–65)", "moderate (65–80)", "healthy (80+)", "unknown"];
+            }
+
+            function categoryOf(m, d) {
+                if (m === "sovereignty") return d.jurisdiction || "OTHER";
+                if (m === "provider") {
+                    const key = d.asn_org || d.label;
+                    return topProviders.includes(key) ? key : "Other";
+                }
+                const s = d.avg_risk_score;
+                if (s == null) return "unknown";
+                if (s < 50) return "risky (<50)";
+                if (s < 65) return "elevated (50–65)";
+                if (s < 80) return "moderate (65–80)";
+                return "healthy (80+)";
+            }
+
+            function isLongTail(d) {
+                const cat = categoryOf(mode, d);
+                return cat === "Other" || cat === "unknown";
+            }
+
+            function computeAnchors(cats) {
+                const n = cats.length;
+                const radius = Math.max(1000, 260 * n);
+                const out = {};
+                cats.forEach((c, i) => {
+                    const angle = -Math.PI / 2 + (2 * Math.PI * i) / n;
+                    out[c] = { x: radius * Math.cos(angle), y: radius * Math.sin(angle) };
+                });
+                return out;
+            }
+
+            function anchorFor(d) {
+                return anchors[categoryOf(mode, d)] || { x: 0, y: 0 };
+            }
+
+            function clusterStrength(d) {
+                return isLongTail(d) ? 0.02 : 0.38;
+            }
+
+            // ---------- dispersion (layout) types ----------
+            // Decoupled from color mode: how nodes are positioned, independent of what
+            // drives their color. "clustered" reuses the category anchors above; "radial"
+            // arranges hubs in rings by importance (domain_count); "organic" applies no
+            // positional bias at all — pure link/charge/collide physics.
+
+            function applyDispersionForces() {
+                if (!sim) return;
+                if (dispersion === "clustered") {
+                    sim.force("x", d3.forceX((d) => anchorFor(d).x).strength(clusterStrength));
+                    sim.force("y", d3.forceY((d) => anchorFor(d).y).strength(clusterStrength));
+                    sim.force("radial", null);
+                } else if (dispersion === "radial") {
+                    sim.force("x", null);
+                    sim.force("y", null);
+                    sim.force("radial", d3.forceRadial((d) => radialTargetScale(d.domain_count), 0, 0).strength(0.5));
+                } else {
+                    sim.force("x", null);
+                    sim.force("y", null);
+                    sim.force("radial", null);
+                }
+            }
+
+            function colorFor(d) {
+                if (mode === "sovereignty") return JURISDICTION_COLORS[d.jurisdiction] || JURISDICTION_COLORS.OTHER;
+                if (mode === "risk") return d.avg_risk_score == null ? "#7f8c9a" : RISK_SCALE(d.avg_risk_score);
+                return providerColor(d.asn_org || d.label);
+            }
+
+            function jurClass(d) {
+                return "jur-" + (d.jurisdiction || "OTHER");
+            }
+
+            function kindLabel(kind) {
+                if (kind === "provider") return "NS operator & hosting";
+                if (kind === "ns_operator") return "Nameserver operator";
+                return "Hosting ASN";
+            }
+
+            // ---------- legend / rank list ----------
+
+            function buildLegend() {
+                legendEl.innerHTML = "";
+                const visible = nodes.filter((n) => showLongTail || !isLongTail(n));
+                if (mode === "sovereignty") {
+                    for (const [key, color] of Object.entries(JURISDICTION_COLORS)) {
+                        const cnt = visible.filter((n) => (n.jurisdiction || "OTHER") === key).length;
+                        addLegendRow(color, key, cnt);
+                    }
+                } else if (mode === "risk") {
+                    const bands = [
+                        ["risky (<50)", RISK_SCALE(35)],
+                        ["elevated (50–65)", RISK_SCALE(57)],
+                        ["moderate (65–80)", RISK_SCALE(72)],
+                        ["healthy (80+)", RISK_SCALE(88)],
+                    ];
+                    for (const [label, color] of bands) {
+                        const cnt = visible.filter((n) => categoryOf("risk", n) === label).length;
+                        addLegendRow(color, label, cnt);
+                    }
+                } else {
+                    for (const key of [...topProviders, "Other"]) {
+                        if (key === "Other" && !showLongTail) continue;
+                        const cnt = visible.filter((n) => categoryOf("provider", n) === key).length;
+                        addLegendRow(providerColor(key), key, cnt);
+                    }
+                }
+            }
+
+            function addLegendRow(color, label, count) {
+                const row = document.createElement("div");
+                row.className = "legend-item";
+                row.innerHTML = `<div class="legend-item-left"><div class="legend-color" style="background:${color}"></div><span>${label}</span></div><span class="legend-count">${count.toLocaleString()}</span>`;
+                legendEl.appendChild(row);
+            }
+
+            function buildRankList() {
+                rankListEl.innerHTML = "";
+                const top = [...nodes].sort((a, b) => b.domain_count - a.domain_count).slice(0, 200);
+                for (const n of top) {
+                    const row = document.createElement("div");
+                    row.className = "rank-row";
+                    row.innerHTML = `<span class="rank-dot" style="background:${colorFor(n)}"></span><span class="rank-desc">${n.label}</span><span class="rank-count">${n.domain_count.toLocaleString()}</span>`;
+                    row.addEventListener("click", () => selectHubById(n.id));
+                    rankListEl.appendChild(row);
+                }
+            }
+
+            // ---------- selection / details panel ----------
+
+            function pushNav(id) {
+                const current = navHistory[navIndex];
+                if (current === id) return;
+                navHistory = navHistory.slice(0, navIndex + 1);
+                navHistory.push(id);
+                navIndex = navHistory.length - 1;
+                updateNavButtons();
+            }
+
+            function updateNavButtons() {
+                navBackBtn.disabled = navIndex <= 0;
+                navFwdBtn.disabled = navIndex >= navHistory.length - 1;
+            }
+
+            function selectHubById(id, { pushHistory = true, focusCamera = true } = {}) {
+                const node = nodeById.get(id);
+                if (!node) return;
+                selectedNode = node;
+                selectedConnectedIds = new Set((adjacency.get(id) || []).map((e) => e.neighbor.id));
+                if (pushHistory) pushNav(id);
+                showNodeInfo(node);
+                if (focusCamera && node.x != null) {
+                    const scale = Math.max(1.4, transform.k);
+                    d3.select(canvas)
+                        .transition()
+                        .duration(500)
+                        .call(zoom.transform, d3.zoomIdentity.translate(width / 2 - node.x * scale, height / 2 - node.y * scale).scale(scale));
+                    autoFit = false;
+                }
+                draw();
+            }
+
+            function showNodeInfo(node) {
+                const neighbors = (adjacency.get(node.id) || []).slice().sort((a, b) => b.weight - a.weight);
+                const kindText = kindLabel(node.kind);
+                const jur = node.jurisdiction || "OTHER";
+                const riskBadge =
+                    node.avg_risk_score != null
+                        ? `<span class="badge" style="color:${RISK_SCALE(node.avg_risk_score)};border-color:${RISK_SCALE(node.avg_risk_score)}66">risk ${Math.round(node.avg_risk_score)}</span>`
+                        : "";
+
+                let connectionsHtml = "";
+                if (neighbors.length > 0) {
+                    const items = neighbors
+                        .map(({ neighbor, weight }) => {
+                            const nk = kindLabel(neighbor.kind);
+                            return `<li class="connection-item ${jurClass(neighbor)}" data-id="${neighbor.id}" title="${neighbor.label}">
+                                <span class="conn-name">${neighbor.label}</span>
+                                <span class="connection-meta">${nk} · shared by ${weight.toLocaleString()} domain${weight !== 1 ? "s" : ""}</span>
+                            </li>`;
+                        })
+                        .join("");
+                    connectionsHtml = `
+                        <div class="connections-section">
+                            <div class="connections-header">Connected hubs <span class="connection-count">${neighbors.length}</span></div>
+                            <ul class="connections-list">${items}</ul>
+                        </div>`;
+                }
+
+                nodeInfoContent.innerHTML = `
+                    <div class="node-name">${node.label}</div>
+                    <div class="badge-row">
+                        <span class="badge">${kindText}</span>
+                        <span class="badge jur-${jur}">${jur}</span>
+                        <span class="badge">${node.domain_count.toLocaleString()} domains</span>
+                        ${riskBadge}
+                    </div>
+                    ${connectionsHtml}
+                `;
+                nodeInfo.classList.add("open");
+                leftPanel.classList.remove("open");
+
+                nodeInfoContent.querySelectorAll(".connection-item[data-id]").forEach((el) => {
+                    el.addEventListener("click", () => selectHubById(el.dataset.id));
+                });
+            }
+
+            function hideNodeInfo() {
+                nodeInfo.classList.remove("open");
+                selectedNode = null;
+                selectedConnectedIds = new Set();
+                draw();
+            }
+
+            closeNodeInfo.addEventListener("click", hideNodeInfo);
+            navBackBtn.addEventListener("click", () => {
+                if (navIndex <= 0) return;
+                navIndex--;
+                selectHubById(navHistory[navIndex], { pushHistory: false });
+                updateNavButtons();
+            });
+            navFwdBtn.addEventListener("click", () => {
+                if (navIndex >= navHistory.length - 1) return;
+                navIndex++;
+                selectHubById(navHistory[navIndex], { pushHistory: false });
+                updateNavButtons();
+            });
+
+            // ---------- search ----------
+
+            function runSearch(term) {
+                const q = term.trim().toLowerCase();
+                searchWrapper.classList.toggle("has-value", q.length > 0);
+                if (!q) {
+                    if (selectedNode) showNodeInfo(selectedNode);
+                    else nodeInfoContent.innerHTML = `<div class="placeholder">Click a hub to see its details and connections.</div>`;
+                    if (!selectedNode) nodeInfo.classList.remove("open");
+                    return;
+                }
+                const matches = nodes.filter((n) => n.label.toLowerCase().includes(q)).sort((a, b) => b.domain_count - a.domain_count).slice(0, 80);
+                const items = matches
+                    .map(
+                        (n) =>
+                            `<li class="connection-item ${jurClass(n)}" data-id="${n.id}" title="${n.label}">
+                                <span class="conn-name">${n.label}</span>
+                                <span class="connection-meta">${kindLabel(n.kind)} · ${n.domain_count.toLocaleString()} domains</span>
+                            </li>`,
+                    )
+                    .join("");
+                nodeInfoContent.innerHTML = `
+                    <div class="node-name" style="font-size:14px">"${term}"</div>
+                    <div class="badge-row"><span class="badge">${matches.length} result${matches.length !== 1 ? "s" : ""}</span></div>
+                    <div class="connections-section" style="border-top:none;padding-top:0">
+                        <ul class="connections-list">${items || '<div class="placeholder">No hubs match.</div>'}</ul>
+                    </div>
+                `;
+                nodeInfo.classList.add("open");
+                nodeInfoContent.querySelectorAll(".connection-item[data-id]").forEach((el) => {
+                    el.addEventListener("click", () => selectHubById(el.dataset.id));
+                });
+            }
+
+            searchInput.addEventListener("input", () => runSearch(searchInput.value));
+            searchClear.addEventListener("click", () => {
+                searchInput.value = "";
+                runSearch("");
+                searchInput.focus();
+            });
+
+            // ---------- canvas rendering ----------
+
+            function setStatus(text, klass) {
+                statusEl.textContent = text;
+                statusEl.className = "status " + (klass || "");
+            }
+
+            function resize() {
+                width = stage.clientWidth;
+                height = stage.clientHeight;
+                dpr = Math.max(1, window.devicePixelRatio || 1);
+                canvas.width = width * dpr;
+                canvas.height = height * dpr;
+                draw();
+            }
+
+            function draw() {
+                ctx.save();
+                ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+                ctx.clearRect(0, 0, width, height);
+                ctx.translate(transform.x, transform.y);
+                ctx.scale(transform.k, transform.k);
+
+                const hasSelection = !!selectedNode;
+                const minScreenPx = 1.4;
+
+                ctx.lineCap = "round";
+                for (const e of edges) {
+                    const s = e.source;
+                    const t = e.target;
+                    if (!s || !t || s.x == null || t.x == null) continue;
+                    if (!showLongTail && (isLongTail(s) || isLongTail(t))) continue;
+                    const touchesSelection = hasSelection && (s === selectedNode || t === selectedNode);
+                    if (hasSelection && !touchesSelection) continue; // hide unrelated edges when focused
+                    ctx.strokeStyle = touchesSelection
+                        ? "rgba(0, 255, 136, 0.75)"
+                        : `rgba(160, 190, 230, ${Math.min(0.5, 0.05 + e.weight / 400)})`;
+                    ctx.lineWidth = (touchesSelection ? 1.4 : Math.min(3, 0.3 + Math.log2(e.weight + 1) * 0.3)) / transform.k;
+                    ctx.beginPath();
+                    ctx.moveTo(s.x, s.y);
+                    ctx.lineTo(t.x, t.y);
+                    ctx.stroke();
+                }
+
+                const labelNodes = [];
+                for (const n of nodes) {
+                    if (n.x == null) continue;
+                    if (!showLongTail && isLongTail(n)) continue;
+                    const isSelected = n === selectedNode;
+                    const isNeighbor = selectedConnectedIds.has(n.id);
+                    const dimmed = hasSelection && !isSelected && !isNeighbor;
+                    const r = Math.max(radiusScale(n.domain_count), minScreenPx / transform.k) * (isSelected ? 1.35 : 1);
+
+                    ctx.beginPath();
+                    ctx.fillStyle = colorFor(n);
+                    ctx.globalAlpha = dimmed ? 0.12 : n === hovered ? 1 : 0.88;
+                    ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
+                    ctx.fill();
+                    if (isSelected || n === hovered) {
+                        ctx.lineWidth = (isSelected ? 2 : 1.5) / transform.k;
+                        ctx.strokeStyle = "#ffffff";
+                        ctx.stroke();
+                    }
+                    if (isSelected || isNeighbor) labelNodes.push({ n, r });
+                }
+                ctx.globalAlpha = 1;
+
+                if (hasSelection) {
+                    ctx.font = `700 ${11 / transform.k}px Monda, sans-serif`;
+                    ctx.textAlign = "center";
+                    for (const { n, r } of labelNodes) {
+                        ctx.fillStyle = n === selectedNode ? "#ffffff" : colorFor(n);
+                        ctx.fillText(n.label.toUpperCase(), n.x, n.y - r - 5 / transform.k);
+                    }
+                }
+
+                ctx.restore();
+            }
+
+            function screenToWorld(px, py) {
+                return [(px - transform.x) / transform.k, (py - transform.y) / transform.k];
+            }
+
+            function nodeAt(px, py) {
+                const [wx, wy] = screenToWorld(px, py);
+                const minHitPx = 6;
+                let best = null;
+                let bestDist = Infinity;
+                for (const n of nodes) {
+                    if (n.x == null) continue;
+                    if (!showLongTail && isLongTail(n)) continue;
+                    const r = Math.max(radiusScale(n.domain_count), minHitPx / transform.k);
+                    const dx = n.x - wx;
+                    const dy = n.y - wy;
+                    const dist = Math.hypot(dx, dy);
+                    if (dist <= r && dist < bestDist) {
+                        best = n;
+                        bestDist = dist;
+                    }
+                }
+                return best;
+            }
+
+            let zoom;
+
+            async function main() {
+                setStatus("Loading hub graph...", "loading");
+                const [nodesRaw, edgesRaw] = await Promise.all([
+                    fetch("./hub_nodes.json").then((r) => r.json()),
+                    fetch("./hub_edges.json").then((r) => r.json()),
+                ]);
+
+                nodes = nodesRaw;
+                nodeById = new Map(nodes.map((n) => [n.id, n]));
+                edges = edgesRaw
+                    .filter((e) => nodeById.has(e.source) && nodeById.has(e.target))
+                    .map((e) => ({ source: e.source, target: e.target, weight: e.weight }));
+
+                adjacency = new Map();
+                for (const e of edges) {
+                    const s = nodeById.get(e.source);
+                    const t = nodeById.get(e.target);
+                    if (!adjacency.has(s.id)) adjacency.set(s.id, []);
+                    if (!adjacency.has(t.id)) adjacency.set(t.id, []);
+                    adjacency.get(s.id).push({ neighbor: t, weight: e.weight });
+                    adjacency.get(t.id).push({ neighbor: s, weight: e.weight });
+                }
+
+                const maxCount = d3.max(nodes, (d) => d.domain_count) || 1;
+                radiusScale = d3.scaleSqrt().domain([1, maxCount]).range([3, 24]);
+                // Radial layout: bigger hubs pulled toward the center, long tail pushed out.
+                radialTargetScale = d3.scaleLog().domain([1, maxCount]).range([1800, 80]).clamp(true);
+
+                const totals = d3.rollup(nodes, (v) => d3.sum(v, (d) => d.domain_count), (d) => d.asn_org || d.label);
+                topProviders = Array.from(totals.entries()).sort((a, b) => d3.descending(a[1], b[1])).slice(0, 9).map(([k]) => k);
+                providerColor = d3.scaleOrdinal().domain([...topProviders, "Other"]).range([...d3.schemeTableau10.slice(0, 9), "#4a5568"]);
+                const rawColorFor = providerColor;
+                providerColor = (key) => (topProviders.includes(key) ? rawColorFor(key) : rawColorFor("Other"));
+
+                anchors = computeAnchors(categoriesFor(mode));
+
+                resize();
+                buildLegend();
+                buildRankList();
+
+                const canvasSel = d3.select(canvas);
+
+                function fitToExtent() {
+                    const xs = [];
+                    const ys = [];
+                    for (const n of nodes) {
+                        if (n.x == null || n.y == null) continue;
+                        xs.push(n.x);
+                        ys.push(n.y);
+                    }
+                    if (xs.length < 2) return;
+                    const x0 = d3.min(xs), x1 = d3.max(xs), y0 = d3.min(ys), y1 = d3.max(ys);
+                    const w = Math.max(1, x1 - x0), h = Math.max(1, y1 - y0);
+                    const scale = Math.min(8, Math.max(0.05, Math.min(width / w, height / h) * 0.85));
+                    const tx = width / 2 - (scale * (x0 + x1)) / 2;
+                    const ty = height / 2 - (scale * (y0 + y1)) / 2;
+                    canvasSel.call(zoom.transform, d3.zoomIdentity.translate(tx, ty).scale(scale));
+                }
+
+                sim = d3
+                    .forceSimulation(nodes)
+                    .force(
+                        "link",
+                        d3
+                            .forceLink(edges)
+                            .id((d) => d.id)
+                            .distance((d) => 100 + 30 * Math.log2(1 + 1 / (d.weight || 1)))
+                            .strength((d) => Math.min(0.18, 0.04 + Math.log2(d.weight + 1) * 0.015)),
+                    )
+                    .force("charge", d3.forceManyBody().strength(-420))
+                    .force("collide", d3.forceCollide((d) => radiusScale(d.domain_count) + 3).iterations(2))
+                    .force("center", d3.forceCenter(0, 0))
+                    .alphaDecay(0.02)
+                    .on("tick", () => {
+                        draw();
+                        if (autoFit) fitToExtent();
+                    });
+                applyDispersionForces();
+
+                setStatus(`${nodes.length.toLocaleString()} hubs, ${edges.length.toLocaleString()} links`, "success");
+
+                zoom = d3
+                    .zoom()
+                    .scaleExtent([0.02, 8])
+                    .on("zoom", (event) => {
+                        transform = event.transform;
+                        if (event.sourceEvent) autoFit = false;
+                        draw();
+                    });
+                canvasSel.call(zoom);
+
+                canvasSel.call(
+                    d3
+                        .drag()
+                        .subject((event) => nodeAt(...d3.pointer(event, canvas)))
+                        .on("start", (event) => {
+                            if (!event.subject) return;
+                            autoFit = false;
+                            if (!event.active) sim.alphaTarget(0.25).restart();
+                            const [wx, wy] = screenToWorld(...d3.pointer(event, canvas));
+                            event.subject.fx = wx;
+                            event.subject.fy = wy;
+                        })
+                        .on("drag", (event) => {
+                            if (!event.subject) return;
+                            const [wx, wy] = screenToWorld(...d3.pointer(event, canvas));
+                            event.subject.fx = wx;
+                            event.subject.fy = wy;
+                        })
+                        .on("end", (event) => {
+                            if (!event.subject) return;
+                            if (!event.active) sim.alphaTarget(0);
+                            event.subject.fx = null;
+                            event.subject.fy = null;
+                        }),
+                );
+
+                canvas.addEventListener("mousemove", (ev) => {
+                    const [px, py] = d3.pointer(ev, canvas);
+                    hovered = nodeAt(px, py);
+                    canvas.style.cursor = hovered ? "pointer" : "grab";
+                    if (hovered) {
+                        tooltip.textContent = hovered.label;
+                        tooltip.style.left = ev.clientX + 14 + "px";
+                        tooltip.style.top = ev.clientY - 8 + "px";
+                        tooltip.classList.add("visible");
+                    } else {
+                        tooltip.classList.remove("visible");
+                    }
+                    draw();
+                });
+                canvas.addEventListener("mouseleave", () => {
+                    hovered = null;
+                    tooltip.classList.remove("visible");
+                    draw();
+                });
+                canvas.addEventListener("click", (ev) => {
+                    const [px, py] = d3.pointer(ev, canvas);
+                    const clicked = nodeAt(px, py);
+                    if (clicked) selectHubById(clicked.id, { focusCamera: false });
+                    else hideNodeInfo();
+                    leftPanel.classList.remove("open");
+                });
+            }
+
+            modeToggles.addEventListener("click", (ev) => {
+                const btn = ev.target.closest(".mode-btn");
+                if (!btn) return;
+                mode = btn.dataset.mode;
+                modeToggles.querySelectorAll(".mode-btn").forEach((b) => b.classList.toggle("active", b === btn));
+                buildLegend();
+                buildRankList();
+                // Node position only depends on color mode when the layout is "clustered" —
+                // for radial/organic layouts, recoloring shouldn't jostle the simulation.
+                if (dispersion === "clustered") {
+                    anchors = computeAnchors(categoriesFor(mode));
+                    autoFit = true;
+                    if (sim) sim.alpha(0.7).restart();
+                }
+                draw();
+            });
+
+            layoutToggles.addEventListener("click", (ev) => {
+                const btn = ev.target.closest(".mode-btn");
+                if (!btn) return;
+                dispersion = btn.dataset.layout;
+                layoutToggles.querySelectorAll(".mode-btn").forEach((b) => b.classList.toggle("active", b === btn));
+                if (dispersion === "clustered") anchors = computeAnchors(categoriesFor(mode));
+                applyDispersionForces();
+                autoFit = true;
+                if (sim) sim.alpha(0.8).restart();
+                draw();
+            });
+
+            longTailToggle.addEventListener("change", () => {
+                showLongTail = longTailToggle.checked;
+                buildLegend();
+                autoFit = true;
+                if (sim) sim.alpha(0.4).restart();
+                draw();
+            });
+
+            toggleControlsBtn.addEventListener("click", () => {
+                leftPanel.classList.toggle("open");
+                nodeInfo.classList.remove("open");
+            });
+
+            window.addEventListener("resize", resize);
+
+            main().catch((err) => {
+                console.error(err);
+                setStatus(`Error: ${err.message}`, "error");
+            });
+        </script>
+    </body>
+</html>

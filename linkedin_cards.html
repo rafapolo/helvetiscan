@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Helvetiscan — LinkedIn Cards</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #1a1a1a;
+    font-family: 'Inter', system-ui, sans-serif;
+    padding: 40px;
+    display: flex;
+    flex-direction: column;
+    gap: 48px;
+    align-items: center;
+  }
+
+  .card {
+    width: 1080px;
+    height: 1080px;
+    background: #000;
+    color: #fff;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: 80px;
+    position: relative;
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+
+  /* Subtle grid texture */
+  .card::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
+    background-size: 60px 60px;
+    pointer-events: none;
+  }
+
+  .tag {
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: #E30613;
+    position: relative;
+    z-index: 1;
+  }
+
+  .body {
+    position: relative;
+    z-index: 1;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 36px;
+  }
+
+  .stat {
+    font-size: 140px;
+    font-weight: 900;
+    line-height: 1;
+    color: #E30613;
+    letter-spacing: -4px;
+  }
+
+  .stat-label {
+    font-size: 32px;
+    font-weight: 700;
+    color: #fff;
+    line-height: 1.2;
+    max-width: 800px;
+  }
+
+  .message {
+    font-size: 26px;
+    font-weight: 400;
+    color: rgba(255,255,255,0.65);
+    line-height: 1.5;
+    max-width: 820px;
+    border-left: 4px solid #E30613;
+    padding-left: 28px;
+    margin-top: 8px;
+  }
+
+  .footer {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+  }
+
+  .source {
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.3);
+  }
+
+  /* Brand: "helveti" white, "scan" red — on black cards */
+  .brand {
+    font-size: 22px;
+    font-weight: 900;
+    letter-spacing: 0.05em;
+    color: #fff;
+  }
+  .brand .b-scan { color: #E30613; }
+
+  /* Accent corner */
+  .corner {
+    position: absolute;
+    top: 0; right: 0;
+    width: 8px;
+    height: 220px;
+    background: #E30613;
+  }
+
+  /* Inverted (red background) cards */
+  .card.inverted {
+    background: #E30613;
+  }
+  .card.inverted .stat { color: #fff; }
+  .card.inverted .stat-label { color: #fff; }
+  .card.inverted .message {
+    color: rgba(255,255,255,0.8);
+    border-left-color: #000;
+  }
+  .card.inverted .tag { color: #000; }
+  /* Brand on red: "helveti" black, "scan" white */
+  .card.inverted .brand { color: #000; }
+  .card.inverted .brand .b-scan { color: #fff; }
+  .card.inverted .source { color: rgba(0,0,0,0.35); }
+  .card.inverted .corner { background: #000; }
+  .card.inverted::before {
+    background-image:
+      linear-gradient(rgba(0,0,0,0.08) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,0,0,0.08) 1px, transparent 1px);
+  }
+
+  .print-note {
+    color: #aaa;
+    font-size: 13px;
+    text-align: center;
+    font-family: monospace;
+    margin-top: 8px;
+  }
+</style>
+</head>
+<body>
+
+<p class="print-note">helvetiscan.ch — .ch Domain Security Report 2025 — Screenshot each card at 1080×1080px</p>
+
+<!-- CARD 1: Dead domains -->
+<div class="card">
+  <div class="corner"></div>
+  <div class="tag">Swiss Internet Health</div>
+  <div class="body">
+    <div class="stat">1 in 4</div>
+    <div class="stat-label">Swiss websites is a digital ghost — the name exists, but nothing is behind it.</div>
+    <div class="message">
+      450,916 .ch domains resolve to no server at all. You could be trusting a link that leads nowhere — or worse, somewhere you didn't expect.
+    </div>
+  </div>
+  <div class="footer">
+    <div class="source">helvetiscan.ch · 2026 · 2.3M .ch domains scanned</div>
+    <div class="brand">helveti<span class="b-scan">scan</span></div>
+  </div>
+</div>
+
+<!-- CARD 2: Email spoofing — inverted -->
+<div class="card inverted">
+  <div class="corner"></div>
+  <div class="tag">Phishing Risk</div>
+  <div class="body">
+    <div class="stat">45%</div>
+    <div class="stat-label">of Swiss domains can be used to send fake emails in your name — right now.</div>
+    <div class="message">
+      No hacking required. 1.1 million .ch domains have no protection against email impersonation. Anyone can forge "info@yourbusiness.ch" and your customers won't see a warning.
+    </div>
+  </div>
+  <div class="footer">
+    <div class="source">helvetiscan.ch · 2026 · Email Security Analysis</div>
+    <div class="brand">helveti<span class="b-scan">scan</span></div>
+  </div>
+</div>
+
+<!-- CARD 3: Unencrypted HTTP -->
+<div class="card">
+  <div class="corner"></div>
+  <div class="tag">Data Privacy</div>
+  <div class="body">
+    <div class="stat">1 in 3</div>
+    <div class="stat-label">Swiss websites sends your data unencrypted — like a postcard, not a sealed envelope.</div>
+    <div class="message">
+      28.3% of live .ch sites still use plain HTTP. Every form you fill in, every password you type, every message you send travels across the internet in plain text — readable by anyone on the same network.
+    </div>
+  </div>
+  <div class="footer">
+    <div class="source">helvetiscan.ch · 2026 · HTTPS / TLS Analysis</div>
+    <div class="brand">helveti<span class="b-scan">scan</span></div>
+  </div>
+</div>
+
+<!-- CARD 4: Exposed login panels -->
+<div class="card">
+  <div class="corner"></div>
+  <div class="tag">Open Doors</div>
+  <div class="body">
+    <div class="stat">870K</div>
+    <div class="stat-label">Swiss websites leave their admin login panel open to anyone on the internet.</div>
+    <div class="message">
+      That's 34% of all .ch domains — control rooms with unlocked front doors. In retail and hospitality, it's 1 in 2. No special skills needed to find them: just type /admin.
+    </div>
+  </div>
+  <div class="footer">
+    <div class="source">helvetiscan.ch · 2026 · Exposed Services Scan</div>
+    <div class="brand">helveti<span class="b-scan">scan</span></div>
+  </div>
+</div>
+
+<!-- CARD 5: CVE / Vulnerabilities — inverted -->
+<div class="card inverted">
+  <div class="corner"></div>
+  <div class="tag">Known Vulnerabilities</div>
+  <div class="body">
+    <div class="stat">977K</div>
+    <div class="stat-label">Swiss websites run software with security holes that hackers are actively exploiting today.</div>
+    <div class="message">
+      38% of all .ch domains match vulnerabilities on the US government's official "currently being exploited" list. These aren't theoretical risks — they are attacks happening right now, on Swiss infrastructure.
+    </div>
+  </div>
+  <div class="footer">
+    <div class="source">helvetiscan.ch · 2026 · CISA KEV Match Analysis</div>
+    <div class="brand">helveti<span class="b-scan">scan</span></div>
+  </div>
+</div>
+
+<!-- CARD 6: Data Sovereignty / Jurisdiction -->
+<div class="card">
+  <div class="corner"></div>
+  <div class="tag">Data Sovereignty</div>
+  <div class="body">
+    <div class="stat">40.6%</div>
+    <div class="stat-label">of Swiss websites are hosted outside Switzerland — beyond the reach of Swiss law.</div>
+    <div class="message">
+      207,977 .ch domains have both their servers and their DNS controls abroad. German and US providers dominate. Swiss data protection law may say one thing — but the infrastructure that carries your data answers to someone else.
+    </div>
+  </div>
+  <div class="footer">
+    <div class="source">helvetiscan.ch · 2026 · Hosting & Jurisdiction Analysis</div>
+    <div class="brand">helveti<span class="b-scan">scan</span></div>
+  </div>
+</div>
+
+<!-- CARD 7: WordPress monoculture — inverted -->
+<div class="card inverted">
+  <div class="corner"></div>
+  <div class="tag">Monoculture Risk</div>
+  <div class="body">
+    <div class="stat">1 in 5</div>
+    <div class="stat-label">Swiss websites runs WordPress — one vulnerability affects them all at once.</div>
+    <div class="message">
+      WordPress powers 71.5% of identifiable CMS sites in Switzerland — roughly 19% of every live .ch domain. When a critical WordPress flaw is discovered, it doesn't threaten one website. It threatens a fifth of the Swiss web simultaneously.
+    </div>
+  </div>
+  <div class="footer">
+    <div class="source">helvetiscan.ch · 2026 · CMS & Stack Analysis</div>
+    <div class="brand">helveti<span class="b-scan">scan</span></div>
+  </div>
+</div>
+
+</body>
+</html>

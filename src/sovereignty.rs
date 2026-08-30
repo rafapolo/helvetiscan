@@ -13,7 +13,7 @@ const EU_COUNTRIES: &[&str] = &[
     "NL", "PL", "PT", "RO", "SE", "SI", "SK",
 ];
 
-fn country_to_jurisdiction(code: &str) -> &'static str {
+pub(crate) fn country_to_jurisdiction(code: &str) -> &'static str {
     match code {
         "CH" => "CH",
         "US" => "US",

