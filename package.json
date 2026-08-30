@@ -11,10 +11,10 @@
     "serve": "bun web/serve.js"
   },
   "devDependencies": {
-    "apache-arrow": "^21.1.0",
-    "playwright": "^1.60.0"
+    "apache-arrow": "^21.2.0",
+    "playwright": "^1.62.1"
   },
   "dependencies": {
-    "csv-parse": "^6.2.1"
+    "csv-parse": "^7.0.2"
   }
 }
