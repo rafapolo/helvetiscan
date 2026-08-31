@@ -116,19 +116,68 @@ CISA KEV feed the scan stages already pull in), then `snapshot`. Each stage is t
 `logs/benchmark-<YYYY-MM>.log`, which is copied into the snapshot's own directory once it
 exists.
 
+### Pipeline shape — what can run in parallel
+
+```mermaid
+flowchart TD
+    Init["init\nload/refresh domain list"]
+
+    subgraph Phase1["Phase 1 — network scans · parallel-safe\neach hits a different remote service, no data dependency between them"]
+        direction LR
+        Scan["scan\nHTTP"]
+        Dns["dns"]
+        Tls["tls"]
+        Ports["ports"]
+        Sub["subdomains\nCT logs + AXFR"]
+    end
+
+    Init --> Scan & Dns & Tls & Ports & Sub
+
+    subgraph Phase2["Phase 2 — post-processing · must be sequential\neach stage reads the previous stage's output"]
+        direction TB
+        Smtp["smtp-check"]
+        Detect["detect\nJS libs / frameworks / WP plugins"]
+        UpdateCves["update-cves\nCISA KEV + seed matching\n(reads detect + ports banners)"]
+        VerifyCves["verify-cves\n(reads update-cves matches)"]
+        Classify["classify"]
+        Sovereignty["sovereignty"]
+        Smtp --> Detect --> UpdateCves --> VerifyCves --> Classify --> Sovereignty
+    end
+
+    Scan & Dns & Tls & Ports & Sub --> Smtp
+
+    Sovereignty --> Benchmark["benchmark"]
+    Benchmark --> FetchFeeds["fetch-feeds --all\nNVD / OSV.dev / GHSA"]
+    FetchFeeds --> Snap["snapshot\n→ data/snapshots/month=YYYY-MM/"]
+```
+
+Phase 1's five modules have no dependency on each other — `scan`, `dns`, `tls`, `ports`, and
+`subdomains` each write to their own table and hit a different remote service (HTTP, DNS
+resolvers, TLS handshake, arbitrary TCP ports, crt.sh/AXFR), so they're safe to run
+concurrently. Phase 2 is a real chain and cannot be parallelized: `detect` needs `scan`'s
+`status_code` and must run after `ports` too (CVE matching folds in `ports_info` banners
+alongside `detect`'s `software_detections`), `update-cves` needs `detect`'s output,
+`verify-cves` needs `update-cves`'s matches, and so on down to `sovereignty`.
+
+### How `scripts/monthly.sh` runs this — `SCAN_MODE`
+
 `helvetiscan full` — the single command meant to run the whole scan pipeline in one process —
 hangs at real full-namespace scale (millions of pending domains): the process stays CPU-busy but
 stops writing to the database entirely after some minutes. Root cause not yet found; not
-reproducible at small scale (e.g. the 5-domain e2e test). Until it's fixed, `scripts/monthly.sh`
-defaults to `SEQUENTIAL_SCAN=1`, which runs each phase as its own standalone `helvetiscan`
-command instead, mirroring `full`'s own phase order exactly (`cmd_full_pipeline` in
-`src/main.rs`) — `scan → dns → tls → ports → subdomains` (Phase 1), then
-`smtp-check → detect → update-cves → verify-cves → classify → sovereignty` (Phase 2), then
-`benchmark`. `detect` (JS libraries/frameworks/WordPress plugins) has to run before
-`update-cves`, since CVE matching folds in whatever's already in `software_detections` — and
-after `ports`, since it also folds in `ports_info` banners. Set `SEQUENTIAL_SCAN=0` to use `full`
-once the hang is root-caused and fixed. `DOMAINS_LIST` and `PARALLEL_DIVISOR` (the latter only
-applies to the `full` codepath) are also overridable via environment variables — see the
+reproducible at small scale (e.g. the 5-domain e2e test, or a 1.5M-row synthetic-domain repro
+attempt — see task notes). `scripts/monthly.sh` selects how Phase 1 actually runs via
+`SCAN_MODE`:
+
+| `SCAN_MODE` | What it does |
+|---|---|
+| `concurrent` (default) | Each Phase 1 module as its own standalone OS process, all five launched at once against the one WAL database, with a barrier that fails the run if any module fails. Local test (60k synthetic domains): 120.5s vs 474.9s sequential — 3.9x faster, zero write contention/corruption. **Not yet validated at real full-namespace scale (millions of domains).** |
+| `sequential` | Each Phase 1 module one after another — the most conservative option, same total-time shape as summing every stage's duration. Use if a concurrent run misbehaves in production. |
+| `full` | `helvetiscan full`'s in-process 5-module orchestration — left in for debugging only; do not use for a production run until the hang above is root-caused. |
+
+Phase 2 always runs sequentially regardless of `SCAN_MODE` — there's no dependency structure to
+exploit there. The legacy `SEQUENTIAL_SCAN=1`/`SEQUENTIAL_SCAN=0` toggle still works as a
+back-compat shim when `SCAN_MODE` is unset. `DOMAINS_LIST` and `PARALLEL_DIVISOR` (the latter
+only applies to `SCAN_MODE=full`) are also overridable via environment variables — see the
 script's own comments for details.
 
 Snapshots are compact enough to pull back from a scan host to a local machine after each run
