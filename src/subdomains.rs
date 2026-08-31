@@ -19,6 +19,98 @@ use crate::shared::{
 use crate::dns_scan::{collect_ip_strings, collect_lookup_strings};
 use crate::SubdomainsArgs;
 
+// ---- Global crt.sh rate limiter ----
+//
+// The old design paid a fixed 2s `sleep` in every task *after* its single crt.sh
+// GET, ostensibly "to rate-limit crt.sh". Because each task only ever issues one
+// crt.sh request, that sleep never actually throttled a task's request rate — it
+// just added 2s of latency to every domain (~half the per-domain wall time on a
+// well-connected host). This pacer instead caps the *aggregate* crt.sh request
+// rate across all concurrent tasks to `rps` req/s, decoupled from task
+// concurrency, and adds latency to a task only when crt.sh is the bottleneck.
+struct CrtShPacer {
+    interval: Option<Duration>,
+    next: tokio::sync::Mutex<tokio::time::Instant>,
+}
+
+impl CrtShPacer {
+    fn new(rps: f64) -> Self {
+        let interval = if rps > 0.0 {
+            Some(Duration::from_secs_f64(1.0 / rps))
+        } else {
+            None // 0 or negative => unlimited (no pacing)
+        };
+        Self {
+            interval,
+            next: tokio::sync::Mutex::new(tokio::time::Instant::now()),
+        }
+    }
+
+    /// Wait until this task is allowed to issue its crt.sh request.
+    async fn throttle(&self) {
+        let Some(interval) = self.interval else { return };
+        let scheduled = {
+            let mut next = self.next.lock().await;
+            let now = tokio::time::Instant::now();
+            let scheduled = (*next).max(now);
+            *next = scheduled + interval;
+            scheduled
+        };
+        tokio::time::sleep_until(scheduled).await;
+    }
+}
+
+// ---- Per-step timing instrumentation (gated by SUBDOMAINS_TIMING=1) ----
+use std::sync::atomic::AtomicU64;
+
+#[derive(Clone, Copy)]
+enum TimingStep { Ct, Axfr, Harvest }
+
+struct StepTimings {
+    ns: [AtomicU64; 3],
+    n: [AtomicU64; 3],
+    max_ns: [AtomicU64; 3],
+}
+
+static TIMINGS: StepTimings = StepTimings {
+    ns: [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)],
+    n: [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)],
+    max_ns: [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)],
+};
+
+fn timing_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var("SUBDOMAINS_TIMING").is_ok())
+}
+
+fn timing_record(step: TimingStep, d: Duration) {
+    if !timing_enabled() { return; }
+    let i = step as usize;
+    let nanos = d.as_nanos() as u64;
+    TIMINGS.ns[i].fetch_add(nanos, Ordering::Relaxed);
+    TIMINGS.n[i].fetch_add(1, Ordering::Relaxed);
+    TIMINGS.max_ns[i].fetch_max(nanos, Ordering::Relaxed);
+}
+
+fn timing_report() {
+    if !timing_enabled() { return; }
+    let labels = ["ct_fetch", "axfr_loop", "mx_ns_harvest"];
+    eprintln!("=== subdomains per-step timing (wall time summed across concurrent tasks) ===");
+    for i in 0..3 {
+        let total = TIMINGS.ns[i].load(Ordering::Relaxed);
+        let n = TIMINGS.n[i].load(Ordering::Relaxed).max(1);
+        let max = TIMINGS.max_ns[i].load(Ordering::Relaxed);
+        eprintln!(
+            "  {:<14} avg {:>8.1}ms   max {:>8.1}ms   total {:>10.1}s   (n={})",
+            labels[i],
+            (total as f64 / n as f64) / 1e6,
+            max as f64 / 1e6,
+            total as f64 / 1e9,
+            n,
+        );
+    }
+}
+
 pub(crate) async fn cmd_subdomains(
     args: SubdomainsArgs,
     ext_shutdown_rx: Option<tokio::sync::watch::Receiver<bool>>,
@@ -113,6 +205,14 @@ pub(crate) async fn cmd_subdomains(
         )))
     };
 
+    let pacer = Arc::new(CrtShPacer::new(args.crtsh_rps));
+    let ct_client = Arc::new(
+        reqwest::Client::builder()
+            .timeout(Duration::from_secs(30))
+            .pool_max_idle_per_host(args.concurrency)
+            .build()
+            .context("build crt.sh HTTP client")?,
+    );
     let dispatcher_handle = tokio::spawn(dispatcher_loop_subdomains(
         work_rx,
         result_tx,
@@ -120,6 +220,9 @@ pub(crate) async fn cmd_subdomains(
         resolver,
         args.concurrency,
         dispatcher_cancel_rx,
+        ct_client,
+        pacer,
+        args.axfr_budget,
     ));
 
     reader_handle.await.context("subdomains reader task panicked")?.context("subdomains reader failed")?;
@@ -131,6 +234,8 @@ pub(crate) async fn cmd_subdomains(
         let _ = h.await;
     }
 
+    timing_report();
+
     Ok(())
 }
 
@@ -141,6 +246,9 @@ async fn dispatcher_loop_subdomains(
     resolver: TokioResolver,
     max_concurrency: usize,
     mut cancel_rx: tokio::sync::watch::Receiver<bool>,
+    client: Arc<reqwest::Client>,
+    pacer: Arc<CrtShPacer>,
+    axfr_budget: Duration,
 ) -> Result<()> {
     let sem = Arc::new(sem);
     let resolver = Arc::new(resolver);
@@ -162,10 +270,12 @@ async fn dispatcher_loop_subdomains(
             let permit = sem.clone().acquire_owned().await.context("semaphore closed")?;
             let resolver = resolver.clone();
             let tx = result_tx.clone();
+            let client = client.clone();
+            let pacer = pacer.clone();
 
             joinset.spawn(async move {
                 let _permit = permit;
-                let row = probe_subdomains(resolver, domain).await;
+                let row = probe_subdomains(resolver, domain, client, pacer, axfr_budget).await;
                 let _ = tx.send(row).await;
             });
 
@@ -182,10 +292,12 @@ async fn dispatcher_loop_subdomains(
             let permit = sem.clone().acquire_owned().await.context("semaphore closed")?;
             let resolver = resolver.clone();
             let tx = result_tx.clone();
+            let client = client.clone();
+            let pacer = pacer.clone();
 
             joinset.spawn(async move {
                 let _permit = permit;
-                let row = probe_subdomains(resolver, domain).await;
+                let row = probe_subdomains(resolver, domain, client, pacer, axfr_budget).await;
                 let _ = tx.send(row).await;
             });
 
@@ -201,67 +313,138 @@ async fn dispatcher_loop_subdomains(
     Ok(())
 }
 
-async fn probe_subdomains(resolver: Arc<TokioResolver>, domain: String) -> SubdomainRow {
+async fn probe_subdomains(
+    resolver: Arc<TokioResolver>,
+    domain: String,
+    client: Arc<reqwest::Client>,
+    pacer: Arc<CrtShPacer>,
+    axfr_budget: Duration,
+) -> SubdomainRow {
     let apex_bare = domain.trim_end_matches('.').to_ascii_lowercase();
     let apex_suffix = format!(".{apex_bare}");
 
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut found: Vec<(String, &'static str)> = Vec::new();
 
-    // 1. CT logs (primary)
-    for sub in fetch_ct_subdomains(&apex_bare).await {
+    // CT logs (crt.sh HTTP) and DNS-based discovery (AXFR + NS/MX harvest) hit
+    // completely independent services, so run them concurrently instead of
+    // serializing CT -> sleep -> AXFR -> harvest. Per-domain wall time becomes
+    // roughly max(ct, dns) rather than their sum.
+    let ct_fut = async {
+        let t = std::time::Instant::now();
+        let subs = fetch_ct_subdomains(&apex_bare, &client, &pacer).await;
+        timing_record(TimingStep::Ct, t.elapsed());
+        subs
+    };
+    let dns_fut = dns_discovery(&resolver, &domain, &apex_suffix, axfr_budget);
+
+    let (ct_subs, (axfr_subs, harvest_subs)) = tokio::join!(ct_fut, dns_fut);
+
+    for sub in ct_subs {
         if seen.insert(sub.clone()) {
             found.push((sub, "ct"));
         }
     }
-
-    // 2. AXFR (opportunistic) — 2-second pause after CT fetch to rate-limit crt.sh
-    tokio::time::sleep(Duration::from_secs(2)).await;
-
-    let ns_list = collect_lookup_strings(&resolver, &domain, RecordType::NS)
-        .await
-        .unwrap_or_default();
-
-    'axfr: for ns in &ns_list {
-        let ns_host = ns.trim_end_matches('.');
-        let mut ns_ips = collect_ip_strings(&resolver, ns_host, RecordType::A)
-            .await
-            .unwrap_or_default();
-        ns_ips.extend(
-            collect_ip_strings(&resolver, ns_host, RecordType::AAAA)
-                .await
-                .unwrap_or_default(),
-        );
-        for ip_str in ns_ips {
-            if let Ok(ip) = ip_str.parse::<IpAddr>() {
-                let axfr = axfr_from_ns_ip(ip, &domain).await;
-                if !axfr.is_empty() {
-                    for sub in axfr {
-                        if seen.insert(sub.clone()) {
-                            found.push((sub, "axfr"));
-                        }
-                    }
-                    break 'axfr;
-                }
-            }
+    for sub in axfr_subs {
+        if seen.insert(sub.clone()) {
+            found.push((sub, "axfr"));
         }
     }
-
-    // 3. NS/MX harvest (fallback)
-    let (mx_result, ns_result) = tokio::join!(
-        collect_lookup_strings(&resolver, &domain, RecordType::MX),
-        collect_lookup_strings(&resolver, &domain, RecordType::NS),
-    );
-    for name in ns_result.unwrap_or_default().into_iter().chain(mx_result.unwrap_or_default()) {
-        let clean = name.trim_end_matches('.').to_ascii_lowercase();
-        if clean.ends_with(&apex_suffix) && seen.insert(clean.clone()) {
-            found.push((clean, "mx_ns"));
+    for sub in harvest_subs {
+        if seen.insert(sub.clone()) {
+            found.push((sub, "mx_ns"));
         }
     }
 
     found.sort_by(|a, b| a.0.cmp(&b.0));
 
     SubdomainRow { domain, found }
+}
+
+/// DNS-based subdomain discovery: an opportunistic AXFR attempt (bounded by
+/// `axfr_budget`) plus an NS/MX harvest. Shares a single NS lookup between the
+/// two (the old code looked NS up twice). Returns (axfr_subs, harvest_subs).
+async fn dns_discovery(
+    resolver: &Arc<TokioResolver>,
+    domain: &str,
+    apex_suffix: &str,
+    axfr_budget: Duration,
+) -> (Vec<String>, Vec<String>) {
+    // NS and MX resolve concurrently; NS feeds both the AXFR attempt and harvest.
+    let (ns_result, mx_result) = tokio::join!(
+        collect_lookup_strings(resolver, domain, RecordType::NS),
+        collect_lookup_strings(resolver, domain, RecordType::MX),
+    );
+    let ns_list = ns_result.unwrap_or_default();
+    let mx_list = mx_result.unwrap_or_default();
+
+    // AXFR attempt, capped by a single overall deadline instead of letting
+    // per-NS connect/read timeouts multiply across every nameserver serially.
+    let t = std::time::Instant::now();
+    let axfr_subs = tokio::time::timeout(
+        axfr_budget,
+        try_axfr(resolver, domain, &ns_list),
+    )
+    .await
+    .unwrap_or_default();
+    timing_record(TimingStep::Axfr, t.elapsed());
+
+    // NS/MX harvest fallback (reuses the NS list already fetched above).
+    let t = std::time::Instant::now();
+    let mut harvest = Vec::new();
+    for name in ns_list.iter().chain(mx_list.iter()) {
+        let clean = name.trim_end_matches('.').to_ascii_lowercase();
+        if clean.ends_with(apex_suffix) {
+            harvest.push(clean);
+        }
+    }
+    timing_record(TimingStep::Harvest, t.elapsed());
+
+    (axfr_subs, harvest)
+}
+
+/// Resolve every nameserver's A/AAAA concurrently, then attempt AXFR against the
+/// resulting IPs, stopping at the first that yields a non-empty zone. The whole
+/// function is meant to run under an external `timeout(axfr_budget, ...)`.
+async fn try_axfr(
+    resolver: &Arc<TokioResolver>,
+    domain: &str,
+    ns_list: &[String],
+) -> Vec<String> {
+    if ns_list.is_empty() {
+        return Vec::new();
+    }
+
+    // Resolve A + AAAA for all nameservers in parallel (was serial A-then-AAAA,
+    // per NS, across every NS — the dominant cost for the ~all .ch domains that
+    // refuse zone transfer).
+    let ip_futs = ns_list.iter().map(|ns| {
+        let ns_host = ns.trim_end_matches('.').to_string();
+        async move {
+            let (a, aaaa) = tokio::join!(
+                collect_ip_strings(resolver, &ns_host, RecordType::A),
+                collect_ip_strings(resolver, &ns_host, RecordType::AAAA),
+            );
+            let mut ips = a.unwrap_or_default();
+            ips.extend(aaaa.unwrap_or_default());
+            ips
+        }
+    });
+    let per_ns_ips = futures_util::future::join_all(ip_futs).await;
+
+    let mut tried = std::collections::HashSet::new();
+    for ip_str in per_ns_ips.into_iter().flatten() {
+        if !tried.insert(ip_str.clone()) {
+            continue;
+        }
+        if let Ok(ip) = ip_str.parse::<IpAddr>() {
+            let axfr = axfr_from_ns_ip(ip, domain).await;
+            if !axfr.is_empty() {
+                return axfr;
+            }
+        }
+    }
+    Vec::new()
 }
 
 /// Attempt DNS zone transfer (AXFR) from `ns_ip` for `domain`.
@@ -337,33 +520,40 @@ async fn axfr_from_ns_ip(ns_ip: IpAddr, domain: &str) -> Vec<String> {
     found
 }
 
+/// Issue one crt.sh GET. `Ok(body)` on success; `Err(retryable)` on failure,
+/// where `retryable` is false for timeouts (already spent the full budget) and
+/// true for fast connection-level errors worth one more attempt.
+async fn send_ct_request(client: &reqwest::Client, url: &str) -> std::result::Result<String, bool> {
+    match client.get(url).send().await {
+        Ok(r) => r.text().await.map_err(|e| !e.is_timeout()),
+        Err(e) => Err(!e.is_timeout()),
+    }
+}
+
 /// Query crt.sh Certificate Transparency logs for known subdomains of `domain`.
-async fn fetch_ct_subdomains(domain: &str) -> Vec<String> {
+async fn fetch_ct_subdomains(domain: &str, client: &reqwest::Client, pacer: &CrtShPacer) -> Vec<String> {
     let url = format!("https://crt.sh/?q=%.{}&output=json", domain);
     let apex = domain.trim_end_matches('.').to_ascii_lowercase();
     let suffix = format!(".{apex}");
 
-    let client = match reqwest::Client::builder()
-        .timeout(Duration::from_secs(30))
-        .build()
-    {
-        Ok(c) => c,
-        Err(_) => return vec![],
-    };
+    // Global rate limiter: paces aggregate crt.sh request rate across all tasks.
+    pacer.throttle().await;
 
-    // Try once; on failure retry once
-    let text = match client.get(&url).send().await {
-        Ok(r) => match r.text().await {
-            Ok(t) => t,
-            Err(_) => return vec![],
-        },
-        Err(_) => match client.get(&url).send().await {
-            Ok(r) => match r.text().await {
+    // Try once; retry once only on a *fast* failure (connection/reset). A request
+    // that already timed out consumed the full budget and would almost certainly
+    // time out again on retry, so retrying it just doubled the worst-case tail
+    // (30s + 30s = 60s) while pinning a concurrency slot — don't.
+    let text = match send_ct_request(client, &url).await {
+        Ok(t) => t,
+        Err(retryable) => {
+            if !retryable {
+                return vec![];
+            }
+            match send_ct_request(client, &url).await {
                 Ok(t) => t,
                 Err(_) => return vec![],
-            },
-            Err(_) => return vec![],
-        },
+            }
+        }
     };
 
     let json: Vec<serde_json::Value> = match serde_json::from_str(&text) {
