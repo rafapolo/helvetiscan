@@ -628,8 +628,27 @@ fn raise_nofile_limit() {
     }
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+/// Number of tokio worker threads. Defaults to the core count; `HELVETISCAN_WORKER_THREADS`
+/// overrides it, which lets a small production host (e.g. a 4-vCPU VM) be reproduced on a
+/// larger dev box for load testing.
+fn worker_threads() -> usize {
+    std::env::var("HELVETISCAN_WORKER_THREADS")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or_else(|| std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1))
+}
+
+fn main() -> Result<()> {
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(worker_threads())
+        .enable_all()
+        .build()
+        .context("building tokio runtime")?
+        .block_on(async_main())
+}
+
+async fn async_main() -> Result<()> {
     raise_nofile_limit();
     let cli = Cli::parse();
     let retry_errors = cli.retry_errors;
