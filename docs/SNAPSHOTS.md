@@ -110,12 +110,26 @@ away in `risk_score`.
 
 ## Operational workflow
 
-`scripts/monthly.sh` runs the whole monthly cycle: load any newly-registered domains, `full`
+`scripts/monthly.sh` runs the whole monthly cycle: load any newly-registered domains, a full
 re-scan, refresh the CVE catalog from every available source (`fetch-feeds --all`, on top of the
-CISA KEV feed `full` already pulls in), then `snapshot`. Each stage is timed into
+CISA KEV feed the scan stages already pull in), then `snapshot`. Each stage is timed into
 `logs/benchmark-<YYYY-MM>.log`, which is copied into the snapshot's own directory once it
-exists. `DOMAINS_LIST` and `PARALLEL_DIVISOR` are overridable via environment variables — see
-the script's own comments.
+exists.
+
+`helvetiscan full` — the single command meant to run the whole scan pipeline in one process —
+hangs at real full-namespace scale (millions of pending domains): the process stays CPU-busy but
+stops writing to the database entirely after some minutes. Root cause not yet found; not
+reproducible at small scale (e.g. the 5-domain e2e test). Until it's fixed, `scripts/monthly.sh`
+defaults to `SEQUENTIAL_SCAN=1`, which runs each phase as its own standalone `helvetiscan`
+command instead, mirroring `full`'s own phase order exactly (`cmd_full_pipeline` in
+`src/main.rs`) — `scan → dns → tls → ports → subdomains` (Phase 1), then
+`smtp-check → detect → update-cves → verify-cves → classify → sovereignty` (Phase 2), then
+`benchmark`. `detect` (JS libraries/frameworks/WordPress plugins) has to run before
+`update-cves`, since CVE matching folds in whatever's already in `software_detections` — and
+after `ports`, since it also folds in `ports_info` banners. Set `SEQUENTIAL_SCAN=0` to use `full`
+once the hang is root-caused and fixed. `DOMAINS_LIST` and `PARALLEL_DIVISOR` (the latter only
+applies to the `full` codepath) are also overridable via environment variables — see the
+script's own comments for details.
 
 Snapshots are compact enough to pull back from a scan host to a local machine after each run
 (hundreds of MB, not the tens of GB of `domains.db` itself):

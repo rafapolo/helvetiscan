@@ -53,12 +53,15 @@ growing without bound. See `docs/SNAPSHOTS.md` for the full design/workflow writ
 `docs/SCHEMA.md#snapshots` for what's recorded, and `tasks/done/task_23_monthly_snapshots.md`
 for the original design rationale.
 
-Run once a month via cron/launchd (no in-binary scheduler); `scripts/monthly.sh` wraps the full
-scan + snapshot chain and is the intended cron target:
+`scripts/monthly.sh` wraps the whole scan + CVE-refresh + snapshot chain and is meant to run
+once a month (no in-binary scheduler) — via cron/launchd, or triggered manually:
 
 ```
-0 3 1 * * /root/helvetiscan/scripts/monthly.sh
+./scripts/monthly.sh
 ```
+
+See `docs/SNAPSHOTS.md#operational-workflow` for what it actually runs and why (a `full`
+pipeline hang at real scale currently forces a sequential-standalone-modules workaround there).
 
 Each month lands in `data/snapshots/month=YYYY-MM/*.parquet`, written atomically (temp dir +
 rename, so a reader never sees a half-written month) with a `manifest.json` completeness
