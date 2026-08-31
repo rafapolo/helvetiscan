@@ -604,6 +604,13 @@ columns, per-file SHA-256 checksum, tool version, and this same coverage block) 
 this row's data readable without opening SQLite at all. `helvetiscan snapshot --verify --month
 YYYY-MM` recomputes each file's checksum against it.
 
+A second, flat file — `data/snapshots/snapshot_YYYY-MM.json` (note: no `month=` directory, one
+level up) — is also written on every successful run: this row's `row_counts`/`coverage` plus a
+`metrics` block of headline dataset numbers computed off the `risk_score` view (missing-HSTS %,
+weak-TLS %, cert-expiring %, CVE/KEV counts, top CMS/sectors, etc.) so month-over-month trend
+reading (`data/snapshots/snapshot_*.json`) doesn't require opening Parquet — see
+`docs/SNAPSHOTS.md#snapshot_monthjson--the-flat-cross-month-history`.
+
 ```sql
 -- Snapshot history
 SELECT snapshot_month, status, started_at, finished_at FROM snapshot_runs ORDER BY snapshot_month;

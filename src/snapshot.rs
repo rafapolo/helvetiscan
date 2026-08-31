@@ -68,6 +68,57 @@ struct TableManifestEntry {
     sha256: String,
 }
 
+/// Headline dataset metrics for this month, computed straight off the `risk_score` view (the
+/// same definitions used everywhere else in the project — README's "Mapping" numbers, the
+/// benchmark command, etc.) plus a few counts from `cve_matches`/`domains`/`domain_classification`
+/// not carried by that view. Written into `snapshot_<month>.json` (see `SnapshotSummary` below)
+/// so month-over-month trend reading doesn't require opening Parquet with Polars just to answer
+/// "did CVE exposure go up or down" — a flat JSON history is enough for that, and cheap to diff.
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+struct SnapshotMetrics {
+    total_domains: i64,
+    avg_risk_score: Option<f64>,
+    missing_hsts_pct: f64,
+    missing_csp_pct: f64,
+    missing_caa_pct: f64,
+    weak_tls_pct: f64,
+    cert_expired_pct: f64,
+    cert_expiring_30d_pct: f64,
+    no_dnssec_pct: f64,
+    dmarc_weak_pct: f64,
+    exposed_db_port_pct: f64,
+    exposed_risky_port_pct: f64,
+    exposed_ftp_pct: f64,
+    exposed_docker_api_pct: f64,
+    has_critical_cve_pct: f64,
+    spf_permissive_pct: f64,
+    no_dkim_pct: f64,
+    smtp_no_starttls_pct: f64,
+    smtp_starttls_fails_pct: f64,
+    cve_total_matches: i64,
+    cve_domains_affected: i64,
+    cve_kev_matches: i64,
+    cve_critical_matches: i64,
+    top_cms: Vec<(String, i64)>,
+    top_sectors: Vec<(String, i64)>,
+}
+
+/// The `snapshot_<month>.json` file itself — one per month, written flat under `output_dir`
+/// (not inside `month=YYYY-MM/`) so `data/snapshots/snapshot_*.json` glob-reads across every
+/// month present without descending into hive-partitioned directories, and survives a
+/// `month=YYYY-MM/` dir being pruned/archived independently of this lighter-weight history.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct SnapshotSummary {
+    snapshot_month: String,
+    tool_version: String,
+    started_at: String,
+    finished_at: String,
+    duration_seconds: Option<i64>,
+    row_counts: BTreeMap<String, i64>,
+    coverage: BTreeMap<String, ModuleCoverage>,
+    metrics: SnapshotMetrics,
+}
+
 /// Written last into each month's directory — a completeness marker readable without opening
 /// SQLite at all (tasks/done/task_27_snapshot_export_atomicity.md step 4). `snapshot_runs`
 /// stays the source of truth for anything that needs querying across months from the DB side;
@@ -265,6 +316,31 @@ fn run_snapshot(
         ],
     )?;
 
+    // Final step: compute headline dataset metrics and write the flat, cross-month
+    // `snapshot_<month>.json` history file, so next month's run (or any offline analysis) has
+    // real numbers to compare against without opening Parquet — deliberately last, after
+    // everything that can fail has already succeeded.
+    let metrics = compute_metrics(conn)?;
+    let duration_seconds = chrono::DateTime::parse_from_rfc3339(started_at)
+        .ok()
+        .zip(chrono::DateTime::parse_from_rfc3339(&finished_at).ok())
+        .map(|(s, f)| (f - s).num_seconds());
+    let row_counts: BTreeMap<String, i64> = exported
+        .iter()
+        .map(|t| (t.table.clone(), t.row_count))
+        .collect();
+    let summary = SnapshotSummary {
+        snapshot_month: month.to_string(),
+        tool_version: env!("CARGO_PKG_VERSION").to_string(),
+        started_at: started_at.to_string(),
+        finished_at,
+        duration_seconds,
+        row_counts,
+        coverage,
+        metrics,
+    };
+    write_snapshot_summary(&args.output_dir, &summary)?;
+
     eprintln!("snapshot {month}: done");
     Ok(())
 }
@@ -366,6 +442,119 @@ fn compute_coverage(conn: &Connection) -> Result<BTreeMap<String, ModuleCoverage
         );
     }
     Ok(out)
+}
+
+fn compute_metrics(conn: &Connection) -> Result<SnapshotMetrics> {
+    let mut m = SnapshotMetrics::default();
+
+    // One pass over risk_score for every percentage — same flag definitions used across the
+    // rest of the project, so these numbers are directly comparable to README/benchmark output.
+    conn.query_row(
+        "SELECT
+            COUNT(*),
+            AVG(score),
+            AVG(missing_hsts) * 100.0,
+            AVG(missing_csp) * 100.0,
+            AVG(missing_caa) * 100.0,
+            AVG(weak_tls) * 100.0,
+            AVG(cert_expired) * 100.0,
+            AVG(cert_expiring) * 100.0,
+            AVG(no_dnssec) * 100.0,
+            AVG(dmarc_weak) * 100.0,
+            AVG(exposed_db_port) * 100.0,
+            AVG(exposed_risky_port) * 100.0,
+            AVG(exposed_ftp) * 100.0,
+            AVG(exposed_docker_api) * 100.0,
+            AVG(has_critical_cve) * 100.0,
+            AVG(spf_permissive) * 100.0,
+            AVG(no_dkim) * 100.0,
+            AVG(smtp_no_starttls) * 100.0,
+            AVG(smtp_starttls_fails) * 100.0
+         FROM risk_score",
+        [],
+        |r| {
+            m.total_domains = r.get(0)?;
+            m.avg_risk_score = r.get(1)?;
+            m.missing_hsts_pct = r.get::<_, Option<f64>>(2)?.unwrap_or(0.0);
+            m.missing_csp_pct = r.get::<_, Option<f64>>(3)?.unwrap_or(0.0);
+            m.missing_caa_pct = r.get::<_, Option<f64>>(4)?.unwrap_or(0.0);
+            m.weak_tls_pct = r.get::<_, Option<f64>>(5)?.unwrap_or(0.0);
+            m.cert_expired_pct = r.get::<_, Option<f64>>(6)?.unwrap_or(0.0);
+            m.cert_expiring_30d_pct = r.get::<_, Option<f64>>(7)?.unwrap_or(0.0);
+            m.no_dnssec_pct = r.get::<_, Option<f64>>(8)?.unwrap_or(0.0);
+            m.dmarc_weak_pct = r.get::<_, Option<f64>>(9)?.unwrap_or(0.0);
+            m.exposed_db_port_pct = r.get::<_, Option<f64>>(10)?.unwrap_or(0.0);
+            m.exposed_risky_port_pct = r.get::<_, Option<f64>>(11)?.unwrap_or(0.0);
+            m.exposed_ftp_pct = r.get::<_, Option<f64>>(12)?.unwrap_or(0.0);
+            m.exposed_docker_api_pct = r.get::<_, Option<f64>>(13)?.unwrap_or(0.0);
+            m.has_critical_cve_pct = r.get::<_, Option<f64>>(14)?.unwrap_or(0.0);
+            m.spf_permissive_pct = r.get::<_, Option<f64>>(15)?.unwrap_or(0.0);
+            m.no_dkim_pct = r.get::<_, Option<f64>>(16)?.unwrap_or(0.0);
+            m.smtp_no_starttls_pct = r.get::<_, Option<f64>>(17)?.unwrap_or(0.0);
+            m.smtp_starttls_fails_pct = r.get::<_, Option<f64>>(18)?.unwrap_or(0.0);
+            Ok(())
+        },
+    )?;
+
+    conn.query_row(
+        "SELECT COUNT(*), COUNT(DISTINCT domain) FROM cve_matches",
+        [],
+        |r| {
+            m.cve_total_matches = r.get(0)?;
+            m.cve_domains_affected = r.get(1)?;
+            Ok(())
+        },
+    )?;
+    m.cve_kev_matches = conn.query_row(
+        "SELECT COUNT(*) FROM cve_matches WHERE in_kev = 1",
+        [],
+        |r| r.get(0),
+    )?;
+    m.cve_critical_matches = conn.query_row(
+        "SELECT COUNT(*) FROM cve_matches WHERE severity = 'CRITICAL'",
+        [],
+        |r| r.get(0),
+    )?;
+
+    let mut cms_stmt = conn.prepare(
+        "SELECT cms, COUNT(*) c FROM domains WHERE cms IS NOT NULL AND cms != '' \
+         GROUP BY cms ORDER BY c DESC LIMIT 10",
+    )?;
+    m.top_cms = cms_stmt
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    let mut sector_stmt = conn.prepare(
+        "SELECT sector, COUNT(*) c FROM domain_classification WHERE sector IS NOT NULL AND sector != '' \
+         GROUP BY sector ORDER BY c DESC LIMIT 10",
+    )?;
+    m.top_sectors = sector_stmt
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    Ok(m)
+}
+
+/// Writes `output_dir/snapshot_<month>.json` — the flat, cross-month-glob-friendly summary
+/// (see `SnapshotSummary`). Temp-file-then-rename, same atomicity reasoning as the month
+/// directory itself: a reader never sees a half-written summary for a month.
+fn write_snapshot_summary(
+    output_dir: &std::path::Path,
+    summary: &SnapshotSummary,
+) -> Result<()> {
+    let final_path = output_dir.join(format!("snapshot_{}.json", summary.snapshot_month));
+    let temp_path = output_dir.join(format!(
+        ".tmp-snapshot_{}-{}.json",
+        summary.snapshot_month,
+        std::process::id()
+    ));
+    fs::write(&temp_path, serde_json::to_string_pretty(summary)?)
+        .with_context(|| format!("writing {:?}", temp_path))?;
+    fs::rename(&temp_path, &final_path)
+        .with_context(|| format!("renaming {:?} -> {:?}", temp_path, final_path))?;
+    Ok(())
 }
 
 // ---- verify (task 30) ----
@@ -499,6 +688,14 @@ mod tests {
         assert!(month_dir.join("risk_score.parquet").exists());
         assert!(month_dir.join("manifest.json").exists());
 
+        let summary_path = out_dir.join("snapshot_2026-08.json");
+        assert!(summary_path.exists(), "snapshot_<month>.json should be written flat under output_dir");
+        let summary: SnapshotSummary =
+            serde_json::from_str(&fs::read_to_string(&summary_path).unwrap()).unwrap();
+        assert_eq!(summary.snapshot_month, "2026-08");
+        assert_eq!(summary.metrics.total_domains, 2);
+        assert_eq!(summary.row_counts.get("domains"), Some(&2));
+
         let conn = Connection::open(&db_path).unwrap();
         let (started_at, tables_json, status): (String, String, String) = conn
             .query_row(
@@ -593,6 +790,38 @@ mod tests {
         let mut verify_args = test_args(&db_path, &out_dir, "2026-08");
         verify_args.verify = true;
         assert!(cmd_snapshot(verify_args).is_err(), "tampered snapshot must fail verify");
+
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn compute_metrics_reports_cve_and_top_breakdowns() {
+        let dir = tempdir();
+        let db_path = dir.join("snap_test6.db");
+        let conn = Connection::open(&db_path).unwrap();
+        ensure_schema(&conn).unwrap();
+        conn.execute_batch(
+            "INSERT INTO domains (domain, status, status_code, cms) VALUES
+                ('a.ch', 'ok', 200, 'wordpress'),
+                ('b.ch', 'ok', 200, 'wordpress'),
+                ('c.ch', 'ok', 200, 'drupal');
+             INSERT INTO domain_classification (domain, sector) VALUES
+                ('a.ch', 'finance'), ('b.ch', 'finance'), ('c.ch', 'government');
+             INSERT INTO cve_matches (domain, technology, cve_id, severity, in_kev) VALUES
+                ('a.ch', 'wordpress', 'CVE-2024-0001', 'CRITICAL', 1),
+                ('b.ch', 'wordpress', 'CVE-2024-0002', 'MEDIUM', 0);",
+        )
+        .unwrap();
+
+        let metrics = compute_metrics(&conn).unwrap();
+        assert_eq!(metrics.total_domains, 3);
+        assert_eq!(metrics.cve_total_matches, 2);
+        assert_eq!(metrics.cve_domains_affected, 2);
+        assert_eq!(metrics.cve_kev_matches, 1);
+        assert_eq!(metrics.cve_critical_matches, 1);
+        assert!((metrics.has_critical_cve_pct - 100.0 / 3.0).abs() < 0.01);
+        assert_eq!(metrics.top_cms.first(), Some(&("wordpress".to_string(), 2)));
+        assert_eq!(metrics.top_sectors.first(), Some(&("finance".to_string(), 2)));
 
         cleanup(&dir);
     }

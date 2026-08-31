@@ -52,6 +52,8 @@ materialized at export time).
 
 ```
 data/snapshots/
+  snapshot_2026-07.json  # flat, cross-month summary — see below
+  snapshot_2026-08.json
   month=2026-08/
     domains.parquet
     dns_info.parquet
@@ -83,6 +85,29 @@ opening SQLite at all:
 PK, `started_at`/`finished_at`, `status` — `running`/`ok`/`failed`, `error`, `output_dir`,
 `tables_json`, `row_counts_json`, `columns_json`, `coverage_json`); the manifest is its
 self-contained mirror for readers that only have the Parquet files, not the database.
+
+## `snapshot_<month>.json` — the flat cross-month history
+
+In addition to `manifest.json` (directory-local, lives inside `month=YYYY-MM/`),
+every successful run also writes `<output_dir>/snapshot_<month>.json` — flat, one level up,
+so `data/snapshots/snapshot_*.json` glob-reads the whole history without descending into
+hive-partitioned directories or touching Parquet at all. It's the "data to enhance next ones"
+file: cheap enough to `cat`/`jq` or load with plain `json` in any language, meant for exactly
+the kind of month-over-month comparison (did CVE exposure go up? did TLS posture improve?) that
+doesn't need Polars.
+
+Written last, only after the Parquet export and DB update have both already succeeded. Contains:
+- `snapshot_month`, `tool_version`, `started_at`, `finished_at`, `duration_seconds`
+- `row_counts`: same per-table counts as the manifest
+- `coverage`: same per-module coverage as the manifest (see below)
+- `metrics`: headline dataset numbers computed straight off the `risk_score` view (the same
+  flag definitions used everywhere else in the project — README's "Mapping" bullets, the
+  `benchmark` command), plus a few counts from `cve_matches`/`domains`/`domain_classification`
+  that view doesn't carry: `avg_risk_score`, `missing_hsts_pct`, `weak_tls_pct`,
+  `cert_expiring_30d_pct`, `no_dnssec_pct`, `dmarc_weak_pct`, `exposed_db_port_pct`,
+  `exposed_ftp_pct`, `has_critical_cve_pct`, `no_dkim_pct`, `smtp_no_starttls_pct`,
+  `cve_total_matches`, `cve_domains_affected`, `cve_kev_matches`, `cve_critical_matches`,
+  `top_cms`, `top_sectors` — see `SnapshotMetrics` in `src/snapshot.rs` for the exhaustive list.
 
 ## Coverage metrics
 
