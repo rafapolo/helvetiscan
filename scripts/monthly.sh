@@ -47,16 +47,24 @@ stage() {
 stage init        "$BIN" init --input "$DOMAINS_LIST" --db "$DB"
 
 if [ "$SEQUENTIAL_SCAN" = "1" ]; then
-    stage scan       "$BIN" scan --db "$DB"
-    stage dns         "$BIN" dns --db "$DB"
-    stage tls         "$BIN" tls --db "$DB"
-    stage ports       "$BIN" ports --db "$DB"
-    stage subdomains "$BIN" subdomains --db "$DB"
-    stage smtp-check "$BIN" smtp-check --db "$DB"
-    stage update-cves "$BIN" update-cves --db "$DB"
-    stage classify     "$BIN" classify --db "$DB"
-    stage sovereignty "$BIN" sovereignty --db "$DB"
-    stage benchmark   "$BIN" benchmark --db "$DB"
+    # Mirrors `full`'s own phase order (cmd_full_pipeline in src/main.rs) exactly — Phase 1
+    # (scan/dns/tls/ports/subdomains) then Phase 2 (smtp-check/detect/update-cves/verify-cves/
+    # classify/sovereignty) then benchmark. Previously missing `detect` and `verify-cves` here
+    # meant update-cves's CVE matching ran against a stale/empty software_detections table
+    # (JS libs, frameworks, WP plugins) — detect must run before update-cves, which also folds
+    # in ports_info banners, so it needs to come after `ports` too.
+    stage scan         "$BIN" scan --db "$DB"
+    stage dns           "$BIN" dns --db "$DB"
+    stage tls           "$BIN" tls --db "$DB"
+    stage ports         "$BIN" ports --db "$DB"
+    stage subdomains   "$BIN" subdomains --db "$DB"
+    stage smtp-check   "$BIN" smtp-check --db "$DB"
+    stage detect         "$BIN" detect --db "$DB"
+    stage update-cves   "$BIN" update-cves --db "$DB"
+    stage verify-cves   "$BIN" verify-cves --db "$DB"
+    stage classify       "$BIN" classify --db "$DB"
+    stage sovereignty   "$BIN" sovereignty --db "$DB"
+    stage benchmark     "$BIN" benchmark --db "$DB"
 else
     stage full "$BIN" full --db "$DB" --parallel-divisor "$PARALLEL_DIVISOR"
 fi
