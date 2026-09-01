@@ -34,6 +34,13 @@
 #
 # Back-compat: SEQUENTIAL_SCAN=1 still forces sequential, SEQUENTIAL_SCAN=0 still forces full,
 # but only when SCAN_MODE is not set explicitly.
+#
+# NOTE: `update-cves --db` requires a binary built from src/main.rs's `UpdateCvesArgs` fix
+# (task_36). Before that fix, `update-cves` was a bare subcommand with zero args, so `--db "$DB"`
+# after it failed with "unexpected argument '--db' found" and (under `set -e`) killed the whole
+# run — confirmed on the 2026-08-30/31 production run, which died here every time after ~19h of
+# Phase 1 + smtp-check work. Deploying this script without the matching binary reintroduces that
+# crash — deploy them together.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

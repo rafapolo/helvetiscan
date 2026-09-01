@@ -67,7 +67,7 @@ enum Command {
     /// Discover subdomains via DNS zone transfer (AXFR) and NS/MX record harvest.
     Subdomains(SubdomainsArgs),
     /// Fetch/refresh the CVE catalog from CISA KEV and seed built-in entries.
-    UpdateCves,
+    UpdateCves(UpdateCvesArgs),
     /// Populate domain_technologies from scan data, then rebuild cve_matches.
     PopulateTechnologies,
     /// Re-apply the version filter to an existing cve_matches table (shrinks pre-filter data).
@@ -272,6 +272,12 @@ pub(crate) struct SubdomainsArgs {
 
 #[derive(Parser, Debug)]
 pub(crate) struct ClassifyArgs {
+    #[arg(long, default_value = "data/domains.db")]
+    pub(crate) db: PathBuf,
+}
+
+#[derive(Parser, Debug)]
+pub(crate) struct UpdateCvesArgs {
     #[arg(long, default_value = "data/domains.db")]
     pub(crate) db: PathBuf,
 }
@@ -687,7 +693,7 @@ async fn async_main() -> Result<()> {
                 Command::Ports(mut a) => { if a.retry_errors.is_none() { a.retry_errors = retry_errors; } ports_scan::cmd_ports(a, None, None).await }
                 Command::SmtpCheck(a) => smtp_check::cmd_smtp_check(a, None, None).await,
                 Command::Subdomains(a) => subdomains::cmd_subdomains(a, None, None).await,
-                Command::UpdateCves => cve::cmd_update_cves(db).await,
+                Command::UpdateCves(a) => cve::cmd_update_cves(a.db).await,
                 Command::PopulateTechnologies => cve::cmd_populate_technologies(db).await,
                 Command::RefilterCves(a) => if a.preview { cve::cmd_refilter_cves_preview(db) } else { cve::cmd_refilter_cves(db) },
                 Command::FetchFeeds(a) => {
