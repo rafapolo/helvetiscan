@@ -8,7 +8,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use tokio::sync::Semaphore;
 
 const HTTP_TIMEOUT: Duration = Duration::from_secs(8);
 const MAX_BODY: usize = 256 * 1024;
@@ -251,7 +250,7 @@ pub(crate) async fn cmd_detect(db: PathBuf, concurrency: usize, limit: Option<us
             .build()
             .unwrap_or_default(),
     );
-    let semaphore = Arc::new(Semaphore::new(concurrency));
+    let semaphore = crate::shared::AdaptiveSemaphore::new(concurrency, "detect");
     let (tx, mut rx) = tokio::sync::mpsc::channel::<(String, Vec<Detection>)>(1024);
 
     let conn2 = crate::shared::open_db(&db)?;
@@ -266,11 +265,17 @@ pub(crate) async fn cmd_detect(db: PathBuf, concurrency: usize, limit: Option<us
     });
 
     for domain in domains {
-        let permit = semaphore.clone().acquire_owned().await.unwrap();
+        let permit = semaphore.acquire_owned().await;
+        let sem = semaphore.clone();
         let tx = tx.clone();
         let client = client.clone();
         tokio::spawn(async move {
-            if let Some(dets) = fetch_fingerprints(&client, &domain).await {
+            let result = fetch_fingerprints(&client, &domain).await;
+            // `None` here means both the https and http attempts failed at the transport level
+            // (see fetch_fingerprints) — a real network outcome, not "found nothing", so it's
+            // exactly what the adaptive limiter's error-rate signal wants.
+            sem.record_result(result.is_some());
+            if let Some(dets) = result {
                 let _ = tx.send((domain, dets)).await;
             }
             drop(permit);

@@ -1,6 +1,7 @@
 use std::fmt;
 use std::net::SocketAddr;
 use std::sync::atomic::AtomicU64;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use hickory_resolver::config::{ResolverConfig, CLOUDFLARE};
@@ -224,6 +225,240 @@ impl Progress {
             err_label,
         }
     }
+}
+
+// ---- Adaptive concurrency ----
+//
+// Every scan module fans out over a fixed `tokio::sync::Semaphore` sized to its own
+// `--concurrency` default (scan=500, dns=250, tls=150, ports=100, subdomains=200,
+// smtp-check=300, detect=100 — each already tuned per-stage for that stage's own
+// CPU/IO/network profile). Running that fixed size for the whole run means a stage either
+// underuses an idle box (finland: 4 vCPUs sitting at ~0.1-0.3 load average while `detect` ran
+// at a flat 100) or, on a smaller/busier host, overshoots and drives load through the roof.
+//
+// `AdaptiveSemaphore` replaces the fixed semaphore with one that grows and shrinks itself
+// every tick, using the module's existing `--concurrency` value as a ceiling (never exceeded)
+// rather than a fixed operating point. It starts conservatively at a small floor and probes
+// upward while the host has headroom, backing off fast the moment it doesn't — same shape as
+// TCP congestion control (slow additive growth, fast multiplicative backoff), because that
+// asymmetry is what keeps a shared box from being pushed over LOAD_TARGET even by a stage that
+// ramps hard.
+//
+// Two independent hardware signals feed the decision, since 1-minute load average is a lagging
+// indicator that can miss a spike the tick after it happens:
+//   - 1-minute system load average (`libc::getloadavg`, portable across the macOS/Linux release
+//     targets) — the primary signal, kept under `LOAD_TARGET`.
+//   - Instantaneous CPU busy % since the last tick, from `/proc/stat` deltas (Linux only; the
+//     signal is simply skipped elsewhere, so macOS dev runs still work off load average alone).
+// Either signal reporting "hot" is enough to shrink; both must report "comfortably cool" to grow.
+//
+// Rollout note: only `fingerprint::cmd_detect` (the `detect` stage) has been switched over to
+// this so far — it's the stage that was actually observed idling on finland. The other six
+// modules (http_scan, dns_scan, tls_scan, ports_scan, subdomains, smtp_check) all fan out with
+// the exact same `Semaphore::new(args.concurrency)` + `acquire_owned()` pattern, so adopting
+// this there is a mechanical swap once this primitive has run for real on a live pipeline.
+
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+use tokio::sync::Semaphore;
+
+/// 1-minute load average ceiling the adaptive limiter tries to stay under.
+const LOAD_TARGET: f64 = 0.9;
+/// CPU busy% ceiling (Linux only) — a fast-reacting backstop for when load average hasn't
+/// caught up yet.
+const CPU_TARGET_PCT: f64 = 90.0;
+/// Network-error-rate ceiling — the third front. CPU/load stay flat while a stage is
+/// I/O-bound waiting on remote sockets, so a stage can drive the network into the ground
+/// (timeouts, connection resets, upstream rate-limiting) without either of the other two
+/// signals ever noticing. `record_result` feeds this from the caller's own fetch outcomes.
+const ERROR_TARGET_PCT: f64 = 20.0;
+/// Below this many attempts in a tick, the error rate is too noisy to act on (e.g. one failed
+/// request out of two isn't "50% error", it's no data yet).
+const MIN_SAMPLES_FOR_ERROR_SIGNAL: u64 = 20;
+/// How often the background scaler re-samples load and adjusts permits.
+const ADAPT_INTERVAL: Duration = Duration::from_secs(3);
+
+pub(crate) struct AdaptiveSemaphore {
+    sem: Arc<Semaphore>,
+    current: AtomicUsize,
+    floor: usize,
+    ceiling: usize,
+    label: &'static str,
+    attempts: AtomicU64,
+    errors: AtomicU64,
+}
+
+impl AdaptiveSemaphore {
+    /// `ceiling` is the module's existing `--concurrency` value — the most it will ever grow
+    /// to. `label` is just for the odd debug eprintln so a run's log says which stage's limiter
+    /// is talking.
+    pub(crate) fn new(ceiling: usize, label: &'static str) -> Arc<Self> {
+        // `.max(4).min(ceiling)`, not `.clamp(4, ceiling)` — clamp panics on min > max, which
+        // a ceiling below 4 would trigger.
+        let floor = (ceiling / 8).max(4).min(ceiling);
+        let this = Arc::new(Self {
+            sem: Arc::new(Semaphore::new(floor)),
+            current: AtomicUsize::new(floor),
+            floor,
+            ceiling,
+            label,
+            attempts: AtomicU64::new(0),
+            errors: AtomicU64::new(0),
+        });
+        Arc::clone(&this).spawn_scaler();
+        this
+    }
+
+    /// Feed one fetch outcome into the network-health signal: `ok = false` for a connect
+    /// failure, timeout, or similar transport-level error — not for "the request succeeded but
+    /// found nothing", which isn't a network problem. Optional: a module that never calls this
+    /// just runs on load average + CPU alone, exactly as before.
+    pub(crate) fn record_result(&self, ok: bool) {
+        self.attempts.fetch_add(1, Ordering::Relaxed);
+        if !ok {
+            self.errors.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    fn spawn_scaler(self: Arc<Self>) {
+        if self.floor >= self.ceiling {
+            return; // nothing to adapt — ceiling too small to bother scaling
+        }
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(ADAPT_INTERVAL);
+            let mut prev_jiffies = read_cpu_jiffies();
+            loop {
+                tick.tick().await;
+                let load1 = load_average_1m();
+                let cpu_pct = read_cpu_jiffies().and_then(|now| {
+                    let pct = prev_jiffies.and_then(|prev| cpu_busy_pct(prev, now));
+                    prev_jiffies = Some(now);
+                    pct
+                });
+                let attempts = self.attempts.swap(0, Ordering::Relaxed);
+                let errors = self.errors.swap(0, Ordering::Relaxed);
+                let net_error_pct = (attempts >= MIN_SAMPLES_FOR_ERROR_SIGNAL)
+                    .then(|| 100.0 * errors as f64 / attempts as f64);
+
+                let cur = self.current.load(Ordering::Relaxed);
+                match decide_scale(cur, self.floor, self.ceiling, load1, cpu_pct, net_error_pct) {
+                    ScaleAction::Shrink(cut) => {
+                        let forgotten = self.sem.forget_permits(cut);
+                        if forgotten > 0 {
+                            self.current.fetch_sub(forgotten, Ordering::Relaxed);
+                        }
+                    }
+                    ScaleAction::Grow(grow) => {
+                        self.sem.add_permits(grow);
+                        self.current.fetch_add(grow, Ordering::Relaxed);
+                    }
+                    ScaleAction::Hold => {}
+                }
+                let _ = self.label; // reserved for future verbose/debug logging
+            }
+        });
+    }
+
+    pub(crate) async fn acquire_owned(self: &Arc<Self>) -> tokio::sync::OwnedSemaphorePermit {
+        Arc::clone(&self.sem)
+            .acquire_owned()
+            .await
+            .expect("adaptive semaphore is never closed")
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum ScaleAction {
+    Grow(usize),
+    Shrink(usize),
+    Hold,
+}
+
+/// The actual scaling decision, pulled out of `spawn_scaler`'s loop as a pure function so it's
+/// testable without a live tokio runtime or real `/proc/stat`/`getloadavg` readings.
+///
+/// Three independent fronts feed this — CPU, (disk) I/O, and network — because a stage can
+/// overwhelm any one of them without moving the others:
+///   - `load1`: 1-minute load average. On Linux this counts both runnable *and*
+///     uninterruptible-sleep (disk-wait) tasks, so it's the signal that catches I/O pressure —
+///     there's no separate iowait check needed.
+///   - `cpu_pct`: instantaneous CPU busy%, explicitly excluding iowait (see `read_cpu_jiffies`)
+///     — a fast-reacting backstop for compute-bound stages, since load average lags a spike.
+///   - `net_error_pct`: rising transport-error rate (timeouts, resets, refused connections).
+///     This is the one CPU/load genuinely cannot see: an async I/O-bound stage waiting on
+///     remote sockets can drive the network into the ground while local CPU and load both sit
+///     near zero. `None` (module doesn't call `record_result`, or too few samples this tick)
+///     never blocks growth — it's opt-in instrumentation, not a requirement.
+///
+/// `hot` (shrink trigger) is true if ANY signal says so — a single overloaded front is enough
+/// to back off. `cool` (grow trigger) requires ALL signals to agree it's safe. A missing load
+/// reading defaults `hot` to true (fail safe: if `getloadavg` fails, don't climb blind); a
+/// missing `cpu_pct` or `net_error_pct` reading defaults to "not a problem" on both sides,
+/// since those two are opt-in/platform-specific and their absence must never permanently wedge
+/// the limiter (e.g. `cpu_pct` is always `None` on macOS, which has no `/proc/stat`).
+fn decide_scale(
+    cur: usize,
+    floor: usize,
+    ceiling: usize,
+    load1: Option<f64>,
+    cpu_pct: Option<f64>,
+    net_error_pct: Option<f64>,
+) -> ScaleAction {
+    let hot = load1.map(|l| l >= LOAD_TARGET).unwrap_or(true)
+        || cpu_pct.map(|c| c >= CPU_TARGET_PCT).unwrap_or(false)
+        || net_error_pct.map(|e| e >= ERROR_TARGET_PCT).unwrap_or(false);
+    let cool = load1.map(|l| l < LOAD_TARGET * 0.7).unwrap_or(false)
+        && cpu_pct.map(|c| c < CPU_TARGET_PCT * 0.7).unwrap_or(true)
+        && net_error_pct.map(|e| e < ERROR_TARGET_PCT * 0.5).unwrap_or(true);
+
+    if hot && cur > floor {
+        // Multiplicative backoff: cut ~25%, fast.
+        ScaleAction::Shrink((cur / 4).max(1).min(cur - floor))
+    } else if cool && cur < ceiling {
+        // Additive growth: probe up ~10%, slow.
+        ScaleAction::Grow((cur / 10).max(1).min(ceiling - cur))
+    } else {
+        ScaleAction::Hold
+    }
+}
+
+fn load_average_1m() -> Option<f64> {
+    let mut loads: [f64; 3] = [0.0; 3];
+    let n = unsafe { libc::getloadavg(loads.as_mut_ptr(), 3) };
+    if n <= 0 {
+        None
+    } else {
+        Some(loads[0])
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn read_cpu_jiffies() -> Option<(u64, u64)> {
+    let s = std::fs::read_to_string("/proc/stat").ok()?;
+    let line = s.lines().next()?; // "cpu  user nice system idle iowait irq softirq steal ..."
+    let fields: Vec<u64> = line.split_whitespace().skip(1).filter_map(|f| f.parse().ok()).collect();
+    if fields.len() < 4 {
+        return None;
+    }
+    let idle = fields[3] + fields.get(4).copied().unwrap_or(0); // idle + iowait
+    let total: u64 = fields.iter().sum();
+    Some((total, idle))
+}
+
+#[cfg(not(target_os = "linux"))]
+fn read_cpu_jiffies() -> Option<(u64, u64)> {
+    None
+}
+
+fn cpu_busy_pct(prev: (u64, u64), now: (u64, u64)) -> Option<f64> {
+    let (prev_total, prev_idle) = prev;
+    let (total, idle) = now;
+    let total_delta = total.checked_sub(prev_total)?;
+    let idle_delta = idle.checked_sub(prev_idle)?;
+    if total_delta == 0 {
+        return None;
+    }
+    Some(100.0 * (1.0 - idle_delta as f64 / total_delta as f64))
 }
 
 // ---- Resolver ----
@@ -693,5 +928,196 @@ mod tests {
     #[test]
     fn format_eta_hours() {
         assert_eq!(format_eta(3661.0), "1h01m");
+    }
+
+    // AdaptiveSemaphore
+
+    #[tokio::test]
+    async fn adaptive_semaphore_starts_at_floor_and_allows_that_many_immediately() {
+        let sem = AdaptiveSemaphore::new(100, "test");
+        // floor = (100/8).clamp(4, 100) = 12
+        let permits: Vec<_> = futures_util::future::join_all((0..12).map(|_| sem.acquire_owned())).await;
+        assert_eq!(permits.len(), 12);
+        // the 13th permit should not be immediately available (floor exhausted, no grow tick yet)
+        assert!(sem.sem.try_acquire().is_err());
+    }
+
+    #[tokio::test]
+    async fn adaptive_semaphore_floor_is_clamped_between_4_and_ceiling() {
+        // `new` spawns the background scaler via `tokio::spawn`, so this needs a runtime even
+        // though nothing here awaits it.
+        assert_eq!(AdaptiveSemaphore::new(4, "tiny").floor, 4);
+        assert_eq!(AdaptiveSemaphore::new(1, "tinier").floor, 1); // floor can't exceed ceiling
+        assert_eq!(AdaptiveSemaphore::new(800, "big").floor, 100);
+    }
+
+    // cpu_busy_pct
+
+    #[test]
+    fn cpu_busy_pct_all_idle_is_zero() {
+        let prev = (1000, 800);
+        let now = (1100, 900); // +100 total, +100 idle
+        assert_eq!(cpu_busy_pct(prev, now), Some(0.0));
+    }
+
+    #[test]
+    fn cpu_busy_pct_all_busy_is_hundred() {
+        let prev = (1000, 800);
+        let now = (1100, 800); // +100 total, +0 idle
+        assert_eq!(cpu_busy_pct(prev, now), Some(100.0));
+    }
+
+    #[test]
+    fn cpu_busy_pct_half_busy() {
+        let prev = (1000, 800);
+        let now = (1200, 900); // +200 total, +100 idle -> 50% busy
+        assert_eq!(cpu_busy_pct(prev, now), Some(50.0));
+    }
+
+    #[test]
+    fn cpu_busy_pct_no_time_elapsed_is_none() {
+        assert_eq!(cpu_busy_pct((1000, 800), (1000, 800)), None);
+    }
+
+    #[test]
+    fn cpu_busy_pct_counter_went_backwards_is_none() {
+        // e.g. /proc/stat counters reset or jiffy wraparound — don't report garbage
+        assert_eq!(cpu_busy_pct((1000, 800), (900, 700)), None);
+    }
+
+    // decide_scale
+
+    #[test]
+    fn decide_scale_high_load_shrinks() {
+        // load 1.2 >= LOAD_TARGET 0.9 -> hot
+        assert_eq!(decide_scale(100, 10, 500, Some(1.2), Some(10.0), None), ScaleAction::Shrink(25));
+    }
+
+    #[test]
+    fn decide_scale_high_cpu_alone_shrinks_even_with_low_load() {
+        // load is comfortably low but CPU is pegged — any one signal being hot is enough
+        assert_eq!(decide_scale(100, 10, 500, Some(0.1), Some(95.0), None), ScaleAction::Shrink(25));
+    }
+
+    #[test]
+    fn decide_scale_high_network_error_rate_alone_shrinks_even_with_low_load_and_cpu() {
+        // this is the front CPU/load can't see: an I/O-bound stage hammering the network while
+        // local CPU and load both sit near zero.
+        assert_eq!(decide_scale(100, 10, 500, Some(0.1), Some(5.0), Some(40.0)), ScaleAction::Shrink(25));
+    }
+
+    #[test]
+    fn decide_scale_low_load_and_cpu_grows() {
+        assert_eq!(decide_scale(100, 10, 500, Some(0.2), Some(10.0), None), ScaleAction::Grow(10));
+    }
+
+    #[test]
+    fn decide_scale_middling_load_holds_steady() {
+        // 0.63 (=0.9*0.7) <= load < 0.9 is neither hot nor cool
+        assert_eq!(decide_scale(100, 10, 500, Some(0.8), Some(10.0), None), ScaleAction::Hold);
+    }
+
+    #[test]
+    fn decide_scale_low_load_but_high_cpu_holds_not_grows() {
+        // cool requires every signal comfortable; CPU still busy blocks growth
+        assert_eq!(decide_scale(100, 10, 500, Some(0.1), Some(80.0), None), ScaleAction::Hold);
+    }
+
+    #[test]
+    fn decide_scale_low_load_and_cpu_but_rising_errors_holds_not_grows() {
+        // CPU and load both look great, but the network is starting to misbehave — still
+        // shouldn't grow into that.
+        assert_eq!(decide_scale(100, 10, 500, Some(0.1), Some(5.0), Some(15.0)), ScaleAction::Hold);
+    }
+
+    #[test]
+    fn decide_scale_low_error_rate_permits_growth() {
+        assert_eq!(decide_scale(100, 10, 500, Some(0.1), Some(5.0), Some(2.0)), ScaleAction::Grow(10));
+    }
+
+    #[test]
+    fn decide_scale_missing_load_reading_is_treated_as_hot() {
+        // getloadavg() failed -> fail safe, don't blindly grow, back off if above floor
+        assert_eq!(decide_scale(100, 10, 500, None, Some(10.0), None), ScaleAction::Shrink(25));
+    }
+
+    #[test]
+    fn decide_scale_missing_load_at_floor_holds_cannot_shrink_further() {
+        assert_eq!(decide_scale(10, 10, 500, None, Some(10.0), None), ScaleAction::Hold);
+    }
+
+    #[test]
+    fn decide_scale_missing_cpu_reading_low_load_still_grows() {
+        // macOS has no /proc/stat -> cpu_pct is always None there; load average alone should
+        // still be able to drive growth (cool's cpu_pct check defaults to true when absent).
+        assert_eq!(decide_scale(100, 10, 500, Some(0.1), None, None), ScaleAction::Grow(10));
+    }
+
+    #[test]
+    fn decide_scale_missing_error_rate_never_blocks_growth() {
+        // a module that hasn't wired up record_result (or hasn't hit MIN_SAMPLES yet) must
+        // behave exactly as if the network signal didn't exist — opt-in, not a requirement.
+        assert_eq!(decide_scale(100, 10, 500, Some(0.1), Some(5.0), None), ScaleAction::Grow(10));
+    }
+
+    #[test]
+    fn decide_scale_at_floor_cannot_shrink_further() {
+        assert_eq!(decide_scale(10, 10, 500, Some(1.5), Some(99.0), None), ScaleAction::Hold);
+    }
+
+    #[test]
+    fn decide_scale_at_ceiling_cannot_grow_further() {
+        assert_eq!(decide_scale(500, 10, 500, Some(0.1), Some(1.0), None), ScaleAction::Hold);
+    }
+
+    #[test]
+    fn decide_scale_shrink_never_cuts_below_floor() {
+        // cur=12, floor=10: a 25% cut of 12 is 3, which would land at 9 (below floor) —
+        // must clamp to exactly cur-floor=2 instead.
+        assert_eq!(decide_scale(12, 10, 500, Some(1.5), Some(99.0), None), ScaleAction::Shrink(2));
+    }
+
+    #[test]
+    fn decide_scale_grow_never_exceeds_ceiling() {
+        // cur=495, ceiling=500: a 10% grow of 495 is 49, which would overshoot — must clamp to
+        // exactly ceiling-cur=5 instead.
+        assert_eq!(decide_scale(495, 10, 500, Some(0.1), Some(1.0), None), ScaleAction::Grow(5));
+    }
+
+    #[test]
+    fn decide_scale_shrink_step_is_at_least_one() {
+        // cur=11, floor=10: 25% of 11 rounds down to 2 via integer division... but even a
+        // tiny cur must still make forward progress toward the floor.
+        assert_eq!(decide_scale(11, 10, 500, Some(1.5), Some(99.0), None), ScaleAction::Shrink(1));
+    }
+
+    #[test]
+    fn decide_scale_grow_step_is_at_least_one() {
+        // cur=5: 10% of 5 rounds down to 0 via integer division, but growth must still make
+        // forward progress — never a permanently-stuck no-op.
+        assert_eq!(decide_scale(5, 4, 500, Some(0.1), Some(1.0), None), ScaleAction::Grow(1));
+    }
+
+    // AdaptiveSemaphore::record_result / net-error-rate wiring
+
+    #[tokio::test]
+    async fn record_result_counts_only_failures_as_errors() {
+        let sem = AdaptiveSemaphore::new(500, "test");
+        for _ in 0..15 {
+            sem.record_result(true);
+        }
+        for _ in 0..5 {
+            sem.record_result(false);
+        }
+        assert_eq!(sem.attempts.load(Ordering::Relaxed), 20);
+        assert_eq!(sem.errors.load(Ordering::Relaxed), 5);
+    }
+
+    #[test]
+    fn min_samples_threshold_is_below_a_typical_tick_batch() {
+        // sanity check on the constant relationship, not the algorithm: with a 3s tick and
+        // realistic per-domain scan latency, MIN_SAMPLES should be reachable inside one tick
+        // for any stage past its floor, or the network signal would never actually engage.
+        assert!(MIN_SAMPLES_FOR_ERROR_SIGNAL <= 20);
     }
 }
