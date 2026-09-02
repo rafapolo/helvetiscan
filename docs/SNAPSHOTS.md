@@ -205,6 +205,87 @@ back-compat shim when `SCAN_MODE` is unset. `DOMAINS_LIST` and `PARALLEL_DIVISOR
 only applies to `SCAN_MODE=full`) are also overridable via environment variables — see the
 script's own comments for details.
 
+### Example run — 2026-09, timings and sizes
+
+Run on `finland` (`SCAN_MODE=sequential`), 2026-08-30 21:06 UTC → 2026-09-02 13:59:56 UTC —
+**total wall time 2d 16h 53m** (233,622s):
+
+| Stage | Started (UTC) | Duration |
+|---|---|---|
+| scan | 08-30 21:06:14 | 1h 21m 36s |
+| dns | 08-30 22:27:50 | 2h 07m 37s |
+| tls | 08-31 00:35:27 | 4h 02m 43s |
+| ports | 08-31 04:38:10 | 1h 26m 55s |
+| subdomains | 08-31 06:05:05 | 14h 13m 32s |
+| smtp-check | 08-31 20:18:37 | 2h 49m 57s |
+| detect | 09-01 07:01:42 | 10h 12m 01s |
+| update-cves | 09-01 17:13:43 | 9h 47m 25s |
+| verify-cves | 09-02 03:01:08 | 55s |
+| classify | 09-02 03:02:03 | 17s |
+| sovereignty | 09-02 03:02:20 | 38m 09s |
+| benchmark | 09-02 03:40:29 | 7m 35s |
+| fetch-feeds | 09-02 03:48:04 | 9h 45m 56s |
+| snapshot | 09-02 13:34:00 | 25m 56s |
+
+CVE detection + matching (`detect` → `update-cves` → `verify-cves`) was the single biggest chunk
+of the run at ~20h, followed by `subdomains` (14h, CT logs + AXFR across the full `.ch`
+namespace) and `fetch-feeds` (9h46m, pulling NVD/OSV/GHSA on top of CISA KEV).
+
+```mermaid
+gantt
+    title 2026-09 snapshot run — stage durations (UTC)
+    dateFormat  YYYY-MM-DDTHH:mm:ss
+    axisFormat  %b-%d %H:%M
+
+    section Phase 1 — network scans
+    scan         :2026-08-30T21:06:14, 4896s
+    dns          :2026-08-30T22:27:50, 7657s
+    tls          :2026-08-31T00:35:27, 14563s
+    ports        :2026-08-31T04:38:10, 5215s
+    subdomains   :2026-08-31T06:05:05, 51212s
+
+    section Phase 2 — post-processing
+    smtp-check   :2026-08-31T20:18:37, 10197s
+    detect       :2026-09-01T07:01:42, 36721s
+    update-cves  :2026-09-01T17:13:43, 35245s
+    verify-cves  :2026-09-02T03:01:08, 55s
+    classify     :2026-09-02T03:02:03, 17s
+    sovereignty  :2026-09-02T03:02:20, 2289s
+
+    section Phase 3 — benchmark + export
+    benchmark    :2026-09-02T03:40:29, 455s
+    fetch-feeds  :2026-09-02T03:48:04, 35156s
+    snapshot     :2026-09-02T13:34:00, 1556s
+```
+
+This particular run used `SCAN_MODE=sequential`, so Phase 1's stages show back-to-back rather
+than overlapping — a `concurrent` run would show `scan`/`dns`/`tls`/`ports`/`subdomains` starting
+together and finishing at staggered times instead.
+
+Resulting sizes:
+
+| File | Size |
+|---|---|
+| `data/domains.db` (live SQLite) | 17 GB |
+| `data/snapshots/month=2026-09/` (full Parquet export) | 1.6 GB |
+
+Per-table Parquet in that snapshot — `dns_info`, `domains`, and `tls_info` dominate since they
+carry one row per domain with the most columns; `cve_catalog` is nearly free since it's shared
+reference data, not per-domain:
+
+| Table | Size |
+|---|---|
+| dns_info | 363 MB |
+| domains | 343 MB |
+| tls_info | 288 MB |
+| cve_matches | 223 MB |
+| smtp_tls_check | 132 MB |
+| ports_info | 118 MB |
+| risk_score | 60 MB |
+| email_security | 57 MB |
+| domain_classification | 2.4 MB |
+| cve_catalog | 371 KB |
+
 Snapshots are compact enough to pull back from a scan host to a local machine after each run
 (hundreds of MB, not the tens of GB of `domains.db` itself):
 ```bash
@@ -232,3 +313,25 @@ The underlying read pattern, for writing new ad-hoc queries: `pl.scan_parquet` o
 column for free; `extra_columns="ignore", missing_columns="insert"` handles schema drift across
 months as this repo's migrations land, rather than erroring on a column present in one month but
 not another.
+
+## Publishing the trend to the website
+
+The "Snapshot Trend" section on `website/index.html` (id `#trend`) renders month-over-month
+deltas and sparklines for a handful of headline `SnapshotMetrics` percentages. It reads
+`website/data/snapshot-history.json` client-side — a small array, one entry per published month,
+kept in git (unlike `data/`, which is gitignored) since it's what actually ships to GitHub Pages.
+
+Regenerate it from every `snapshot_<month>.json` on disk with:
+
+```bash
+python3 scripts/publish_snapshot_history.py
+```
+
+This is a manual step, not wired into `scripts/monthly.sh` — not every local snapshot is meant to
+be published. Run it (and commit the result) after a `helvetiscan snapshot` run you do want
+reflected on the site. With zero `snapshot_<month>.json` files present it writes `[]`, and the
+website renders an explicit "no snapshot published yet" empty state rather than a fabricated
+chart — this was true when the section was first built (Sep 2026) since the flat-JSON summary
+feature postdates the one snapshot on record. With one entry it shows absolute values only,
+labeled "first snapshot" instead of a delta. Deltas and sparklines only appear from two entries
+on.
