@@ -3,18 +3,18 @@
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>HELVETISCAN — Investor Brief</title>
+        <title>HELVETISCAN — Swiss .ch Domain Security Scanner</title>
 
         <!-- Open Graph -->
         <meta property="og:type" content="website" />
         <meta property="og:url" content="https://helvetiscan.ミ.xyz/" />
         <meta
             property="og:title"
-            content="HELVETISCAN — Switzerland's Cybersecurity Intelligence Platform"
+            content="HELVETISCAN — Switzerland's Cybersecurity Monitoring Platform"
         />
         <meta
             property="og:description"
-            content="The only complete map of Switzerland's digital attack surface, updated daily. Switzerland's new laws just made our product mandatory."
+            content="An independent scan of every .ch domain — DNS, TLS, HTTP, ports, email security, CVEs — republished as an open snapshot on every run."
         />
         <meta property="og:locale" content="en_US" />
 
@@ -703,45 +703,239 @@
                 letter-spacing: 0.3px;
             }
 
-            /* ─────────────────── PROJECTIONS ─────────────────── */
-            .projections {
+            /* contained variant — used when the band sits inside a section instead of
+               spanning full-bleed between sections */
+            .metrics-band.inset {
+                border-radius: 14px;
+                padding: 40px 5vw;
+            }
+
+            /* ─────────────────── SNAPSHOT TREND ─────────────────── */
+            .trend {
                 background: var(--off);
             }
 
-            .proj-grid {
+            .trend-grid {
                 display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+                grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
                 gap: 1rem;
-                margin-bottom: 2.5rem;
+                margin-top: 2rem;
             }
 
-            .proj-card {
+            .trend-card {
                 background: var(--white);
                 border: 1px solid var(--border);
                 border-radius: 12px;
-                padding: 1.5rem;
+                padding: 1.4rem 1.5rem;
             }
 
-            .proj-card .year {
+            .trend-card .label {
                 font-size: 0.72rem;
                 font-weight: 700;
-                letter-spacing: 1.5px;
+                letter-spacing: 1px;
                 text-transform: uppercase;
                 color: var(--mid);
-                margin-bottom: 0.5rem;
+                margin-bottom: 0.6rem;
             }
 
-            .proj-card .revenue {
-                font-size: 1.55rem;
+            .trend-card .row {
+                display: flex;
+                align-items: flex-end;
+                justify-content: space-between;
+                gap: 0.75rem;
+            }
+
+            .trend-card .value {
+                font-size: 1.75rem;
                 font-weight: 800;
                 color: var(--navy);
                 line-height: 1;
-                margin-bottom: 0.4rem;
             }
 
-            .proj-card .subs {
+            .trend-card .spark {
+                flex-shrink: 0;
+            }
+
+            .trend-delta {
+                display: inline-flex;
+                align-items: center;
+                gap: 4px;
+                margin-top: 0.6rem;
+                font-size: 0.82rem;
+                font-weight: 700;
+                padding: 2px 9px;
+                border-radius: 999px;
+                width: fit-content;
+            }
+            .trend-delta.good {
+                color: #15803d;
+                background: rgba(22, 163, 74, 0.12);
+            }
+            .trend-delta.bad {
+                color: #b91c1c;
+                background: rgba(220, 38, 38, 0.12);
+            }
+            .trend-delta.flat {
+                color: var(--gray);
+                background: rgba(90, 106, 122, 0.1);
+            }
+
+            .trend-empty {
+                background: var(--white);
+                border: 1px dashed var(--border);
+                border-radius: 14px;
+                padding: 2.5rem;
+                text-align: center;
+                color: var(--gray);
+                font-size: 0.92rem;
+                line-height: 1.7;
+            }
+            .trend-empty strong {
+                display: block;
+                color: var(--navy);
+                font-size: 1.05rem;
+                margin-bottom: 0.5rem;
+            }
+
+            .trend-note {
+                margin-top: 1.5rem;
                 font-size: 0.82rem;
                 color: var(--gray);
+                text-align: center;
+            }
+
+            /* partial-scan caveat banner */
+            .trend-status {
+                margin-top: 2rem;
+                background: rgba(180, 83, 9, 0.07);
+                border: 1px solid rgba(180, 83, 9, 0.22);
+                border-radius: 12px;
+                padding: 1.1rem 1.3rem;
+            }
+            .trend-status .status-head {
+                display: flex;
+                align-items: center;
+                gap: 0.55rem;
+                font-size: 0.9rem;
+                font-weight: 700;
+                color: #92400e;
+            }
+            .trend-status .status-head .dot {
+                width: 8px;
+                height: 8px;
+                border-radius: 50%;
+                background: #d97706;
+                flex-shrink: 0;
+                animation: trend-pulse 1.8s ease-in-out infinite;
+            }
+            @keyframes trend-pulse {
+                0%, 100% { opacity: 1; }
+                50% { opacity: 0.35; }
+            }
+            .trend-status .status-sub {
+                margin-top: 0.35rem;
+                font-size: 0.82rem;
+                color: var(--gray);
+                line-height: 1.6;
+            }
+            .cov-list {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+                gap: 0.6rem 1.4rem;
+                margin-top: 0.9rem;
+            }
+            .cov-row {
+                display: grid;
+                grid-template-columns: 1fr auto;
+                align-items: center;
+                gap: 0.4rem 0.7rem;
+                font-size: 0.8rem;
+            }
+            .cov-row .cov-name {
+                color: var(--blue);
+                font-weight: 600;
+                text-transform: capitalize;
+            }
+            .cov-row .cov-pct {
+                font-weight: 700;
+                color: var(--navy);
+                font-variant-numeric: tabular-nums;
+            }
+            .cov-row .cov-bar {
+                grid-column: 1 / -1;
+                height: 5px;
+                border-radius: 999px;
+                background: rgba(15, 31, 54, 0.08);
+                overflow: hidden;
+            }
+            .cov-row .cov-bar > span {
+                display: block;
+                height: 100%;
+                border-radius: 999px;
+                background: var(--mid);
+            }
+            .cov-row.full .cov-bar > span {
+                background: #16a34a;
+            }
+            .cov-row.full .cov-pct {
+                color: #15803d;
+            }
+            .cov-row.low .cov-bar > span {
+                background: #d97706;
+            }
+
+            /* forward-looking "next snapshot" card */
+            .trend-upcoming {
+                margin-top: 1.4rem;
+                display: flex;
+                align-items: center;
+                gap: 1rem;
+                background: var(--white);
+                border: 1px dashed var(--border);
+                border-radius: 14px;
+                padding: 1.3rem 1.5rem;
+            }
+            .trend-upcoming .up-icon {
+                width: 40px;
+                height: 40px;
+                border-radius: 10px;
+                background: var(--light);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 1.2rem;
+                flex-shrink: 0;
+            }
+            .trend-upcoming .up-body strong {
+                display: block;
+                color: var(--navy);
+                font-size: 0.98rem;
+                margin-bottom: 0.2rem;
+            }
+            .trend-upcoming .up-body span {
+                font-size: 0.83rem;
+                color: var(--gray);
+                line-height: 1.55;
+            }
+            .trend-upcoming .up-tag {
+                margin-left: auto;
+                font-size: 0.72rem;
+                font-weight: 700;
+                letter-spacing: 0.5px;
+                text-transform: uppercase;
+                color: var(--mid);
+                background: var(--light);
+                padding: 5px 11px;
+                border-radius: 999px;
+                white-space: nowrap;
+            }
+            @media (max-width: 560px) {
+                .trend-upcoming {
+                    flex-wrap: wrap;
+                }
+                .trend-upcoming .up-tag {
+                    margin-left: 0;
+                }
             }
 
             /* ─────────────────── MILESTONES ─────────────────── */
@@ -1063,7 +1257,7 @@
                 .metrics-band {
                     grid-template-columns: 1fr 1fr;
                 }
-                .proj-grid {
+                .trend-grid {
                     grid-template-columns: 1fr 1fr;
                 }
             }
@@ -1086,7 +1280,7 @@
                 .metrics-band {
                     grid-template-columns: 1fr;
                 }
-                .proj-grid {
+                .trend-grid {
                     grid-template-columns: 1fr;
                 }
                 .funds-grid {
@@ -1109,12 +1303,13 @@
             </button>
 
             <ul class="nav-links" id="nav-links">
-                <li><a href="#problem">Problem</a></li>
-                <li><a href="#product">Product</a></li>
+                <li><a href="#context">Why</a></li>
+                <li><a href="#product">What We Scan</a></li>
                 <li><a href="#findings">Findings</a></li>
-                <li><a href="#market">Market</a></li>
-                <li><a href="#traction">Traction</a></li>
-                <li><a href="#contact" class="nav-cta">Contact Us</a></li>
+                <li><a href="#trend">Trend</a></li>
+                <li><a href="#audience">Who It's For</a></li>
+                <li><a href="#about">About</a></li>
+                <li><a href="#contact" class="nav-cta">Get In Touch</a></li>
             </ul>
         </nav>
 
@@ -1122,25 +1317,29 @@
         <section class="hero">
             <div class="hero-badge">
                 <span class="badge-dot"></span>
-                Seed Round — Basel, Switzerland — April 2026
+                Independent research project — Basel, Switzerland
             </div>
 
             <h1>
                 The only complete map of
                 <span>Switzerland's digital attack surface.</span>
-                Updated daily.
+                Rescanned and republished on every run.
             </h1>
 
             <p>
-                Switzerland's new cybersecurity laws just made our product
-                mandatory. 75,000 SMEs. No accessible solution. We are building
-                it.
+                We enumerated the entire Swiss .ch domain namespace and scan
+                it continuously — DNS, TLS, HTTP, ports, email security, CVEs.
+                Every scan is written to a snapshot and published openly.
             </p>
 
             <div class="hero-actions">
                 <a href="#findings" class="btn btn-primary">Findings Report</a>
-                <a href="#contact" class="btn btn-outline"
-                    >Request Investor Brief →</a
+                <a
+                    href="https://xn--2dk.xyz/dataviz/swiss/"
+                    target="_blank"
+                    rel="noopener"
+                    class="btn btn-outline"
+                    >Explore Data Visualisation →</a
                 >
             </div>
         </section>
@@ -1172,8 +1371,8 @@
                     <path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6" />
                 </svg>
                 <span
-                    ><span class="trust-stat">CHF 6M+</span> revenue at 10%
-                    penetration</span
+                    ><span class="trust-stat">Open</span> snapshots published
+                    on every scan</span
                 >
             </div>
             <div class="trust-item">
@@ -1182,8 +1381,8 @@
                     <polyline points="17 6 23 6 23 12" />
                 </svg>
                 <span
-                    ><span class="trust-stat">85%+</span> gross margin at
-                    scale</span
+                    ><span class="trust-stat">50+</span> risk dimensions
+                    scored per domain</span
                 >
             </div>
             <div class="trust-item">
@@ -1198,14 +1397,14 @@
             </div>
         </div>
 
-        <!-- ── THE PROBLEM ── -->
-        <section id="problem" class="problem">
-            <div class="section-label">The Problem</div>
-            <h2>Three laws. 600,000 SMEs. Zero accessible tools.</h2>
+        <!-- ── WHY THIS MATTERS ── -->
+        <section id="context" class="problem">
+            <div class="section-label">Why This Matters</div>
+            <h2>Three laws. 600,000 SMEs. No public baseline.</h2>
             <p class="section-intro">
                 Switzerland's regulatory landscape has fundamentally shifted —
-                and the mass market of SMEs has no compliant, affordable
-                solution.
+                yet no public dataset showed where the Swiss .ch namespace
+                actually stood. So we scanned all of it.
             </p>
 
             <div class="reasons-grid">
@@ -1241,15 +1440,15 @@
                 </div>
                 <div class="reason-card">
                     <div class="reason-icon">🎯</div>
-                    <h3>The Gap Is Enormous</h3>
+                    <h3>The Data Gap Was Enormous</h3>
                     <p>
-                        Existing solutions cost CHF 10,000–25,000/year, require
-                        internal IT access, and target enterprise clients.
+                        Existing tools assess one organisation at a time,
+                        behind a paywall, on request.
                         <strong
-                            >70% of Swiss SMEs have no formal cybersecurity
-                            posture</strong
+                            >No one had scanned the entire Swiss namespace and
+                            published the result</strong
                         >
-                        — and no tool built for them.
+                        — so there was no baseline to measure against.
                     </p>
                 </div>
             </div>
@@ -1258,30 +1457,29 @@
         <!-- ── THE MOAT ── -->
         <section class="mission">
             <div class="mission-inner">
-                <div class="section-label">Competitive Moat</div>
-                <h2>No competitor holds what we built.</h2>
+                <div class="section-label">Unique Dataset</div>
+                <h2>No one else holds this dataset.</h2>
                 <div class="mission-body">
                     <p>
-                        Before company formation, we independently enumerated
-                        the entire Swiss .ch domain namespace — over 2.5 million
-                        domains. This proprietary dataset is the foundation for
-                        every product feature and cannot be easily replicated.
-                        No domestic or international player holds this asset.
+                        We independently enumerated the entire Swiss .ch domain
+                        namespace — over 2.5 million domains — and scan it on
+                        a recurring basis. This dataset is not licensed from
+                        anyone and cannot be easily replicated. No domestic or
+                        international player holds this asset.
                     </p>
                     <p>
-                        The dataset enables national-level risk benchmarking
-                        against Swiss industry peers, identification of .ch
-                        look-alike domains used for phishing, and longitudinal
-                        tracking of the Swiss internet attack surface over time.
-                        These are capabilities no generic global platform can
-                        offer.
+                        It enables national-level risk benchmarking against
+                        Swiss industry peers, identification of .ch look-alike
+                        domains used for phishing, and longitudinal tracking of
+                        the Swiss internet attack surface over time — one
+                        snapshot at a time. These are capabilities no generic
+                        global scanner can offer.
                     </p>
                 </div>
                 <p class="mission-quote">
-                    "We have performed a complete enumeration of the entire
-                    Swiss .ch domain namespace. This is the foundation for a
-                    scalable SaaS product — and a moat that grows with every
-                    scan."
+                    "We performed a complete enumeration of the entire Swiss
+                    .ch domain namespace. Every run adds another snapshot to a
+                    history no one else has."
                 </p>
             </div>
         </section>
@@ -1293,9 +1491,9 @@
                 Automated. External. Zero internal access required. Constantly.
             </h2>
             <p class="section-intro">
-                HELVETISCAN monitors everything an attacker can see from the
-                outside — no agent installation, no IT access, no technical
-                expertise needed by the client.
+                HELVETISCAN scans everything an attacker can see from the
+                outside — no agent installation, no IT access, no cooperation
+                from the domain owner required.
             </p>
 
             <div class="services-grid">
@@ -1659,6 +1857,26 @@
             </div>
         </section>
 
+        <!-- ── SNAPSHOT TREND ── -->
+        <section id="trend" class="trend">
+            <div class="section-label">Snapshot Trend</div>
+            <h2>How the namespace is changing, month over month.</h2>
+            <p class="section-intro">
+                Every scan is written to a dated, read-only snapshot — nothing
+                is overwritten. This section diffs the two most recent
+                snapshots automatically as new ones are published. The first
+                snapshot is still being filled in, so some modules below are
+                only partially scanned — the numbers firm up as coverage
+                reaches 100%.
+            </p>
+
+            <div id="trend-band" class="metrics-band inset"></div>
+            <div id="trend-status"></div>
+            <div id="trend-grid" class="trend-grid"></div>
+            <div id="trend-upcoming"></div>
+            <p id="trend-note" class="trend-note"></p>
+        </section>
+
         <!-- ── HELVETISCORE ── -->
         <section id="score" class="mission">
             <div class="mission-inner" style="max-width: 960px">
@@ -1807,10 +2025,9 @@
                                 line-height: 1.6;
                             "
                         >
-                            Every finding is ranked by its score impact. Clients
-                            get a prioritised remediation list — not a raw dump
-                            of data — so limited IT resources go to the
-                            highest-risk issues first.
+                            Every finding is ranked by its score impact, so
+                            each domain gets a prioritised remediation list —
+                            not a raw dump of data.
                         </p>
                     </div>
                 </div>
@@ -1829,150 +2046,69 @@
             </div>
         </section>
 
-        <!-- ── COMPETITIVE TABLE ── -->
-        <section id="competitive" class="comparison">
-            <div class="section-label">Competitive Landscape</div>
-            <h2>An uncontested segment.</h2>
-            <p class="section-intro">
-                Every existing player has built upmarket. None of them have
-                incentive to build a CHF 800/year automated tool for the SME
-                mass market.
-            </p>
 
-            <div class="table-wrap">
-                <table class="compare-table">
-                    <thead>
-                        <tr>
-                            <th>Criteria</th>
-                            <th>Swiss Post Cyber</th>
-                            <th>Exeon Analytics</th>
-                            <th>ImmuniWeb</th>
-                            <th class="hl">HELVETISCAN</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td>Target Market</td>
-                            <td>Enterprise (250+)</td>
-                            <td>Mid-Market</td>
-                            <td>Enterprise</td>
-                            <td class="hl">
-                                <span class="chk">SME (primary)</span>
-                            </td>
-                        </tr>
-                        <tr>
-                            <td>Annual Price</td>
-                            <td>CHF 200k+</td>
-                            <td>CHF 50k+</td>
-                            <td>CHF 15k+</td>
-                            <td class="hl"><span class="chk">CHF 800</span></td>
-                        </tr>
-                        <tr>
-                            <td>Internal Access Required</td>
-                            <td><span class="crx">✘ Yes</span></td>
-                            <td><span class="crx">✘ Yes</span></td>
-                            <td><span class="prx">⚠ Partial</span></td>
-                            <td class="hl"><span class="chk">✔ No</span></td>
-                        </tr>
-                        <tr>
-                            <td>Swiss .ch Proprietary Dataset</td>
-                            <td><span class="crx">✘ No</span></td>
-                            <td><span class="crx">✘ No</span></td>
-                            <td><span class="crx">✘ No</span></td>
-                            <td class="hl">
-                                <span class="chk">✔ 100% namespace</span>
-                            </td>
-                        </tr>
-                        <tr>
-                            <td>AI Risk Narrative</td>
-                            <td><span class="crx">✘ No</span></td>
-                            <td><span class="prx">⚠ Partial</span></td>
-                            <td><span class="prx">⚠ Partial</span></td>
-                            <td class="hl"><span class="chk">✔ Yes</span></td>
-                        </tr>
-                        <tr>
-                            <td>DORA-Ready Reports</td>
-                            <td><span class="chk">✔ Yes</span></td>
-                            <td><span class="chk">✔ Yes</span></td>
-                            <td><span class="prx">⚠ Partial</span></td>
-                            <td class="hl"><span class="chk">✔ Yes</span></td>
-                        </tr>
-                        <tr>
-                            <td>Self-Serve / No Sales Required</td>
-                            <td><span class="crx">✘ No</span></td>
-                            <td><span class="crx">✘ No</span></td>
-                            <td><span class="crx">✘ No</span></td>
-                            <td class="hl"><span class="chk">✔ Yes</span></td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-        </section>
-
-        <!-- ── MARKET ── -->
-        <section id="market" class="market">
-            <div class="section-label">Market Opportunity</div>
-            <h2>
-                75,000 addressable clients. Zero direct competitors at this
-                price.
-            </h2>
+        <!-- ── AUDIENCE ── -->
+        <section id="audience" class="market">
+            <div class="section-label">Who It's For</div>
+            <h2>Built for anyone who needs a Swiss baseline.</h2>
             <p class="section-intro">
-                Three high-priority verticals for go-to-market — each with a
-                direct regulatory trigger.
+                The snapshots and dataviz are open. No sales process, no
+                account required to look.
             </p>
 
             <div class="audience-grid">
                 <div class="audience-card">
                     <div class="aud-icon">🧬</div>
-                    <h3>Basel Pharma &amp; Life Sciences</h3>
+                    <h3>Sector Researchers</h3>
                     <p>
-                        Roche, Novartis, and 3,000+ Swiss suppliers under GDPR,
-                        NIS2, and FDA cybersecurity requirements.
+                        Pharma, finance, healthcare and other sector teams
+                        benchmarking their own posture against national norms.
                     </p>
                 </div>
                 <div class="audience-card">
-                    <div class="aud-icon">🏦</div>
-                    <h3>Swiss Financial Services</h3>
+                    <div class="aud-icon">📰</div>
+                    <h3>Journalists &amp; Analysts</h3>
                     <p>
-                        300+ fintechs, 200+ banks, thousands of insurance and
-                        asset management firms subject to FINMA and DORA.
+                        Sourced, reproducible figures on the state of Swiss
+                        internet infrastructure — no vendor sales pitch
+                        attached.
                     </p>
                 </div>
                 <div class="audience-card">
                     <div class="aud-icon">⚖️</div>
-                    <h3>Professional Services</h3>
+                    <h3>Compliance &amp; Policy</h3>
                     <p>
-                        Law firms, audit firms, HR tech — increasingly required
-                        by enterprise clients to demonstrate cyber hygiene.
+                        ISG, DORA and NIS2 stakeholders who need a national
+                        picture, not a single-organisation assessment.
                     </p>
                 </div>
                 <div class="audience-card">
-                    <div class="aud-icon">🤝</div>
-                    <h3>Treuhand Network</h3>
+                    <div class="aud-icon">🔎</div>
+                    <h3>Security Teams</h3>
                     <p>
-                        80% of Swiss SMEs work with fiduciaries. 10 partnerships
-                        unlock access to their entire client base.
+                        Anyone who wants to check where their own .ch domain
+                        stands against 2.5M peers, for free.
                     </p>
                 </div>
             </div>
         </section>
 
-        <!-- ── TRACTION / MILESTONES ── -->
-        <section id="traction" class="milestones">
-            <div class="section-label">Traction &amp; Milestones</div>
-            <h2>Production-ready before the seed round.</h2>
+        <!-- ── ABOUT ── -->
+        <section id="about" class="milestones">
+            <div class="section-label">About the Project</div>
+            <h2>Built and run by one person, in the open.</h2>
             <p class="section-intro">
-                Built by a technical founder. Every core module is operational.
+                Every scan module is operational and the source is public. See
+                the
+                <a href="https://github.com/rafapolo/helvetiscan" target="_blank" rel="noopener">GitHub repo</a>
+                for the code behind every figure on this page.
             </p>
         </section>
 
         <!-- ── CONTACT ── -->
         <section id="contact" class="contact">
-            <div class="section-label">Investor Contact</div>
-            <h2>
-                Ready to back Switzerland's first SME cybersecurity intelligence
-                platform?
-            </h2>
+            <div class="section-label">Get In Touch</div>
+            <h2>Questions about the data, or found something we missed?</h2>
 
             <form class="contact-form" id="contact-form">
                 <div class="form-row">
@@ -1985,22 +2121,21 @@
                         <input
                             type="text"
                             id="org"
-                            placeholder="Venture Fund"
+                            placeholder="Optional"
                         />
                     </div>
                 </div>
                 <div>
                     <label for="email">Email</label>
-                    <input type="email" id="email" placeholder="you@fund.ch" />
+                    <input type="email" id="email" placeholder="you@example.ch" />
                 </div>
                 <div>
-                    <label for="interest">Interest</label>
+                    <label for="interest">Reason</label>
                     <select id="interest">
                         <option value="">Select one</option>
-                        <option>Seed investment</option>
-                        <option>Strategic partnership</option>
-                        <option>Pilot client</option>
-                        <option>Advisory</option>
+                        <option>Data question / correction</option>
+                        <option>Press &amp; research enquiry</option>
+                        <option>Collaboration</option>
                         <option>Other</option>
                     </select>
                 </div>
@@ -2008,7 +2143,7 @@
                     <label for="message">Message</label>
                     <textarea
                         id="message"
-                        placeholder="Tell us briefly about your interest..."
+                        placeholder="Tell us briefly what you need..."
                     ></textarea>
                 </div>
                 <div class="form-submit">
@@ -2016,7 +2151,7 @@
                         Send Message
                     </button>
                     <span class="privacy-note"
-                        >Confidential — not for distribution</span
+                        >Opens your email client — nothing is stored here</span
                     >
                 </div>
                 <div id="form-feedback">
@@ -2032,14 +2167,15 @@
                     >HELVETISCAN</strong
                 ><br />
                 Basel, Switzerland · rafael@extrapolo.com<br />
-                Confidential Investor Brief — April 2026
+                Independent Swiss .ch domain scan — published snapshots
             </div>
             <div class="footer-links">
-                <a href="#problem">Problem</a>
-                <a href="#product">Platform</a>
+                <a href="#context">Why</a>
+                <a href="#product">What We Scan</a>
                 <a href="#findings">Findings</a>
-                <a href="#market">Market</a>
-                <a href="#traction">Traction</a>
+                <a href="#trend">Trend</a>
+                <a href="#audience">Who It's For</a>
+                <a href="#about">About</a>
                 <a href="#contact">Contact</a>
                 <a
                     href="https://xn--2dk.xyz/dataviz/swiss/"
@@ -2082,7 +2218,7 @@
                     const interest = document.getElementById("interest").value;
                     const message = document.getElementById("message").value;
                     const subject = encodeURIComponent(
-                        "HELVETISCAN — " + (interest || "Investor Enquiry"),
+                        "HELVETISCAN — " + (interest || "Enquiry"),
                     );
                     const body = encodeURIComponent(
                         "Name: " +
@@ -2102,6 +2238,274 @@
                         "&body=" +
                         body;
                 });
+
+            // ── snapshot trend ──
+            // Reads website/data/snapshot-history.json — a trimmed, month-sorted array written
+            // by scripts/publish_snapshot_history.py from each `helvetiscan snapshot` run's flat
+            // summary. Empty until a real snapshot has been published; renders an honest empty
+            // state instead of guessing at numbers. See docs/SNAPSHOTS.md.
+            (function () {
+                const TREND_METRICS = [
+                    { key: "missing_hsts_pct", label: "Missing HSTS", lowerIsBetter: true },
+                    { key: "weak_tls_pct", label: "Weak / expired TLS", lowerIsBetter: true },
+                    { key: "cert_expiring_30d_pct", label: "Certs expiring <30d", lowerIsBetter: true },
+                    { key: "no_dnssec_pct", label: "No DNSSEC", lowerIsBetter: true },
+                    { key: "dmarc_weak_pct", label: "DMARC weak / absent", lowerIsBetter: true },
+                    { key: "exposed_db_port_pct", label: "Exposed DB port", lowerIsBetter: true },
+                    { key: "has_critical_cve_pct", label: "Has CRITICAL CVE", lowerIsBetter: true },
+                    { key: "no_dkim_pct", label: "No DKIM", lowerIsBetter: true },
+                ];
+
+                const MODULE_LABELS = {
+                    http: "HTTP",
+                    dns: "DNS",
+                    tls: "TLS",
+                    ports: "Ports",
+                    email_security: "Email security",
+                    smtp: "SMTP",
+                    classification: "Classification",
+                };
+                const MONTH_NAMES = [
+                    "January", "February", "March", "April", "May", "June",
+                    "July", "August", "September", "October", "November", "December",
+                ];
+
+                function fmtInt(n) {
+                    return typeof n === "number" ? n.toLocaleString("en-US") : "—";
+                }
+                function fmtPct(n) {
+                    return typeof n === "number" ? n.toFixed(1) + "%" : "—";
+                }
+                function fmtMonth(ym) {
+                    const m = /^(\d{4})-(\d{2})$/.exec(ym || "");
+                    if (!m) return ym || "—";
+                    return MONTH_NAMES[parseInt(m[2], 10) - 1] + " " + m[1];
+                }
+                function nextMonth(ym) {
+                    const m = /^(\d{4})-(\d{2})$/.exec(ym || "");
+                    if (!m) return null;
+                    let y = parseInt(m[1], 10);
+                    let mo = parseInt(m[2], 10) + 1;
+                    if (mo > 12) { mo = 1; y += 1; }
+                    return y + "-" + String(mo).padStart(2, "0");
+                }
+
+                function sparkline(values) {
+                    if (values.length < 2) return "";
+                    const w = 130,
+                        h = 34,
+                        pad = 4;
+                    const nums = values.filter((v) => typeof v === "number");
+                    if (nums.length < 2) return "";
+                    const min = Math.min(...nums);
+                    const max = Math.max(...nums);
+                    const range = max - min || 1;
+                    const stepX = (w - pad * 2) / (values.length - 1);
+                    const pts = values.map((v, i) => {
+                        const x = pad + i * stepX;
+                        const val = typeof v === "number" ? v : min;
+                        const y = h - pad - ((val - min) / range) * (h - pad * 2);
+                        return [x, y];
+                    });
+                    const d = pts
+                        .map((p, i) => (i === 0 ? "M" : "L") + p[0].toFixed(1) + "," + p[1].toFixed(1))
+                        .join(" ");
+                    const last = pts[pts.length - 1];
+                    return (
+                        '<svg class="spark" width="' +
+                        w +
+                        '" height="' +
+                        h +
+                        '" viewBox="0 0 ' +
+                        w +
+                        " " +
+                        h +
+                        '"><path d="' +
+                        d +
+                        '" fill="none" stroke="var(--mid)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="' +
+                        last[0].toFixed(1) +
+                        '" cy="' +
+                        last[1].toFixed(1) +
+                        '" r="2.6" fill="var(--red)"/></svg>'
+                    );
+                }
+
+                function deltaBadge(curr, prev, lowerIsBetter, fmt, unit, judged) {
+                    if (typeof curr !== "number" || typeof prev !== "number") return "";
+                    const diff = curr - prev;
+                    const arrow = diff > 0 ? "▲" : diff < 0 ? "▼" : "▬";
+                    const magnitude = fmt(Math.abs(diff)).replace(/^0(\.0)?%?$/, "0" + (unit || ""));
+                    let cls = "flat";
+                    if (judged && Math.abs(diff) > 0.05) {
+                        cls = (lowerIsBetter ? diff < 0 : diff > 0) ? "good" : "bad";
+                    }
+                    return (
+                        '<span class="trend-delta ' +
+                        cls +
+                        '">' +
+                        arrow +
+                        " " +
+                        magnitude +
+                        " vs prev</span>"
+                    );
+                }
+
+                function renderEmpty(grid, note) {
+                    grid.innerHTML =
+                        '<div class="trend-empty" style="grid-column: 1 / -1"><strong>No snapshot published yet</strong>' +
+                        "Trend tracking starts once <code>helvetiscan snapshot</code> has run at least once and its " +
+                        "summary has been published here. Once it has, this section will show, for each metric below — " +
+                        "missing HSTS, weak/expired TLS, certs expiring within 30 days, missing DNSSEC, weak DMARC, " +
+                        "exposed database ports, CRITICAL CVE matches, and missing DKIM — the latest value, how it moved " +
+                        "since the prior snapshot, and a small trend line across every snapshot on record.</div>";
+                    note.textContent = "";
+                }
+
+                function renderStatus(status, latest) {
+                    const cov = latest.coverage || {};
+                    const modules = Object.keys(cov);
+                    if (!latest.partial || modules.length === 0) {
+                        status.innerHTML = "";
+                        return;
+                    }
+                    modules.sort((a, b) => (cov[a] || 0) - (cov[b] || 0));
+                    const lagging = modules.filter((m) => (cov[m] || 0) < 99.5);
+                    const rows = modules
+                        .map(function (m) {
+                            const pct = typeof cov[m] === "number" ? cov[m] : 0;
+                            const cls = pct >= 99.5 ? "full" : pct < 50 ? "low" : "";
+                            return (
+                                '<div class="cov-row ' + cls + '">' +
+                                '<span class="cov-name">' + (MODULE_LABELS[m] || m) + "</span>" +
+                                '<span class="cov-pct">' + pct.toFixed(1) + "%</span>" +
+                                '<span class="cov-bar"><span style="width:' +
+                                Math.max(2, Math.min(100, pct)).toFixed(1) + '%"></span></span>' +
+                                "</div>"
+                            );
+                        })
+                        .join("");
+                    status.className = "trend-status";
+                    status.innerHTML =
+                        '<div class="status-head"><span class="dot"></span>Partial snapshot — scan still in progress</div>' +
+                        '<div class="status-sub">' +
+                        fmtMonth(latest.snapshot_month) +
+                        " is this dataset's first snapshot, captured mid-scan. Fully-scanned modules are settled; " +
+                        (lagging.length
+                            ? lagging.map((m) => MODULE_LABELS[m] || m).join(", ") +
+                              " are still being filled in, so metrics that depend on them will keep moving until coverage reaches 100%."
+                            : "the remaining modules are still being filled in.") +
+                        "</div>" +
+                        '<div class="cov-list">' + rows + "</div>";
+                }
+
+                function renderUpcoming(upcoming, latest) {
+                    const nm = nextMonth(latest.snapshot_month);
+                    if (!nm) {
+                        upcoming.innerHTML = "";
+                        return;
+                    }
+                    upcoming.className = "trend-upcoming";
+                    upcoming.innerHTML =
+                        '<div class="up-icon" aria-hidden="true">🛰️</div>' +
+                        '<div class="up-body"><strong>Next snapshot — ' +
+                        fmtMonth(nm) +
+                        "</strong><span>A fresh full-namespace scan is underway. When it lands, this section switches on " +
+                        "month-over-month deltas and per-metric trend lines against " +
+                        fmtMonth(latest.snapshot_month) +
+                        ".</span></div>" +
+                        '<div class="up-tag">Coming next</div>';
+                }
+
+                async function loadSnapshotTrend() {
+                    const band = document.getElementById("trend-band");
+                    const grid = document.getElementById("trend-grid");
+                    const note = document.getElementById("trend-note");
+                    const status = document.getElementById("trend-status");
+                    const upcoming = document.getElementById("trend-upcoming");
+                    let history = [];
+                    try {
+                        const res = await fetch("data/snapshot-history.json", { cache: "no-store" });
+                        if (res.ok) history = await res.json();
+                    } catch (e) {
+                        /* offline, opened via file://, or not deployed yet — fall through to empty state */
+                    }
+                    if (!Array.isArray(history)) history = [];
+
+                    if (history.length === 0) {
+                        band.style.display = "none";
+                        status.innerHTML = "";
+                        upcoming.innerHTML = "";
+                        renderEmpty(grid, note);
+                        return;
+                    }
+
+                    band.style.display = "";
+                    const latest = history[history.length - 1];
+                    const prev = history.length > 1 ? history[history.length - 2] : null;
+
+                    band.innerHTML =
+                        '<div class="metric-item"><h3>' +
+                        fmtInt(latest.total_domains) +
+                        "</h3><p>Domains in latest snapshot (" +
+                        latest.snapshot_month +
+                        ")</p></div>" +
+                        '<div class="metric-item"><h3>' +
+                        (typeof latest.avg_risk_score === "number" ? latest.avg_risk_score.toFixed(1) : "—") +
+                        "</h3><p>Avg. risk score (0–100, higher = better)</p></div>" +
+                        '<div class="metric-item"><h3>' +
+                        history.length +
+                        "</h3><p>Snapshot" +
+                        (history.length === 1 ? "" : "s") +
+                        " on record</p></div>" +
+                        '<div class="metric-item"><h3>' +
+                        (typeof latest.min_module_coverage_pct === "number"
+                            ? latest.min_module_coverage_pct.toFixed(0) + "%"
+                            : "—") +
+                        "</h3><p>Lowest module coverage this snapshot</p></div>";
+
+                    renderStatus(status, latest);
+                    renderUpcoming(upcoming, latest);
+
+                    grid.innerHTML = TREND_METRICS.map(function (m) {
+                        const currVal = latest.metrics ? latest.metrics[m.key] : undefined;
+                        const prevVal = prev && prev.metrics ? prev.metrics[m.key] : undefined;
+                        const series = history.map((h) => (h.metrics ? h.metrics[m.key] : undefined));
+                        const spark = sparkline(series);
+                        const delta = prev
+                            ? deltaBadge(currVal, prevVal, m.lowerIsBetter, function (v) {
+                                  return v.toFixed(1) + "%";
+                              }, "%", true)
+                            : '<span class="trend-delta flat">first snapshot</span>';
+                        return (
+                            '<div class="trend-card"><div class="label">' +
+                            m.label +
+                            '</div><div class="row"><div><div class="value">' +
+                            fmtPct(currVal) +
+                            "</div>" +
+                            delta +
+                            "</div>" +
+                            (spark ? '<div class="spark">' + spark + "</div>" : "") +
+                            "</div></div>"
+                        );
+                    }).join("");
+
+                    note.textContent = prev
+                        ? "Comparing " +
+                          latest.snapshot_month +
+                          " against " +
+                          prev.snapshot_month +
+                          " — " +
+                          history.length +
+                          " snapshot" +
+                          (history.length === 1 ? "" : "s") +
+                          " on record."
+                        : "First snapshot on record (" +
+                          latest.snapshot_month +
+                          "). Deltas and trend lines appear once a second snapshot is published.";
+                }
+
+                loadSnapshotTrend();
+            })();
         </script>
     </body>
 </html>
