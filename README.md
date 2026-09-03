@@ -75,7 +75,7 @@ Options:
 
 ---
 
-→ [RESEARCH & ROADMAP](docs/RESEARCH.md) / [SCAN OVERVIEW](docs/README.md) / [REGULATORY PRESSURE](docs/REGULATORY.md) / [LEGAL](docs/LEGAL.md) / [LICENSE](LICENSE)
+→ [RESEARCH & ROADMAP](docs/RESEARCH.md) / [SCAN OVERVIEW](docs/README.md) / [SNAPSHOTS](docs/SNAPSHOTS.md) / [REGULATORY PRESSURE](docs/REGULATORY.md) / [LEGAL](docs/LEGAL.md) / [LICENSE](LICENSE)
 
 [^1]: Full dataset visualization requires ~32GB RAM for a proper WebGPU processing.
 [^2]: Raw datasets are not published. Consider only processed edges.arrow and nodes.arrow for dataviz.
