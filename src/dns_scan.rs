@@ -438,7 +438,7 @@ fn writer_loop_dns(
         if row.error_kind.is_none() {
             progress.ok.fetch_add(1, Ordering::Relaxed);
         } else {
-            progress.errors.fetch_add(1, Ordering::Relaxed);
+            progress.record_error(row.error_kind);
         }
         batch.push(row);
         progress.completed.fetch_add(1, Ordering::Relaxed);

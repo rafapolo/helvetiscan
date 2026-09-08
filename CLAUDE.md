@@ -58,7 +58,9 @@ one multi-line progress display and one error-rate supervisor.
 ### `full` pipeline phases (`cmd_full_pipeline` in main.rs)
 1. **Phase 1 — parallel network scans**: http, dns, tls, ports, subdomains run concurrently as a
    `JoinSet`, each with its own cancellation channel. An `error_rate_supervisor` cancels a module early if its
-   error rate exceeds `--error-threshold` after `min_samples` requests. Ctrl-C/SIGTERM triggers a global
+   *transport-error* rate (timeouts/refused/reset — not non-resolving or HTTPS-less domains, which are zone
+   facts, so a namespace full of dead domains can't trip it) stays above `--error-threshold` for several
+   consecutive 2s windows, once past the `--min-samples` warm-up gate. Ctrl-C/SIGTERM triggers a global
    shutdown that fans out to every module's cancel channel; a second Ctrl-C forces an immediate exit.
 2. **Phase 2 — sequential post-processing**: smtp-check, update-cves, classify, sovereignty (each depends on
    Phase 1 data being present).
