@@ -76,6 +76,21 @@ impl ErrorKind {
             ErrorKind::Other => "other",
         }
     }
+
+    /// True only for transport-level failures the host can influence by backing off — a
+    /// connection that timed out, was refused/reset, or failed in some other transport way.
+    /// False for "zone facts" that merely describe the remote domain and would be true no matter
+    /// how healthy our end is: it doesn't resolve (`Dns`/`NotFound`), serves no TLS (`Tls`),
+    /// answered with an HTTP error status (`HttpStatus`, a *successful* connection), or returned
+    /// bytes we couldn't parse (`ParseFailed`).
+    ///
+    /// The error-rate supervisor counts only these, so a namespace where a large share of
+    /// domains are parked/dead/HTTPS-less can't trip it. This matches `AdaptiveSemaphore::
+    /// record_result`'s definition of a network error ("not for 'the request succeeded but found
+    /// nothing', which isn't a network problem").
+    pub(crate) fn is_transport_failure(self) -> bool {
+        matches!(self, ErrorKind::Timeout | ErrorKind::Refused | ErrorKind::Other)
+    }
 }
 
 impl fmt::Display for ErrorKind {
@@ -208,6 +223,9 @@ pub(crate) struct Progress {
     pub(crate) completed: AtomicU64,
     pub(crate) ok: AtomicU64,
     pub(crate) errors: AtomicU64,
+    /// Subset of `errors` that are transport-level failures (see `ErrorKind::is_transport_failure`).
+    /// Only the error-rate supervisor reads this; the display still uses the full `errors` count.
+    pub(crate) transport_errors: AtomicU64,
     pub(crate) ok_label: &'static str,
     pub(crate) err_label: &'static str,
 }
@@ -221,8 +239,21 @@ impl Progress {
             completed: AtomicU64::new(0),
             ok: AtomicU64::new(0),
             errors: AtomicU64::new(0),
+            transport_errors: AtomicU64::new(0),
             ok_label,
             err_label,
+        }
+    }
+
+    /// Record one failed row: always bumps `errors` (the displayed count), and additionally bumps
+    /// `transport_errors` when the failure is a backoff-worthy transport problem rather than a
+    /// zone fact. Modules whose "error" is a found-nothing outcome (ports with no resolved IP,
+    /// subdomains with no discoveries) keep calling `errors.fetch_add` directly and contribute
+    /// nothing here, so the supervisor never cancels them on a structural non-signal.
+    pub(crate) fn record_error(&self, kind: Option<ErrorKind>) {
+        self.errors.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        if kind.is_some_and(ErrorKind::is_transport_failure) {
+            self.transport_errors.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         }
     }
 }
@@ -1099,6 +1130,32 @@ mod tests {
     }
 
     // AdaptiveSemaphore::record_result / net-error-rate wiring
+
+    #[test]
+    fn is_transport_failure_only_true_for_backoff_worthy_kinds() {
+        // Transport failures the host can influence by backing off.
+        assert!(ErrorKind::Timeout.is_transport_failure());
+        assert!(ErrorKind::Refused.is_transport_failure());
+        assert!(ErrorKind::Other.is_transport_failure());
+        // Zone facts about the remote domain — not our network's problem.
+        assert!(!ErrorKind::Dns.is_transport_failure());
+        assert!(!ErrorKind::Tls.is_transport_failure());
+        assert!(!ErrorKind::HttpStatus.is_transport_failure());
+        assert!(!ErrorKind::NotFound.is_transport_failure());
+        assert!(!ErrorKind::ParseFailed.is_transport_failure());
+    }
+
+    #[test]
+    fn record_error_counts_transport_subset_separately() {
+        let p = Progress::new(100, "ok", "err");
+        p.record_error(Some(ErrorKind::Timeout));   // transport
+        p.record_error(Some(ErrorKind::Refused));   // transport
+        p.record_error(Some(ErrorKind::Dns));       // zone fact
+        p.record_error(Some(ErrorKind::HttpStatus)); // zone fact
+        p.record_error(None);                        // unclassified failure
+        assert_eq!(p.errors.load(Ordering::Relaxed), 5);
+        assert_eq!(p.transport_errors.load(Ordering::Relaxed), 2);
+    }
 
     #[tokio::test]
     async fn record_result_counts_only_failures_as_errors() {

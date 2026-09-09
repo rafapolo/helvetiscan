@@ -309,7 +309,7 @@ fn writer_loop_db(
             progress.ok.fetch_add(1, Ordering::Relaxed);
         }
         if row.error_kind.is_some() {
-            progress.errors.fetch_add(1, Ordering::Relaxed);
+            progress.record_error(row.error_kind);
         }
         if let Some(h) = headers {
             headers_batch.push(h);

@@ -831,27 +831,39 @@ async fn error_rate_supervisor_cancels_on_high_error_rate() {
     use std::sync::atomic::Ordering;
     use crate::shared::Progress;
 
-    let prog = Arc::new(Progress::new(200, "ok", "err"));
-    prog.total.store(200, Ordering::Relaxed);
-    prog.completed.store(150, Ordering::Relaxed);
-    prog.errors.store(130, Ordering::Relaxed); // 86% error rate
+    // The supervisor judges each 2s window's transport-error rate and cancels only after the rate
+    // stays over threshold for SUPERVISOR_DEBOUNCE_WINDOWS in a row — so a static snapshot can't
+    // trip it; we need a module that keeps producing results. This driver emits ~100 completions
+    // every 300ms at a 60% transport-error rate (> the 0.35 threshold), past min_samples.
+    let prog = Arc::new(Progress::new(10_000_000, "ok", "err"));
+    prog.total.store(10_000_000, Ordering::Relaxed);
+
+    let driver_prog = prog.clone();
+    let driver = tokio::spawn(async move {
+        loop {
+            driver_prog.completed.fetch_add(100, Ordering::Relaxed);
+            driver_prog.transport_errors.fetch_add(60, Ordering::Relaxed);
+            tokio::time::sleep(Duration::from_millis(300)).await;
+        }
+    });
 
     let (cancel_tx, mut cancel_rx) = tokio::sync::watch::channel(false);
 
     let supervisor = tokio::spawn(crate::error_rate_supervisor(
         vec![("test-module", prog, cancel_tx)],
-        0.5,  // 50% threshold
-        100,  // min_samples
+        0.35, // threshold
+        100, // min_samples (warm-up gate; small so the driver clears it quickly in-test)
     ));
 
-    // Supervisor polls every 2s; give it up to 5s
-    tokio::time::timeout(Duration::from_secs(5), async {
+    // Needs SUPERVISOR_DEBOUNCE_WINDOWS (3) × 2s ≈ 6s of sustained overload; allow generous slack.
+    tokio::time::timeout(Duration::from_secs(15), async {
         cancel_rx.changed().await.unwrap();
         assert!(*cancel_rx.borrow(), "cancel channel should be set to true");
     })
     .await
-    .expect("supervisor did not cancel module within 5s");
+    .expect("supervisor did not cancel a sustained-overload module in time");
 
+    driver.abort();
     supervisor.abort();
 }
 
@@ -863,22 +875,22 @@ async fn error_rate_supervisor_does_not_cancel_below_threshold() {
 
     let prog = Arc::new(Progress::new(200, "ok", "err"));
     prog.total.store(200, Ordering::Relaxed);
-    prog.completed.store(150, Ordering::Relaxed);
-    prog.errors.store(30, Ordering::Relaxed); // 20% error rate, below 50% threshold
+    prog.completed.store(150, Ordering::Relaxed); // past min_samples
+    prog.transport_errors.store(30, Ordering::Relaxed); // 20% transport rate, below 35% threshold
 
     let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
 
-    // Run supervisor for one poll cycle (slightly more than 2s)
+    // Run supervisor for a couple of poll cycles.
     let supervisor = tokio::spawn(crate::error_rate_supervisor(
         vec![("test-module", prog, cancel_tx)],
-        0.5,
+        0.35,
         100,
     ));
 
-    tokio::time::sleep(Duration::from_millis(2500)).await;
+    tokio::time::sleep(Duration::from_millis(4500)).await;
 
     // Cancel channel should remain false
-    assert!(!*cancel_rx.borrow(), "supervisor should not cancel a module below the error threshold");
+    assert!(!*cancel_rx.borrow(), "supervisor should not cancel a module below the transport-error threshold");
 
     supervisor.abort();
 }
@@ -892,13 +904,13 @@ async fn error_rate_supervisor_does_not_cancel_below_min_samples() {
     let prog = Arc::new(Progress::new(200, "ok", "err"));
     prog.total.store(200, Ordering::Relaxed);
     prog.completed.store(50, Ordering::Relaxed); // only 50 samples, below min_samples=100
-    prog.errors.store(50, Ordering::Relaxed);    // 100% error rate
+    prog.transport_errors.store(50, Ordering::Relaxed); // 100% transport rate, but must be ignored
 
     let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
 
     let supervisor = tokio::spawn(crate::error_rate_supervisor(
         vec![("test-module", prog, cancel_tx)],
-        0.5,
+        0.35,
         100, // min_samples
     ));
 
@@ -1066,3 +1078,53 @@ fn test_cli_subdomains_quiet_and_retry() {
     assert_eq!(args.retry_errors.as_deref(), Some("nxdomain"), "--retry-errors should parse");
 }
 
+
+// ---- error-rate supervisor (windowed, transport-only, debounced) ----
+
+use crate::{supervisor_step, SUPERVISOR_DEBOUNCE_WINDOWS};
+
+#[test]
+fn supervisor_holds_streak_at_zero_during_warmup() {
+    // Below min_samples the run is still warming up: even a 100% window must not build a streak.
+    let s = supervisor_step(2, /*completed_total*/ 4_999, /*win_completed*/ 500, /*win_errs*/ 500, 0.35, 5_000);
+    assert_eq!(s, 0);
+}
+
+#[test]
+fn supervisor_builds_streak_only_on_sustained_over_threshold_windows() {
+    // Warmed up, transport-error rate 60% > 35% threshold: streak increments each window.
+    let mut streak = 0;
+    for _ in 0..SUPERVISOR_DEBOUNCE_WINDOWS {
+        streak = supervisor_step(streak, 10_000, 1_000, 600, 0.35, 5_000);
+    }
+    assert_eq!(streak, SUPERVISOR_DEBOUNCE_WINDOWS, "sustained overload should reach the cancel threshold");
+}
+
+#[test]
+fn supervisor_resets_streak_on_a_healthy_window() {
+    // Two bad windows then a healthy one (10% < 35%) must reset — a blip can't accumulate to a cancel.
+    let streak = supervisor_step(2, 10_000, 1_000, 100, 0.35, 5_000);
+    assert_eq!(streak, 0);
+}
+
+#[test]
+fn supervisor_freezes_streak_on_a_no_progress_window() {
+    // A window with zero completions (module stalled) neither grows nor resets the streak.
+    let streak = supervisor_step(2, 10_000, 0, 0, 0.35, 5_000);
+    assert_eq!(streak, 2);
+}
+
+#[test]
+fn supervisor_ignores_a_high_lifetime_rate_when_the_recent_window_is_clean() {
+    // The whole point of windowing: a run that had a rough warm-up but is now healthy is judged on
+    // the recent window (5% here), not on any cumulative lifetime ratio.
+    let streak = supervisor_step(0, 2_000_000, 800, 40, 0.35, 5_000);
+    assert_eq!(streak, 0);
+}
+
+#[test]
+fn supervisor_zone_facts_never_trip_it() {
+    // A stage like subdomains/ports feeds zero transport errors even at 100% "errors": streak stays 0.
+    let streak = supervisor_step(2, 1_000_000, 1_000, 0, 0.35, 5_000);
+    assert_eq!(streak, 0);
+}

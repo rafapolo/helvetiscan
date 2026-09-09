@@ -529,9 +529,17 @@ pub(crate) struct FullArgs {
     #[arg(long, default_value_t = 3)]
     pub(crate) parallel_divisor: usize,
 
-    /// Cancel a module when its error rate exceeds this fraction (0.0-1.0, default: 0.5).
-    #[arg(long, default_value_t = 0.5)]
+    /// Cancel a module when its *transport-error* rate (timeouts/refused/reset — not
+    /// non-resolving or HTTPS-less domains) stays above this fraction (0.0-1.0) for several
+    /// consecutive windows. Default 0.35: ~2.5x the observed steady-state transport floor of the
+    /// worst stage (tls ≈ 15%), well below a genuine meltdown.
+    #[arg(long, default_value_t = 0.35)]
     pub(crate) error_threshold: f64,
+
+    /// Warm-up gate: the supervisor won't judge a module until it has completed at least this
+    /// many domains, so a slow-to-warm start can't trip it. Default 5000 (~0.2% of the namespace).
+    #[arg(long, default_value_t = 5000)]
+    pub(crate) min_samples: u64,
 }
 
 impl Default for ScanArgs {
@@ -814,33 +822,83 @@ fn cmd_show(args: ShowArgs) -> Result<()> {
 
 // ---- full pipeline ----
 
+/// Number of consecutive over-threshold windows (each `SUPERVISOR_TICK`) required before the
+/// supervisor cancels a module. Debounces a single unlucky window so a brief blip can't kill an
+/// otherwise-healthy run; at 2s/window this is ~6s of *sustained* transport failure.
+pub(crate) const SUPERVISOR_DEBOUNCE_WINDOWS: u32 = 3;
+
+/// How often the supervisor samples each module's counters.
+const SUPERVISOR_TICK: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Pure decision for one supervisor window, extracted so it can be unit-tested without timers or
+/// atomics. Returns the updated over-threshold streak; the caller cancels once it reaches
+/// `SUPERVISOR_DEBOUNCE_WINDOWS`.
+///
+/// The rate is measured over the *window* (deltas since the last tick), not the cumulative run, so
+/// a slow-to-warm start averages out instead of dominating a lifetime ratio — and, symmetrically,
+/// a meltdown late in a long run isn't masked by millions of earlier healthy samples. Two gates
+/// guard against false positives: `completed_total < min_samples` holds the streak at 0 during
+/// warm-up, and a window with no progress freezes the streak rather than reacting to noise.
+pub(crate) fn supervisor_step(
+    prev_streak: u32,
+    completed_total: u64,
+    window_completed: u64,
+    window_transport_errors: u64,
+    threshold: f64,
+    min_samples: u64,
+) -> u32 {
+    if completed_total < min_samples {
+        return 0; // still warming up — not enough of the run seen to judge it
+    }
+    if window_completed == 0 {
+        return prev_streak; // no progress this window — freeze, don't react to an empty sample
+    }
+    let rate = window_transport_errors as f64 / window_completed as f64;
+    if rate > threshold {
+        prev_streak + 1
+    } else {
+        0
+    }
+}
+
 pub(crate) async fn error_rate_supervisor(
     modules: Vec<(&'static str, std::sync::Arc<crate::shared::Progress>, tokio::sync::watch::Sender<bool>)>,
     threshold: f64,
     min_samples: u64,
 ) {
     use std::sync::atomic::Ordering;
-    let mut ticker = tokio::time::interval(std::time::Duration::from_secs(2));
+    // Per-module rolling state: (prev_completed, prev_transport_errors, over_streak).
+    let mut state: Vec<(u64, u64, u32)> = vec![(0, 0, 0); modules.len()];
+    let mut ticker = tokio::time::interval(SUPERVISOR_TICK);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
         ticker.tick().await;
         let mut all_done = true;
-        for (name, progress, cancel_tx) in &modules {
+        for (i, (name, progress, cancel_tx)) in modules.iter().enumerate() {
             let completed = progress.completed.load(Ordering::Relaxed);
             let total = progress.total.load(Ordering::Relaxed);
-            let errors = progress.errors.load(Ordering::Relaxed);
+            let transport_errors = progress.transport_errors.load(Ordering::Relaxed);
             if total == 0 || completed < total {
                 all_done = false;
             }
-            if completed >= min_samples && errors > 0 {
-                let rate = errors as f64 / completed as f64;
-                if rate > threshold && !*cancel_tx.borrow() {
-                    eprintln!(
-                        "\n[pipeline] {name}: error rate {:.1}% exceeds {:.0}% threshold — cancelling",
-                        rate * 100.0, threshold * 100.0
-                    );
-                    let _ = cancel_tx.send(true);
-                }
+            let (prev_completed, prev_transport_errors, streak) = state[i];
+            let window_completed = completed.saturating_sub(prev_completed);
+            let window_errors = transport_errors.saturating_sub(prev_transport_errors);
+            let new_streak = supervisor_step(
+                streak, completed, window_completed, window_errors, threshold, min_samples,
+            );
+            state[i] = (completed, transport_errors, new_streak);
+            if new_streak >= SUPERVISOR_DEBOUNCE_WINDOWS && !*cancel_tx.borrow() {
+                let rate = if window_completed > 0 {
+                    window_errors as f64 / window_completed as f64
+                } else {
+                    0.0
+                };
+                eprintln!(
+                    "\n[pipeline] {name}: transport-error rate {:.1}% sustained over {} windows exceeds {:.0}% threshold — cancelling",
+                    rate * 100.0, new_streak, threshold * 100.0
+                );
+                let _ = cancel_tx.send(true);
             }
         }
         if all_done { break; }
@@ -855,6 +913,7 @@ async fn cmd_full_pipeline(args: FullArgs) -> Result<()> {
     let db = args.db;
     let div = args.parallel_divisor.max(1);
     let error_threshold = args.error_threshold;
+    let min_samples = args.min_samples;
 
     // ── Global shutdown (Ctrl+C / SIGTERM) ──────────────────────────────────
     let (global_tx, global_rx) = tokio::sync::watch::channel(false);
@@ -998,7 +1057,7 @@ async fn cmd_full_pipeline(args: FullArgs) -> Result<()> {
             ("subdomains",sub_prog.clone(),   sub_ctx),
         ],
         error_threshold,
-        100,
+        min_samples,
     ));
 
     // Collect phase 1 results silently — don't print while the reporter is live
