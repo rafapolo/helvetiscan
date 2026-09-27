@@ -20,3 +20,6 @@ TODO.md
 tenta/
 /Users/polux/Projetos/helvetiscan/skills-lock.json
 exploit/
+
+# private exploit/RCE analysis — never publish
+docs/rce/
