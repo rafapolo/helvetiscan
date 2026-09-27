@@ -250,11 +250,10 @@ pub(crate) fn extract_version(banner: &str, technology: &str) -> Option<String> 
                 .take_while(|c| !c.is_ascii_whitespace())
                 .collect();
             // Strip MariaDB compatibility prefix "5.5.5-"
-            let version: String = if token.starts_with("5.5.5-") {
-                token[6..]
-                    .split('-')
+            let version: String = if let Some(rest) = token.strip_prefix("5.5.5-") {
+                rest.split('-')
                     .next()
-                    .unwrap_or(&token[6..])
+                    .unwrap_or(rest)
                     .chars()
                     .take_while(|c| c.is_ascii_digit() || *c == '.')
                     .collect()
@@ -273,7 +272,7 @@ pub(crate) fn extract_version(banner: &str, technology: &str) -> Option<String> 
                 .collect();
             // Strip patch suffix "p<N>" (e.g. "9.3p1" → "9.3")
             let version = if let Some(p_pos) = token.find('p') {
-                if token[p_pos + 1..].chars().next().map_or(false, |c| c.is_ascii_digit()) {
+                if token[p_pos + 1..].chars().next().is_some_and(|c| c.is_ascii_digit()) {
                     token[..p_pos].to_string()
                 } else {
                     token
@@ -548,7 +547,7 @@ pub(crate) fn cmd_list_services(db: std::path::PathBuf) -> Result<()> {
         }
     }
 
-    println!("{:<6} {:<16} {:<24} {}", "PORT", "SERVICE", "VERSION(S)", "DOMAINS");
+    println!("{:<6} {:<16} {:<24} DOMAINS", "PORT", "SERVICE", "VERSION(S)");
     println!("{}", "-".repeat(70));
     for ((port, tech), (versions, domain_count)) in &map {
         if versions.is_empty() {
@@ -861,6 +860,9 @@ fn register_match_functions(conn: &rusqlite::Connection) -> Result<()> {
 /// stores one row per (domain, technology, version). Safe to re-run:
 /// uses INSERT OR REPLACE to update the version/last_seen on re-detection.
 pub(crate) fn populate_domain_technologies(conn: &rusqlite::Connection) -> Result<usize> {
+    // hs_banner_version is used below to extract versioned-tech versions at populate time so the
+    // version-filtered INSERT in run_cve_matching can match them on the first pass.
+    register_match_functions(conn)?;
     conn.execute("DELETE FROM domain_technologies", [])?;
 
     // 1. HTTP server/powered_by headers (domains table)
@@ -930,7 +932,7 @@ pub(crate) fn populate_domain_technologies(conn: &rusqlite::Connection) -> Resul
     // 3. Port banners
     conn.execute_batch(
         "INSERT OR REPLACE INTO domain_technologies (domain, technology, version, source)
-         SELECT p.domain, 'mysql', NULL, 'port_banner'
+         SELECT p.domain, 'mysql', hs_banner_version(p.banner, 'mysql'), 'port_banner'
          FROM ports_info p WHERE lower(coalesce(p.banner, '')) LIKE '%mysql%';
 
          INSERT OR REPLACE INTO domain_technologies (domain, technology, version, source)
@@ -1118,7 +1120,7 @@ pub(crate) fn run_cve_matching(conn: &rusqlite::Connection) -> Result<usize> {
         total += rows;
         eprintln!("  {}: +{rows} rows", tech);
         checkpoint_n += 1;
-        if checkpoint_n % 5 == 0 {
+        if checkpoint_n.is_multiple_of(5) {
             let _ = conn.execute_batch("PRAGMA wal_checkpoint(PASSIVE)");
         }
     }
@@ -1379,7 +1381,7 @@ mod tests {
         )
         .unwrap();
 
-        let matched = run_cve_matching(&conn).unwrap();
+        let matched = { populate_domain_technologies(&conn).unwrap(); run_cve_matching(&conn).unwrap() };
         assert!(matched > 0, "expected at least one WordPress CVE match");
 
         let domain_match: i64 = conn
@@ -1402,7 +1404,7 @@ mod tests {
         )
         .unwrap();
 
-        let matched = run_cve_matching(&conn).unwrap();
+        let matched = { populate_domain_technologies(&conn).unwrap(); run_cve_matching(&conn).unwrap() };
         assert_eq!(matched, 0);
     }
 
@@ -1417,7 +1419,7 @@ mod tests {
         )
         .unwrap();
 
-        let matched = run_cve_matching(&conn).unwrap();
+        let matched = { populate_domain_technologies(&conn).unwrap(); run_cve_matching(&conn).unwrap() };
         assert!(matched > 0, "expected MySQL CVE match from port 3306 banner");
 
         let n: i64 = conn
@@ -1442,7 +1444,7 @@ mod tests {
         )
         .unwrap();
 
-        let matched = run_cve_matching(&conn).unwrap();
+        let matched = { populate_domain_technologies(&conn).unwrap(); run_cve_matching(&conn).unwrap() };
         assert!(matched > 0, "expected mysql CVE match from MariaDB 5.5.60 banner");
     }
 
@@ -1457,7 +1459,7 @@ mod tests {
         )
         .unwrap();
 
-        run_cve_matching(&conn).unwrap();
+        { populate_domain_technologies(&conn).unwrap(); run_cve_matching(&conn).unwrap() };
         let n: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM cve_matches WHERE domain='rdp.ch' AND technology='rdp'",
@@ -1479,7 +1481,7 @@ mod tests {
         )
         .unwrap();
 
-        run_cve_matching(&conn).unwrap();
+        { populate_domain_technologies(&conn).unwrap(); run_cve_matching(&conn).unwrap() };
         let n: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM cve_matches WHERE domain='ssh.ch' AND technology='openssh'",
@@ -1503,7 +1505,7 @@ mod tests {
              -- WP plugin, presence based (no version)
              INSERT INTO software_detections (domain, kind, name, version) VALUES ('shop.ch','wp_plugin','contact-form-7',NULL);",
         ).unwrap();
-        run_cve_matching(&conn).unwrap();
+        { populate_domain_technologies(&conn).unwrap(); run_cve_matching(&conn).unwrap() };
 
         let jq: i64 = conn.query_row("SELECT COUNT(*) FROM cve_matches WHERE domain='shop.ch' AND cve_id='CVE-2020-11022'", [], |r| r.get(0)).unwrap();
         assert_eq!(jq, 1, "vulnerable jQuery 3.4.1 must match");
@@ -1523,7 +1525,7 @@ mod tests {
              INSERT INTO ports_info (domain, port, service) VALUES ('svc.ch', 5432, 'postgresql');
              INSERT INTO ports_info (domain, port, service) VALUES ('svc.ch', 5900, 'vnc');",
         ).unwrap();
-        run_cve_matching(&conn).unwrap();
+        { populate_domain_technologies(&conn).unwrap(); run_cve_matching(&conn).unwrap() };
         for tech in ["mongodb", "postgresql", "vnc"] {
             let n: i64 = conn
                 .query_row("SELECT COUNT(*) FROM cve_matches WHERE domain='svc.ch' AND technology=?1", [tech], |r| r.get(0))
@@ -1695,7 +1697,7 @@ mod tests {
         )
         .unwrap();
 
-        run_cve_matching(&conn).unwrap();
+        { populate_domain_technologies(&conn).unwrap(); run_cve_matching(&conn).unwrap() };
 
         let n: i64 = conn
             .query_row(
@@ -1719,7 +1721,7 @@ mod tests {
         )
         .unwrap();
 
-        run_cve_matching(&conn).unwrap();
+        { populate_domain_technologies(&conn).unwrap(); run_cve_matching(&conn).unwrap() };
 
         let n: i64 = conn
             .query_row(
@@ -1743,7 +1745,7 @@ mod tests {
         )
         .unwrap();
 
-        run_cve_matching(&conn).unwrap();
+        { populate_domain_technologies(&conn).unwrap(); run_cve_matching(&conn).unwrap() };
 
         let n: i64 = conn
             .query_row(
@@ -1788,7 +1790,7 @@ mod tests {
         conn.execute_batch(
             "INSERT INTO domains (domain, server) VALUES ('web.ch', 'Apache/2.4.58 (Ubuntu)');",
         ).unwrap();
-        run_cve_matching(&conn).unwrap();
+        { populate_domain_technologies(&conn).unwrap(); run_cve_matching(&conn).unwrap() };
         let n: i64 = conn
             .query_row("SELECT COUNT(*) FROM cve_matches WHERE domain='web.ch' AND cve_id='CVE-2021-41773'", [], |r| r.get(0))
             .unwrap();
@@ -1802,7 +1804,7 @@ mod tests {
         conn.execute_batch(
             "INSERT INTO domains (domain, server) VALUES ('web.ch', 'Apache/2.4.49 (Unix)');",
         ).unwrap();
-        run_cve_matching(&conn).unwrap();
+        { populate_domain_technologies(&conn).unwrap(); run_cve_matching(&conn).unwrap() };
         let n: i64 = conn
             .query_row("SELECT COUNT(*) FROM cve_matches WHERE domain='web.ch' AND cve_id='CVE-2021-41773'", [], |r| r.get(0))
             .unwrap();
@@ -1821,7 +1823,7 @@ mod tests {
         )
         .unwrap();
 
-        run_cve_matching(&conn).unwrap();
+        { populate_domain_technologies(&conn).unwrap(); run_cve_matching(&conn).unwrap() };
 
         let n: i64 = conn
             .query_row(

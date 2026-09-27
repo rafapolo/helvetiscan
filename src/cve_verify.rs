@@ -485,7 +485,7 @@ async fn verify_proftpd(ip: IpAddr, port: u16, aggressive: bool) -> ProbeOutcome
                 if cpto_resp.starts_with("250") {
                     return ProbeOutcome::Behavior {
                         method: "proftpd_mod_copy_rce".into(),
-                        proof: format!("ProFTPD mod_copy full RCE (CPFR+CPTO): passwd copied to /tmp/.helvetiscan_probe"),
+                        proof: "ProFTPD mod_copy full RCE (CPFR+CPTO): passwd copied to /tmp/.helvetiscan_probe".to_string(),
                     };
                 }
                 return ProbeOutcome::Behavior {
@@ -805,15 +805,8 @@ async fn exploit_mysql(ip: IpAddr, port: u16) -> ProbeOutcome {
     if proto_ver != 10 {
         return ProbeOutcome::WrongService { method: "mysql_exploit".into(), proof: format!("not MySQL (proto {})", proto_ver) };
     }
-    // Find auth-plugin-data length at offset 53 (MySQL 5.5+)
-    let auth_plugin_data_len = if handshake.len() > 53 { handshake[53] } else { 8 };
-    let salt1 = &handshake[8..16];
-    let salt2_start = 8 + 8 + 13; // After salt1, 13 bytes of filler/capabilities
-    let salt2 = if handshake.len() > salt2_start + 12 && auth_plugin_data_len > 8 {
-        &handshake[salt2_start..salt2_start + 12]
-    } else {
-        &[][..]
-    };
+    // We authenticate as root with an empty password, so the auth response is zero-length and
+    // the handshake salt is never consumed (no scrambled-password path is implemented).
     // Build auth response for root with empty password
     let username = b"root\0"; // null-terminated
     let auth_resp_len = 0u8; // empty password → zero-length auth response
@@ -1079,9 +1072,7 @@ async fn exploit_mssql(ip: IpAddr, port: u16) -> ProbeOutcome {
     pkt.extend_from_slice(&fields[4].0.to_le_bytes());
     pkt.extend_from_slice(&fields[4].1.to_le_bytes());
     // reserved (padding to reach field 16)
-    for _ in 0..56 {
-        pkt.push(0u8);
-    }
+    pkt.resize(pkt.len() + 56, 0u8);
     // library name offset+length (field 14 in LOGIN7)
     pkt.extend_from_slice(&fields[5].0.to_le_bytes());
     pkt.extend_from_slice(&fields[5].1.to_le_bytes());
@@ -1144,7 +1135,7 @@ async fn exploit_mssql(ip: IpAddr, port: u16) -> ProbeOutcome {
         ProbeOutcome::Present {
             method: "mssql_sa_exploit".into(),
             version: None,
-            proof: format!("MSSQL connected, no TDS login response"),
+            proof: "MSSQL connected, no TDS login response".to_string(),
         }
     }
 }
@@ -1625,9 +1616,9 @@ fn load_pending_verifications(
          FROM cve_matches cm
          JOIN domains d ON d.domain = cm.domain
          JOIN cve_catalog cc ON cc.cve_id = cm.cve_id
-         JOIN cve_pending_local p ON p.domain = cm.domain AND p.cve_id = cm.cve_id
          WHERE cm.technology IN ({tech_in}){epss}
            AND cm.cve_id NOT IN ('CVE-2016-1908','CVE-2023-28531')
+           {stale}
          "
     );
     if limit.is_some() {
@@ -1641,6 +1632,9 @@ fn load_pending_verifications(
     }
     if min_epss > 0.0 {
         params.push(Box::new(min_epss));
+    }
+    if !stale.is_empty() {
+        params.push(Box::new(format!("-{max_age_days} days")));
     }
     if let Some(l) = limit {
         params.push(Box::new(l as i64));
@@ -1667,9 +1661,9 @@ fn load_http_pending_verifications(
          FROM cve_matches cm
          JOIN domains d ON d.domain = cm.domain
          JOIN cve_catalog cc ON cc.cve_id = cm.cve_id
-         JOIN cve_pending_local p ON p.domain = cm.domain AND p.cve_id = cm.cve_id
          WHERE cm.technology IN ({http_in}){epss}
            AND cm.cve_id NOT IN ('CVE-2016-1908','CVE-2023-28531')
+           {stale}
          "
     );
 
@@ -1681,17 +1675,33 @@ fn load_http_pending_verifications(
     if min_epss > 0.0 {
         params.push(Box::new(min_epss));
     }
+    if !stale.is_empty() {
+        params.push(Box::new(format!("-{max_age_days} days")));
+    }
     let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
 
     collect_tasks(&mut stmt, param_refs.as_slice(), |_| Some(80))
 }
+
+/// One row from the pending-verification queries: (domain, cve_id, technology, version, ip,
+/// affected_from, affected_to, detected_port).
+type VerificationRow = (
+    String,
+    String,
+    String,
+    Option<String>,
+    String,
+    Option<String>,
+    Option<String>,
+    i64,
+);
 
 fn collect_tasks(
     stmt: &mut rusqlite::Statement,
     params: &[&dyn rusqlite::types::ToSql],
     port_of: impl Fn(&str) -> Option<u16>,
 ) -> Result<Vec<VerificationTask>> {
-    let rows: Vec<(String, String, String, Option<String>, String, Option<String>, Option<String>, i64)> = stmt
+    let rows: Vec<VerificationRow> = stmt
         .query_map(params, |row| {
             Ok((
                 row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?,
@@ -2195,8 +2205,8 @@ pub(crate) async fn cmd_exploit_cves(
         sql.push_str(&format!("'{}'", tech));
     }
     sql.push(')');
-    if limit.is_some() {
-        sql.push_str(&format!(" LIMIT {}", limit.unwrap()));
+    if let Some(limit) = limit {
+        sql.push_str(&format!(" LIMIT {limit}"));
     }
 
     let mut stmt = conn.prepare(&sql)?;
@@ -2227,10 +2237,7 @@ pub(crate) async fn cmd_exploit_cves(
         let ip = if let Some(ref ip_str) = ip_str {
             ip_str.parse::<IpAddr>().ok()
         } else {
-            match resolve_first_ip(&resolver, &domain).await {
-                Ok(ip) => Some(ip),
-                _ => None,
-            }
+            resolve_first_ip(&resolver, &domain).await.ok()
         };
         let ip = match ip {
             Some(ip) => ip,
@@ -2541,7 +2548,7 @@ mod tests {
             "INSERT INTO domains (domain, ip) VALUES ('db.ch', '127.0.0.1');
              INSERT INTO ports_info (domain, port, service, banner) VALUES ('db.ch', 3306, 'mysql', 'MySQL 5.6.4');",
         ).unwrap();
-        crate::cve::run_cve_matching(&conn).unwrap();
+        { crate::cve::populate_domain_technologies(&conn).unwrap(); crate::cve::run_cve_matching(&conn).unwrap() };
         // Give one mysql CVE a high EPSS, leave the others null.
         conn.execute("UPDATE cve_catalog SET epss_score=0.9 WHERE cve_id='CVE-2016-6662'", []).unwrap();
 
@@ -2560,7 +2567,7 @@ mod tests {
             "INSERT INTO domains (domain, ip) VALUES ('db.ch', '127.0.0.1');
              INSERT INTO ports_info (domain, port, service, banner) VALUES ('db.ch', 3307, 'mysql', 'MySQL 8.0.30');",
         ).unwrap();
-        crate::cve::run_cve_matching(&conn).unwrap();
+        { crate::cve::populate_domain_technologies(&conn).unwrap(); crate::cve::run_cve_matching(&conn).unwrap() };
         let tasks = load_pending_verifications(&conn, None, false, 30, 0.0).unwrap();
         let t = tasks.iter().find(|t| t.technology == "mysql").expect("mysql matched on non-standard port");
         assert_eq!(t.port, 3307, "probe should target the actual detected port, not the 3306 default");
@@ -2623,7 +2630,7 @@ mod tests {
              INSERT INTO ports_info (domain, port, service, banner)
              VALUES ('db.ch', 3306, 'mysql', 'MySQL 8.0.30');",
         ).unwrap();
-        crate::cve::run_cve_matching(&conn).unwrap();
+        { crate::cve::populate_domain_technologies(&conn).unwrap(); crate::cve::run_cve_matching(&conn).unwrap() };
 
         // Freshly verified pair (checked_at = now) is skipped.
         conn.execute(
@@ -2652,7 +2659,7 @@ mod tests {
              INSERT INTO ports_info (domain, port, service, banner)
              VALUES ('db.ch', 3306, 'mysql', 'MySQL 8.0.30');",
         ).unwrap();
-        crate::cve::run_cve_matching(&conn).unwrap();
+        { crate::cve::populate_domain_technologies(&conn).unwrap(); crate::cve::run_cve_matching(&conn).unwrap() };
         let tasks = load_pending_verifications(&conn, None, false, 30, 0.0).unwrap();
         let t = tasks.iter().find(|t| t.cve_id == "CVE-2023-21980").expect("mysql cve present");
         assert_eq!(t.affected_from.as_deref(), Some("8.0.0"));
@@ -2668,7 +2675,7 @@ mod tests {
              INSERT INTO ports_info (domain, port, service, banner)
              VALUES ('db.ch', 3306, 'mysql', 'MySQL 8.0.30');",
         ).unwrap();
-        crate::cve::run_cve_matching(&conn).unwrap();
+        { crate::cve::populate_domain_technologies(&conn).unwrap(); crate::cve::run_cve_matching(&conn).unwrap() };
         conn.execute(
             "INSERT INTO cve_verifications (domain, cve_id, verified, checked_at, check_method)
              VALUES ('db.ch', 'CVE-2023-21980', 1, datetime('now'), 'mysql_handshake')",
@@ -2686,7 +2693,7 @@ mod tests {
         conn.execute_batch(
             "INSERT INTO domains (domain, ip, server) VALUES ('web.ch', '127.0.0.1', 'Apache/2.4.49');",
         ).unwrap();
-        crate::cve::run_cve_matching(&conn).unwrap();
+        { crate::cve::populate_domain_technologies(&conn).unwrap(); crate::cve::run_cve_matching(&conn).unwrap() };
         let tasks = load_http_pending_verifications(&conn, false, 30, 0.0).unwrap();
         assert!(tasks.iter().any(|t| t.technology == "apache"), "expected apache http task");
     }
