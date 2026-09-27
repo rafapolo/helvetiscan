@@ -1093,7 +1093,18 @@ pub(crate) fn run_cve_matching(conn: &rusqlite::Connection) -> Result<usize> {
     // openssh, etc.) unversioned non-KEV CVEs are skipped — they were generating ~100M+ rows
     // per technology that got immediately deleted, causing the INSERT to timeout.
     let mut total = 0usize;
-    let mut stmt = conn.prepare("SELECT DISTINCT technology FROM domain_technologies ORDER BY technology")?;
+    // Only loop over technologies that actually exist in `cve_catalog`. The INSERT below joins
+    // `cve_catalog cc ON cc.technology = dt.technology`, so any technology absent from the
+    // catalog produces zero rows by construction — iterating over it is pure waste. On prod,
+    // `domain_technologies` holds ~25k distinct values (dominated by WordPress plugin slugs from
+    // `software_detections`) while `cve_catalog.technology` holds only ~24 vendor names, so this
+    // filter collapses ~25k `+0 rows` iterations down to the few dozen that can match. It cannot
+    // change results: the filtered-out technologies never join the catalog.
+    let mut stmt = conn.prepare(
+        "SELECT DISTINCT technology FROM domain_technologies
+         WHERE technology IN (SELECT DISTINCT technology FROM cve_catalog)
+         ORDER BY technology",
+    )?;
     let techs: Vec<String> = stmt.query_map([], |r| r.get(0))?.filter_map(|r| r.ok()).collect();
     drop(stmt);
     let insert_sql = format!(
