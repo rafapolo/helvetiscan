@@ -323,7 +323,7 @@ async fn fetch_ports_info(resolver: &TokioResolver, domain: String, stored_ip: O
         None => PORTS.to_vec(),
         Some(f) => PORTS.iter().filter(|&&(p, _)| f.contains(&p)).copied().collect(),
     };
-    let scan_snmp = args.ports.as_deref().map_or(true, |f| f.contains(&161));
+    let scan_snmp = args.ports.as_deref().is_none_or(|f| f.contains(&161));
 
     let (probe_results, snmp_banner) = tokio::join!(
         futures_util::future::join_all(tcp_ports.iter().map(|&(port, _)| port_open(ip, port, timeout))),
@@ -949,7 +949,7 @@ pub(crate) async fn grab_snmp_banner(ip: IpAddr, port: u16) -> Option<String> {
     if str_start + str_len > n { return Some("SNMP".to_string()); }
     let desc: String = data[str_start..str_start + str_len]
         .iter()
-        .filter(|&&b| b >= 0x20 && b < 0x7f)
+        .filter(|&&b| (0x20..0x7f).contains(&b))
         .take(200)
         .map(|&b| b as char)
         .collect();

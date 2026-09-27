@@ -335,7 +335,9 @@ pub(crate) fn cmd_export_hubs(args: HubExportArgs) -> Result<()> {
         .with_context(|| format!("open Country mmdb {:?}", args.country_mmdb))?;
 
     // Cache ASN/country lookups per unique hosting IP — many domains share one IP.
-    let mut ip_cache: HashMap<String, Option<(String, Option<String>, Option<String>)>> = HashMap::new();
+    // (network, asn_org, country) for a resolved IP, or None when the lookup found nothing.
+    type IpGeo = Option<(String, Option<String>, Option<String>)>;
+    let mut ip_cache: HashMap<String, IpGeo> = HashMap::new();
 
     let mut hubs: HashMap<String, HubMeta> = HashMap::new();
     // undirected pair key -> weight

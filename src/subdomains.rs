@@ -96,13 +96,13 @@ fn timing_report() {
     if !timing_enabled() { return; }
     let labels = ["ct_fetch", "axfr_loop", "mx_ns_harvest"];
     eprintln!("=== subdomains per-step timing (wall time summed across concurrent tasks) ===");
-    for i in 0..3 {
+    for (i, label) in labels.iter().enumerate() {
         let total = TIMINGS.ns[i].load(Ordering::Relaxed);
         let n = TIMINGS.n[i].load(Ordering::Relaxed).max(1);
         let max = TIMINGS.max_ns[i].load(Ordering::Relaxed);
         eprintln!(
             "  {:<14} avg {:>8.1}ms   max {:>8.1}ms   total {:>10.1}s   (n={})",
-            labels[i],
+            label,
             (total as f64 / n as f64) / 1e6,
             max as f64 / 1e6,
             total as f64 / 1e9,
@@ -239,6 +239,7 @@ pub(crate) async fn cmd_subdomains(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)] // wiring for the concurrent dispatcher; a param struct would only obscure it
 async fn dispatcher_loop_subdomains(
     mut work_rx: mpsc::Receiver<String>,
     result_tx: mpsc::Sender<SubdomainRow>,

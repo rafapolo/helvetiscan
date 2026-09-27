@@ -3,7 +3,6 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use clap::{Parser, Subcommand};
-use rusqlite;
 
 mod shared;
 mod schema;
@@ -682,12 +681,34 @@ async fn async_main() -> Result<()> {
         // --domain with a subcommand → inject domain and top-level retry_errors into args
         (Some(domain), _, Some(cmd)) => {
             match cmd {
-                Command::Scan(mut a) => { if a.domain.is_none() { a.domain = Some(domain); } if a.retry_errors.is_none() { a.retry_errors = retry_errors; } http_scan::cmd_scan(a, None, None).await }
-                Command::Dns(mut a)  => { if a.domain.is_none() { a.domain = Some(domain); } if a.retry_errors.is_none() { a.retry_errors = retry_errors; } dns_scan::cmd_dns(a, None, None).await }
-                Command::Tls(mut a)  => { if a.domain.is_none() { a.domain = Some(domain); } if a.retry_errors.is_none() { a.retry_errors = retry_errors; } tls_scan::cmd_tls(a, None, None).await }
-                Command::Ports(mut a) => { if a.domain.is_none() { a.domain = Some(domain); } if a.retry_errors.is_none() { a.retry_errors = retry_errors; } ports_scan::cmd_ports(a, None, None).await }
-                Command::SmtpCheck(mut a) => { if a.domain.is_none() { a.domain = Some(domain); } smtp_check::cmd_smtp_check(a, None, None).await }
-                Command::Subdomains(mut a) => { if a.domain.is_none() { a.domain = Some(domain); } subdomains::cmd_subdomains(a, None, None).await }
+                Command::Scan(mut a) => {
+                    if a.domain.is_none() { a.domain = Some(domain); }
+                    if a.retry_errors.is_none() { a.retry_errors = retry_errors; }
+                    http_scan::cmd_scan(a, None, None).await
+                }
+                Command::Dns(mut a) => {
+                    if a.domain.is_none() { a.domain = Some(domain); }
+                    if a.retry_errors.is_none() { a.retry_errors = retry_errors; }
+                    dns_scan::cmd_dns(a, None, None).await
+                }
+                Command::Tls(mut a) => {
+                    if a.domain.is_none() { a.domain = Some(domain); }
+                    if a.retry_errors.is_none() { a.retry_errors = retry_errors; }
+                    tls_scan::cmd_tls(a, None, None).await
+                }
+                Command::Ports(mut a) => {
+                    if a.domain.is_none() { a.domain = Some(domain); }
+                    if a.retry_errors.is_none() { a.retry_errors = retry_errors; }
+                    ports_scan::cmd_ports(a, None, None).await
+                }
+                Command::SmtpCheck(mut a) => {
+                    if a.domain.is_none() { a.domain = Some(domain); }
+                    smtp_check::cmd_smtp_check(a, None, None).await
+                }
+                Command::Subdomains(mut a) => {
+                    if a.domain.is_none() { a.domain = Some(domain); }
+                    subdomains::cmd_subdomains(a, None, None).await
+                }
                 _ => Err(anyhow!("--domain is not supported with this subcommand")),
             }
         }

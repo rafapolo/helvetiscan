@@ -327,7 +327,7 @@ fn print_summary(conn: &rusqlite::Connection) -> Result<()> {
 
     println!();
     println!("=== Top NS Operators (by domain count) ===");
-    println!("{:<26} {:>8} {:>7}  {}", "Operator", "Domains", "%", "Jurisdiction");
+    println!("{:<26} {:>8} {:>7}  Jurisdiction", "Operator", "Domains", "%");
     println!("{}", "-".repeat(60));
 
     let mut stmt2 = conn.prepare(

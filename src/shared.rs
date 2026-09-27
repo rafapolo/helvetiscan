@@ -1175,6 +1175,6 @@ mod tests {
         // sanity check on the constant relationship, not the algorithm: with a 3s tick and
         // realistic per-domain scan latency, MIN_SAMPLES should be reachable inside one tick
         // for any stage past its floor, or the network signal would never actually engage.
-        assert!(MIN_SAMPLES_FOR_ERROR_SIGNAL <= 20);
+        const { assert!(MIN_SAMPLES_FOR_ERROR_SIGNAL <= 20) };
     }
 }

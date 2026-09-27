@@ -34,7 +34,7 @@ pub(crate) fn cmd_import_parquet(args: ImportParquetArgs) -> Result<()> {
         .with_context(|| format!("reading {:?}", args.input_dir))?
         .filter_map(|e| e.ok())
         .map(|e| e.path())
-        .filter(|p| p.extension().map_or(false, |ext| ext == "parquet"))
+        .filter(|p| p.extension().is_some_and(|ext| ext == "parquet"))
         .collect();
 
     if paths.is_empty() {

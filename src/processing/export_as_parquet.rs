@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 use std::fs;
-use std::path::PathBuf;
+use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
@@ -108,7 +108,7 @@ pub(crate) struct TableExport {
 pub(crate) fn export_tables(
     conn: &Connection,
     tables: &[String],
-    output_dir: &PathBuf,
+    output_dir: &Path,
     extra_col: Option<(&str, &str)>,
 ) -> Result<Vec<TableExport>> {
     tables
@@ -129,7 +129,7 @@ pub(crate) fn export_tables(
 fn export_table(
     conn: &Connection,
     table: &str,
-    output_dir: &PathBuf,
+    output_dir: &Path,
     extra_col: Option<(&str, &str)>,
 ) -> Result<(i64, Vec<String>)> {
     // Introspect columns via PRAGMA (cid, name, type, notnull, dflt_value, pk)

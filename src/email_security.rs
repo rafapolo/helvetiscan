@@ -40,6 +40,25 @@ pub(crate) struct EmailSecurityRow {
 
 // ---- SPF parsing ----
 
+/// True if an SPF term triggers a DNS lookup (RFC 7208 §4.6.4). A leading
+/// qualifier (`+`, `-`, `~`, `?`) is optional on any mechanism and is stripped first.
+fn is_spf_lookup_mechanism(token: &str) -> bool {
+    // `redirect=` is a modifier, not a mechanism, so it carries no qualifier.
+    if token.starts_with("redirect=") {
+        return true;
+    }
+    let mech = token.strip_prefix(['+', '-', '~', '?']).unwrap_or(token);
+    for name in ["include", "a", "mx", "ptr", "exists"] {
+        if mech == name
+            || mech.starts_with(&format!("{name}:"))
+            || mech.starts_with(&format!("{name}/"))
+        {
+            return true;
+        }
+    }
+    false
+}
+
 pub(crate) fn parse_spf(txt: &str) -> SpfAnalysis {
     if txt.is_empty() {
         return SpfAnalysis {
@@ -57,7 +76,7 @@ pub(crate) fn parse_spf(txt: &str) -> SpfAnalysis {
 
     // Find the last token matching [+~?-]?all
     for token in lower.split_whitespace() {
-        let t = token.trim_start_matches(|c| c == '+' || c == '-' || c == '~' || c == '?');
+        let t = token.trim_start_matches(['+', '-', '~', '?']);
         if t == "all" {
             policy = Some(token.to_string());
         }
@@ -74,33 +93,11 @@ pub(crate) fn parse_spf(txt: &str) -> SpfAnalysis {
 
     let too_permissive = matches!(qualifier, Some('+') | Some('?'));
 
-    // Count DNS lookups
-    let mut dns_lookups: i32 = 0;
-    for token in lower.split_whitespace() {
-        if token.starts_with("include:") {
-            dns_lookups += 1;
-        } else if token.starts_with("redirect=") {
-            dns_lookups += 1;
-        } else if token.starts_with("exists:") {
-            dns_lookups += 1;
-        } else if token == "a" || token.starts_with("a:") || token.starts_with("a/") {
-            dns_lookups += 1;
-        } else if token == "mx" || token.starts_with("mx:") || token.starts_with("mx/") {
-            dns_lookups += 1;
-        } else if token == "+a" || token.starts_with("+a:") || token.starts_with("+a/")
-            || token == "-a" || token.starts_with("-a:") || token.starts_with("-a/")
-            || token == "~a" || token.starts_with("~a:") || token.starts_with("~a/")
-            || token == "?a" || token.starts_with("?a:") || token.starts_with("?a/")
-        {
-            dns_lookups += 1;
-        } else if token == "+mx" || token.starts_with("+mx:") || token.starts_with("+mx/")
-            || token == "-mx" || token.starts_with("-mx:") || token.starts_with("-mx/")
-            || token == "~mx" || token.starts_with("~mx:") || token.starts_with("~mx/")
-            || token == "?mx" || token.starts_with("?mx:") || token.starts_with("?mx/")
-        {
-            dns_lookups += 1;
-        }
-    }
+    // Count DNS lookups (RFC 7208 §4.6.4: include, a, mx, ptr, exists, redirect each cost one).
+    let dns_lookups: i32 = lower
+        .split_whitespace()
+        .filter(|token| is_spf_lookup_mechanism(token))
+        .count() as i32;
 
     let over_limit = dns_lookups > 10;
 
