@@ -22,6 +22,11 @@ Usage (--snapshots-dir, if given, must come before the subcommand — it's a top
         Domains that entered / left the dataset, with a coverage-aware caveat distinguishing
         "genuinely gone" from "we just didn't scan it that month" (task 28's whole point).
 
+    python3 scripts/snapshot_trend.py content-diff --month-a 2026-07 --month-b 2026-08
+        Domains whose homepage content changed (domains.body_hash differs) between two months,
+        with the same coverage-aware caveat as domains-diff — a domain present in only one month,
+        or with no body captured in one of them, is reported separately and never as a change.
+
 Requires: polars (`pip install polars` or `uv pip install polars`).
 """
 from __future__ import annotations
@@ -164,6 +169,60 @@ def cmd_domains_diff(args: argparse.Namespace) -> int:
     return 0
 
 
+# ---- content-diff ----
+
+
+def cmd_content_diff(args: argparse.Namespace) -> int:
+    snapshots_dir = Path(args.snapshots_dir)
+    warn_low_coverage(snapshots_dir, [args.month_a, args.month_b], "http")
+
+    domains = scan_table(snapshots_dir, "domains").select(
+        "month", "domain", "body_hash", "status_code", "title"
+    )
+    a = domains.filter(pl.col("month") == args.month_a).collect()
+    b = domains.filter(pl.col("month") == args.month_b).collect()
+
+    # Inner join keeps only domains present in BOTH months, so a domain that entered or left the
+    # dataset can never be mistaken for a content change (those cases are counted separately and
+    # left to domains-diff to enumerate).
+    joined = a.join(b, on="domain", how="inner", suffix="_b")
+
+    # A NULL body_hash means no body was captured that month (non-resolving, no HTTPS, error, or
+    # simply not re-scanned — same coverage caveat as domains-diff). Comparing NULL against a hash
+    # would read as a spurious "change", so those rows are split out as no_body rather than counted.
+    both_hashed = joined.filter(
+        pl.col("body_hash").is_not_null() & pl.col("body_hash_b").is_not_null()
+    )
+    changed = both_hashed.filter(pl.col("body_hash") != pl.col("body_hash_b")).sort("domain")
+    no_body = joined.filter(
+        pl.col("body_hash").is_null() | pl.col("body_hash_b").is_null()
+    )
+
+    common = joined.height
+    print(f"Content (body_hash): {args.month_a} -> {args.month_b}")
+    print(f"  in both months: {common}  comparable (body in both): {both_hashed.height}")
+    print(f"  changed: {changed.height}  unchanged: {both_hashed.height - changed.height}")
+    print(f"  not comparable (no body captured in one month): {no_body.height}")
+    print(
+        "  NOTE: only domains present in BOTH months with a body_hash in each are compared — a "
+        "domain that entered/left (see domains-diff) or that wasn't successfully re-scanned that "
+        "month (task 28 coverage) is never counted as a content change."
+    )
+
+    if changed.height:
+        print(f"\n  content changed since {args.month_a}:")
+        print(
+            changed.select(
+                "domain",
+                pl.col("status_code").alias("status_a"),
+                pl.col("status_code_b").alias("status_b"),
+                pl.col("title_b").alias("title"),
+            )
+        )
+
+    return 0
+
+
 def warn_low_coverage(snapshots_dir: Path, months: list[str], module: str) -> None:
     for month in months:
         manifest = load_manifest(snapshots_dir / f"month={month}")
@@ -194,6 +253,12 @@ def main() -> int:
     domains_diff.add_argument("--month-a", required=True)
     domains_diff.add_argument("--month-b", required=True)
 
+    content_diff = sub.add_parser(
+        "content-diff", help="domains whose homepage content (body_hash) changed between two months"
+    )
+    content_diff.add_argument("--month-a", required=True)
+    content_diff.add_argument("--month-b", required=True)
+
     args = parser.parse_args()
 
     if args.command == "verify":
@@ -202,6 +267,8 @@ def main() -> int:
         return cmd_cve_diff(args)
     if args.command == "domains-diff":
         return cmd_domains_diff(args)
+    if args.command == "content-diff":
+        return cmd_content_diff(args)
     parser.error("unknown command")
     return 2
 
