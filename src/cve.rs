@@ -38,8 +38,8 @@ const SEED_CVES: &[(&str, &str, &str, f64, &str, &str, &str)] = &[
     ("wordpress", "CVE-2022-21661", "HIGH", 8.8, "5.6", "5.8.3", "WordPress SQL injection via WP_Query"),
     ("wordpress", "CVE-2021-44223", "CRITICAL", 9.8, "0", "5.8", "WordPress Gutenberg plugin arbitrary file upload"),
     ("wordpress", "CVE-2019-17671", "HIGH", 7.5, "0", "5.2.3", "WordPress unauthenticated view of private posts"),
-    ("wordpress", "CVE-2026-60137", "HIGH", 8.8, "6.8.0", "7.0.1", "WordPress WP2Shell facilitated SQL injection via author__not_in in WP_Query — combined with batch-route confusion leads to RCE"),
-    ("wordpress", "CVE-2026-63030", "CRITICAL", 9.8, "6.9.0", "7.0.1", "WordPress WP2Shell REST API batch-route confusion + SQLi leading to pre-auth RCE — actively exploited in the wild"),
+    ("wordpress", "CVE-2026-60137", "HIGH", 8.8, "6.8.0", "7.0.1", "WordPress core SQL injection via unsanitised author__not_in parameter in WP_Query"),
+    ("wordpress", "CVE-2026-63030", "CRITICAL", 9.8, "6.9.0", "7.0.1", "WordPress core REST API batch-route confusion combined with author__not_in WP_Query SQL injection, leading to pre-auth RCE"),
     // Drupal
     ("drupal", "CVE-2018-7600", "CRITICAL", 9.8, "7.0", "8.5.1", "Drupalgeddon2 — remote code execution"),
     ("drupal", "CVE-2018-7602", "CRITICAL", 9.8, "7.0", "7.59", "Drupalgeddon2 SA-CORE-2018-004 follow-up"),
