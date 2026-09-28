@@ -104,6 +104,9 @@ const SEED_CVES: &[(&str, &str, &str, f64, &str, &str, &str)] = &[
     ("rdp", "CVE-2019-0708", "CRITICAL", 9.8, "0", "999", "BlueKeep — pre-auth wormable RCE in Windows RDP (KEV)"),
     ("rdp", "CVE-2019-1181", "CRITICAL", 9.8, "0", "999", "DejaBlue — pre-auth RCE in Windows RDP (KEV)"),
     ("rdp", "CVE-2019-1182", "CRITICAL", 9.8, "0", "999", "DejaBlue variant — pre-auth RCE in Windows RDP (KEV)"),
+    // SMB (port 445 presence — no readable version banner, matched by port alone like RDP)
+    ("smb", "CVE-2017-0144", "HIGH", 8.1, "0", "999", "EternalBlue — SMBv1 pre-auth wormable RCE (MS17-010, KEV)"),
+    ("smb", "CVE-2020-0796", "CRITICAL", 10.0, "0", "999", "SMBGhost — SMBv3.1.1 compression pre-auth wormable RCE (KEV)"),
     // Redis (port 6379 banner)
     ("redis", "CVE-2022-0543",  "CRITICAL", 10.0, "0",     "6.2.6",  "Redis Lua sandbox escape RCE via Debian/Ubuntu package"),
     ("redis", "CVE-2021-32761", "HIGH",      7.5,  "2.2.0", "6.2.5",  "Redis integer overflow in GETDEL/COPY leading to heap corruption"),
@@ -984,6 +987,10 @@ pub(crate) fn populate_domain_technologies(conn: &rusqlite::Connection) -> Resul
          FROM ports_info p WHERE p.port = 3389;
 
          INSERT OR REPLACE INTO domain_technologies (domain, technology, version, source)
+         SELECT DISTINCT p.domain, 'smb', NULL, 'port_detection'
+         FROM ports_info p WHERE p.port = 445;
+
+         INSERT OR REPLACE INTO domain_technologies (domain, technology, version, source)
          SELECT DISTINCT p.domain, 'mongodb', NULL, 'port_detection'
          FROM ports_info p WHERE p.port = 27017;
 
@@ -1479,6 +1486,28 @@ mod tests {
             )
             .unwrap();
         assert!(n > 0, "expected RDP CVE matches from port 3389 presence");
+    }
+
+    #[test]
+    fn run_cve_matching_matches_smb_presence() {
+        let conn = in_memory_db();
+        seed_hardcoded_cves(&conn).unwrap();
+
+        conn.execute_batch(
+            "INSERT INTO domains (domain) VALUES ('smb.ch');
+             INSERT INTO ports_info (domain, port, service) VALUES ('smb.ch', 445, 'smb');",
+        )
+        .unwrap();
+
+        { populate_domain_technologies(&conn).unwrap(); run_cve_matching(&conn).unwrap() };
+        let n: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM cve_matches WHERE domain='smb.ch' AND technology='smb'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(n > 0, "expected SMB CVE matches from port 445 presence");
     }
 
     #[test]
