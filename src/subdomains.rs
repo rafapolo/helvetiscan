@@ -2,7 +2,7 @@ use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
@@ -28,9 +28,35 @@ use crate::SubdomainsArgs;
 // well-connected host). This pacer instead caps the *aggregate* crt.sh request
 // rate across all concurrent tasks to `rps` req/s, decoupled from task
 // concurrency, and adds latency to a task only when crt.sh is the bottleneck.
+/// State of the crt.sh circuit breaker. crt.sh answers HTTP 429 to sustained load from one IP
+/// (observed 2026-09: every request 429'd at 20 concurrent, so a full-namespace run spent 14h and
+/// produced 22 CT rows). On a 429 the breaker opens and CT lookups are *skipped* (not waited on)
+/// for a cooldown, so the AXFR/NS-MX work — which yields nearly all the output — never stalls.
+enum Breaker {
+    Closed,
+    Open { until: tokio::time::Instant },
+    /// One probe request is in flight; everyone else keeps skipping until it reports back.
+    HalfOpen,
+}
+
+/// Cap on how long a task may queue for a crt.sh slot before giving up on CT for that domain.
+const CT_MAX_QUEUE_WAIT: Duration = Duration::from_secs(2);
+const CT_COOLDOWN_START: Duration = Duration::from_secs(60);
+const CT_COOLDOWN_MAX: Duration = Duration::from_secs(30 * 60);
+
+#[derive(Default)]
+struct CtStats {
+    ok: AtomicU64,
+    rate_limited: AtomicU64,
+    skipped: AtomicU64,
+    failed: AtomicU64,
+}
+
 struct CrtShPacer {
     interval: Option<Duration>,
     next: tokio::sync::Mutex<tokio::time::Instant>,
+    breaker: std::sync::Mutex<(Breaker, Duration)>,
+    stats: CtStats,
 }
 
 impl CrtShPacer {
@@ -43,25 +69,74 @@ impl CrtShPacer {
         Self {
             interval,
             next: tokio::sync::Mutex::new(tokio::time::Instant::now()),
+            breaker: std::sync::Mutex::new((Breaker::Closed, CT_COOLDOWN_START)),
+            stats: CtStats::default(),
         }
     }
 
-    /// Wait until this task is allowed to issue its crt.sh request.
-    async fn throttle(&self) {
-        let Some(interval) = self.interval else { return };
+    /// Wait for a crt.sh slot. Returns `false` when the caller should skip CT for this domain
+    /// (breaker open, or the pacing queue is already longer than `CT_MAX_QUEUE_WAIT`).
+    async fn throttle(&self) -> bool {
+        {
+            let mut g = self.breaker.lock().unwrap_or_else(|e| e.into_inner());
+            match g.0 {
+                Breaker::Open { until } if tokio::time::Instant::now() >= until => {
+                    g.0 = Breaker::HalfOpen; // this caller is the probe
+                    return true;
+                }
+                Breaker::Open { .. } | Breaker::HalfOpen => {
+                    self.stats.skipped.fetch_add(1, Ordering::Relaxed);
+                    return false;
+                }
+                Breaker::Closed => {}
+            }
+        }
+        let Some(interval) = self.interval else { return true };
         let scheduled = {
             let mut next = self.next.lock().await;
             let now = tokio::time::Instant::now();
             let scheduled = (*next).max(now);
+            if scheduled - now > CT_MAX_QUEUE_WAIT {
+                self.stats.skipped.fetch_add(1, Ordering::Relaxed);
+                return false;
+            }
             *next = scheduled + interval;
             scheduled
         };
         tokio::time::sleep_until(scheduled).await;
+        true
+    }
+
+    fn report_ok(&self) {
+        self.stats.ok.fetch_add(1, Ordering::Relaxed);
+        let mut g = self.breaker.lock().unwrap_or_else(|e| e.into_inner());
+        *g = (Breaker::Closed, CT_COOLDOWN_START);
+    }
+
+    fn report_rate_limited(&self, retry_after: Option<Duration>) {
+        self.stats.rate_limited.fetch_add(1, Ordering::Relaxed);
+        let mut g = self.breaker.lock().unwrap_or_else(|e| e.into_inner());
+        // Already open (a request that was in flight when the breaker tripped): don't extend.
+        if matches!(g.0, Breaker::Open { .. }) {
+            return;
+        }
+        let cooldown = retry_after.map_or(g.1, |ra| ra.max(g.1)).min(CT_COOLDOWN_MAX);
+        g.0 = Breaker::Open { until: tokio::time::Instant::now() + cooldown };
+        g.1 = (g.1 * 2).min(CT_COOLDOWN_MAX);
+    }
+
+    fn report(&self) -> String {
+        format!(
+            "crt.sh: ok={} rate_limited(429)={} skipped={} failed={}",
+            self.stats.ok.load(Ordering::Relaxed),
+            self.stats.rate_limited.load(Ordering::Relaxed),
+            self.stats.skipped.load(Ordering::Relaxed),
+            self.stats.failed.load(Ordering::Relaxed),
+        )
     }
 }
 
 // ---- Per-step timing instrumentation (gated by SUBDOMAINS_TIMING=1) ----
-use std::sync::atomic::AtomicU64;
 
 #[derive(Clone, Copy)]
 enum TimingStep { Ct, Axfr, Harvest }
@@ -206,6 +281,7 @@ pub(crate) async fn cmd_subdomains(
     };
 
     let pacer = Arc::new(CrtShPacer::new(args.crtsh_rps));
+    let pacer_for_report = pacer.clone();
     let ct_client = Arc::new(
         reqwest::Client::builder()
             .timeout(Duration::from_secs(30))
@@ -235,6 +311,9 @@ pub(crate) async fn cmd_subdomains(
     }
 
     timing_report();
+    if !args.quiet {
+        eprintln!("{}", pacer_for_report.report());
+    }
 
     Ok(())
 }
@@ -521,39 +600,62 @@ async fn axfr_from_ns_ip(ns_ip: IpAddr, domain: &str) -> Vec<String> {
     found
 }
 
-/// Issue one crt.sh GET. `Ok(body)` on success; `Err(retryable)` on failure,
-/// where `retryable` is false for timeouts (already spent the full budget) and
-/// true for fast connection-level errors worth one more attempt.
-async fn send_ct_request(client: &reqwest::Client, url: &str) -> std::result::Result<String, bool> {
-    match client.get(url).send().await {
-        Ok(r) => r.text().await.map_err(|e| !e.is_timeout()),
-        Err(e) => Err(!e.is_timeout()),
+/// Outcome of one crt.sh GET.
+enum CtOutcome {
+    Body(String),
+    RateLimited(Option<Duration>),
+    /// Timeout, 5xx or other non-success. Not retried: a timeout already spent its full budget,
+    /// and a 5xx from crt.sh under load is far more likely to repeat than to clear.
+    Failed,
+}
+
+async fn send_ct_request(client: &reqwest::Client, url: &str) -> CtOutcome {
+    let resp = match client.get(url).send().await {
+        Ok(r) => r,
+        Err(_) => return CtOutcome::Failed,
+    };
+    let status = resp.status();
+    if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+        let retry_after = resp
+            .headers()
+            .get(reqwest::header::RETRY_AFTER)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.trim().parse::<u64>().ok())
+            .map(Duration::from_secs);
+        return CtOutcome::RateLimited(retry_after);
+    }
+    if !status.is_success() {
+        return CtOutcome::Failed;
+    }
+    match resp.text().await {
+        Ok(t) => CtOutcome::Body(t),
+        Err(_) => CtOutcome::Failed,
     }
 }
 
-/// Query crt.sh Certificate Transparency logs for known subdomains of `domain`.
+/// Query crt.sh Certificate Transparency logs for known subdomains of `domain`. Best-effort:
+/// returns an empty list when crt.sh is throttling us (see `Breaker`).
 async fn fetch_ct_subdomains(domain: &str, client: &reqwest::Client, pacer: &CrtShPacer) -> Vec<String> {
     let url = format!("https://crt.sh/?q=%.{}&output=json", domain);
     let apex = domain.trim_end_matches('.').to_ascii_lowercase();
     let suffix = format!(".{apex}");
 
-    // Global rate limiter: paces aggregate crt.sh request rate across all tasks.
-    pacer.throttle().await;
+    if !pacer.throttle().await {
+        return vec![];
+    }
 
-    // Try once; retry once only on a *fast* failure (connection/reset). A request
-    // that already timed out consumed the full budget and would almost certainly
-    // time out again on retry, so retrying it just doubled the worst-case tail
-    // (30s + 30s = 60s) while pinning a concurrency slot — don't.
     let text = match send_ct_request(client, &url).await {
-        Ok(t) => t,
-        Err(retryable) => {
-            if !retryable {
-                return vec![];
-            }
-            match send_ct_request(client, &url).await {
-                Ok(t) => t,
-                Err(_) => return vec![],
-            }
+        CtOutcome::Body(t) => {
+            pacer.report_ok();
+            t
+        }
+        CtOutcome::RateLimited(ra) => {
+            pacer.report_rate_limited(ra);
+            return vec![];
+        }
+        CtOutcome::Failed => {
+            pacer.stats.failed.fetch_add(1, Ordering::Relaxed);
+            return vec![];
         }
     };
 
@@ -639,6 +741,55 @@ fn flush_subdomains_batch(conn: &rusqlite::Connection, batch: &mut Vec<Subdomain
 mod tests {
     use super::*;
     use crate::shared::SubdomainRow;
+
+    #[tokio::test(start_paused = true)]
+    async fn breaker_opens_on_429_skips_then_probes_and_recovers() {
+        let p = CrtShPacer::new(0.0);
+        assert!(p.throttle().await);
+        p.report_rate_limited(None);
+        // Open: everyone skips immediately, no waiting.
+        assert!(!p.throttle().await);
+        assert!(!p.throttle().await);
+        tokio::time::advance(CT_COOLDOWN_START + Duration::from_secs(1)).await;
+        // Cooldown over: exactly one probe gets through, the rest keep skipping.
+        assert!(p.throttle().await);
+        assert!(!p.throttle().await);
+        p.report_ok();
+        assert!(p.throttle().await);
+        assert_eq!(p.stats.skipped.load(Ordering::Relaxed), 3);
+        assert_eq!(p.stats.rate_limited.load(Ordering::Relaxed), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn breaker_cooldown_doubles_on_failed_probe_and_honours_retry_after() {
+        let p = CrtShPacer::new(0.0);
+        p.report_rate_limited(None); // opens for 60s, next cooldown 120s
+        tokio::time::advance(CT_COOLDOWN_START + Duration::from_secs(1)).await;
+        assert!(p.throttle().await); // probe
+        p.report_rate_limited(Some(Duration::from_secs(300))); // probe 429s again; Retry-After wins
+        tokio::time::advance(Duration::from_secs(200)).await;
+        assert!(!p.throttle().await); // 300s not yet elapsed
+        tokio::time::advance(Duration::from_secs(101)).await;
+        assert!(p.throttle().await);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn pacer_skips_when_queue_exceeds_cap() {
+        let p = CrtShPacer::new(1.0); // one slot per second
+        let mut admitted = 0;
+        let mut skipped = 0;
+        // 10 simultaneous callers: only those scheduled within CT_MAX_QUEUE_WAIT are admitted.
+        for _ in 0..10 {
+            let fut = p.throttle();
+            tokio::pin!(fut);
+            match tokio::time::timeout(Duration::from_millis(1), &mut fut).await {
+                Ok(true) => admitted += 1,
+                Ok(false) => skipped += 1,
+                Err(_) => admitted += 1, // queued for a slot within the cap (still sleeping)
+            }
+        }
+        assert!(skipped >= 6, "admitted={admitted} skipped={skipped}");
+    }
 
     fn in_memory_db() -> rusqlite::Connection {
         let conn = rusqlite::Connection::open_in_memory().unwrap();

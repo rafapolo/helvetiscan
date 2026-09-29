@@ -260,8 +260,8 @@ pub(crate) struct SubdomainsArgs {
     #[arg(long, help = "Re-scan domains whose error_kind matches this value (e.g. 'timeout')")]
     pub(crate) retry_errors: Option<String>,
 
-    #[arg(long, default_value_t = 75.0,
-          help = "Global ceiling on crt.sh requests/sec, shared across all tasks (0 = unlimited). Replaces the old fixed 2s per-task pause. Since every domain needs exactly one crt.sh request, this value is effectively the module's throughput ceiling once other per-domain waste is removed; ~75 is modest headroom over the old pipeline's observed ~53/s.")]
+    #[arg(long, default_value_t = 2.0,
+          help = "Global ceiling on crt.sh requests/sec, shared across all tasks (0 = unlimited). crt.sh answers HTTP 429 to sustained load from one IP, so CT is best-effort: on a 429 it is skipped for a growing cooldown, and tasks never queue >2s for a slot, so it cannot slow the AXFR/NS-MX discovery.")]
     pub(crate) crtsh_rps: f64,
 
     #[arg(long, default_value = "6s", value_parser = shared::parse_duration,

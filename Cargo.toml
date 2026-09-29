@@ -28,6 +28,9 @@ htmd = "0.5"
 arrow = { version = "59", default-features = false, features = ["ipc"] }
 parquet = { version = "59", features = ["arrow"] }
 
+[dev-dependencies]
+tokio = { version = "1", features = ["test-util"] }
+
 [profile.release]
 lto = "fat"
 codegen-units = 1
