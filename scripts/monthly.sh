@@ -52,7 +52,27 @@ PARALLEL_DIVISOR="${PARALLEL_DIVISOR:-3}"
 STAMP=$(date +%Y-%m)
 LOG_DIR=logs
 BENCH_LOG="$LOG_DIR/benchmark-$STAMP.log"
-mkdir -p "$LOG_DIR"
+STATE_DIR="$LOG_DIR/state-$STAMP"
+mkdir -p "$LOG_DIR" "$STATE_DIR"
+
+# Resume + alerting. A stage that finishes cleanly drops a marker in $STATE_DIR; re-running this
+# script the same month skips stages that already passed instead of redoing hours of work after a
+# late failure (task_36: a crash ~19h in cost a full restart). Set FORCE_RERUN=1 to ignore
+# markers. Scan modules are also idempotent on their own (they only pick up pending rows), so
+# re-running a half-finished module is safe. On any failure, NOTIFY_CMD (if set) is run with the
+# failure message as $1 — e.g. NOTIFY_CMD='curl -s -d "$1" https://ntfy.sh/my-topic' style
+# wrappers; the script must not depend on it succeeding.
+CURRENT_STAGE=init
+done_marker() { echo "$STATE_DIR/$1.done"; }
+already_done() { [ -z "${FORCE_RERUN:-}" ] && [ -f "$(done_marker "$1")" ]; }
+notify_failure() {
+    local msg="monthly run $STAMP FAILED at stage '$CURRENT_STAGE' (re-run to resume)"
+    echo "!!! $msg" | tee -a "$BENCH_LOG" >&2
+    if [ -n "${NOTIFY_CMD:-}" ]; then
+        bash -c "$NOTIFY_CMD" _ "$msg" || true
+    fi
+}
+trap 'notify_failure' ERR
 
 # Resolve SCAN_MODE, honouring the legacy SEQUENTIAL_SCAN toggle when SCAN_MODE is unset.
 if [ -z "${SCAN_MODE:-}" ]; then
@@ -67,12 +87,20 @@ stage() {
     local name="$1"
     shift
     local t0 t1 rc
+    if already_done "$name"; then
+        echo "=== [$name] skipped (already completed this month) ===" | tee -a "$BENCH_LOG"
+        return 0
+    fi
+    CURRENT_STAGE="$name"
     t0=$(date +%s)
     echo "=== [$name] started $(date -Iseconds) ===" | tee -a "$BENCH_LOG"
+    set +e
     "$@" 2>&1 | tee -a "$BENCH_LOG"
     rc=${PIPESTATUS[0]}
+    set -e
     t1=$(date +%s)
     echo "=== [$name] finished $(date -Iseconds) — $((t1 - t0))s (exit $rc) ===" | tee -a "$BENCH_LOG"
+    [ "$rc" -eq 0 ] && touch "$(done_marker "$name")"
     return "$rc"
 }
 
@@ -85,13 +113,18 @@ bg_stage() {
     shift
     local log="$LOG_DIR/benchmark-$STAMP-$name.log"
     local t0 t1 rc
+    if already_done "$name"; then
+        echo "  [$name] skipped (already completed this month)"
+        return 0
+    fi
     t0=$(date +%s)
     echo "=== [$name] started $(date -Iseconds) ===" > "$log"
-    "$@" --quiet >> "$log" 2>&1
-    rc=$?
+    rc=0
+    "$@" --quiet >> "$log" 2>&1 || rc=$?
     t1=$(date +%s)
     echo "=== [$name] finished $(date -Iseconds) — $((t1 - t0))s (exit $rc) ===" >> "$log"
     echo "  [$name] $([ $rc -eq 0 ] && echo PASS || echo FAIL) — $((t1 - t0))s (exit $rc)"
+    [ "$rc" -eq 0 ] && touch "$(done_marker "$name")"
     return "$rc"
 }
 
@@ -100,6 +133,7 @@ bg_stage() {
 run_phase1_concurrent() {
     local mods=(scan dns tls ports subdomains)
     local pids=() rc=0 t0 t1
+    CURRENT_STAGE=phase1-concurrent
     t0=$(date +%s)
     echo "=== [phase1-concurrent] started $(date -Iseconds) ===" | tee -a "$BENCH_LOG"
     for m in "${mods[@]}"; do
