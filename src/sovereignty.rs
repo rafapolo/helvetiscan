@@ -209,16 +209,16 @@ pub(crate) async fn cmd_sovereignty(args: SovereigntyArgs) -> Result<()> {
             let (resolved_ip, asn_num, asn_org, country_code) = match ip {
                 Some(ip) => {
                     let (asn_num, asn_org) =
-                        match asn_reader.lookup::<maxminddb::geoip2::Asn>(ip) {
-                            Ok(a) => (
+                        match asn_reader.lookup(ip).and_then(|r| r.decode::<maxminddb::geoip2::Asn>()) {
+                            Ok(Some(a)) => (
                                 a.autonomous_system_number.map(|n| format!("AS{n}")),
                                 a.autonomous_system_organization.map(str::to_owned),
                             ),
-                            Err(_) => (None, None),
+                            Ok(None) | Err(_) => (None, None),
                         };
-                    let cc = match country_reader.lookup::<maxminddb::geoip2::Country>(ip) {
-                        Ok(c) => c.country.and_then(|c| c.iso_code).map(str::to_owned),
-                        Err(_) => None,
+                    let cc = match country_reader.lookup(ip).and_then(|r| r.decode::<maxminddb::geoip2::Country>()) {
+                        Ok(Some(c)) => c.country.iso_code.map(str::to_owned),
+                        Ok(None) | Err(_) => None,
                     };
                     (Some(ip.to_string()), asn_num, asn_org, cc)
                 }

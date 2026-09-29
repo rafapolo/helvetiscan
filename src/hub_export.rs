@@ -370,16 +370,16 @@ pub(crate) fn cmd_export_hubs(args: HubExportArgs) -> Result<()> {
         if let Some(ip_str) = ip {
             let resolved = ip_cache.entry(ip_str.clone()).or_insert_with(|| {
                 let addr = IpAddr::from_str(ip_str).ok()?;
-                let (asn_num, asn_org) = match asn_reader.lookup::<maxminddb::geoip2::Asn>(addr) {
-                    Ok(a) => (
+                let (asn_num, asn_org) = match asn_reader.lookup(addr).and_then(|r| r.decode::<maxminddb::geoip2::Asn>()) {
+                    Ok(Some(a)) => (
                         a.autonomous_system_number.map(|n| format!("AS{n}")),
                         a.autonomous_system_organization.map(str::to_owned),
                     ),
-                    Err(_) => (None, None),
+                    Ok(None) | Err(_) => (None, None),
                 };
-                let cc = match country_reader.lookup::<maxminddb::geoip2::Country>(addr) {
-                    Ok(c) => c.country.and_then(|c| c.iso_code).map(str::to_owned),
-                    Err(_) => None,
+                let cc = match country_reader.lookup(addr).and_then(|r| r.decode::<maxminddb::geoip2::Country>()) {
+                    Ok(Some(c)) => c.country.iso_code.map(str::to_owned),
+                    Ok(None) | Err(_) => None,
                 };
                 let asn_num = asn_num?;
                 Some((asn_num, asn_org, cc))

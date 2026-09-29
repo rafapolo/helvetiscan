@@ -53,9 +53,10 @@ pub(crate) fn cmd_geocode(args: GeoCodeArgs) -> Result<()> {
             for (domain, ip_str) in chunk {
                 let cc: Option<String> = IpAddr::from_str(ip_str).ok().and_then(|ip| {
                     reader
-                        .lookup::<maxminddb::geoip2::Country>(ip)
+                        .lookup(ip)
                         .ok()
-                        .and_then(|c| c.country.and_then(|c| c.iso_code).map(str::to_owned))
+                        .and_then(|r| r.decode::<maxminddb::geoip2::Country>().ok().flatten())
+                        .and_then(|c| c.country.iso_code.map(str::to_owned))
                 });
                 match cc {
                     Some(code) => {

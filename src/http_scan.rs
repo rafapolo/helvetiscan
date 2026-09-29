@@ -358,8 +358,11 @@ pub(crate) fn flush_batch(
         for row in batch.iter_mut() {
             if let Some(ip_str) = row.ip.as_deref() {
                 if let Ok(ip) = IpAddr::from_str(ip_str) {
-                    if let Ok(c) = reader.lookup::<maxminddb::geoip2::Country>(ip) {
-                        row.country_code = c.country.and_then(|c| c.iso_code).map(str::to_owned);
+                    if let Ok(Some(c)) = reader
+                        .lookup(ip)
+                        .and_then(|r| r.decode::<maxminddb::geoip2::Country>())
+                    {
+                        row.country_code = c.country.iso_code.map(str::to_owned);
                     }
                 }
             }

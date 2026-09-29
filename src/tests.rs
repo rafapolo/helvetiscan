@@ -1128,3 +1128,18 @@ fn supervisor_zone_facts_never_trip_it() {
     let streak = supervisor_step(2, 1_000_000, 1_000, 0, 0.35, 5_000);
     assert_eq!(streak, 0);
 }
+
+#[test]
+fn maxminddb_asn_and_country_lookup_real_files() {
+    let (a, c) = (Path::new("data/GeoLite2-ASN.mmdb"), Path::new("data/GeoLite2-Country.mmdb"));
+    if !a.exists() || !c.exists() {
+        return;
+    }
+    let ip: std::net::IpAddr = "8.8.8.8".parse().unwrap();
+    let asn_reader = maxminddb::Reader::open_readfile(a).unwrap();
+    let asn: maxminddb::geoip2::Asn = asn_reader.lookup(ip).unwrap().decode().unwrap().unwrap();
+    assert_eq!(asn.autonomous_system_number, Some(15169));
+    let country_reader = maxminddb::Reader::open_readfile(c).unwrap();
+    let cc: maxminddb::geoip2::Country = country_reader.lookup(ip).unwrap().decode().unwrap().unwrap();
+    assert_eq!(cc.country.iso_code, Some("US"));
+}
