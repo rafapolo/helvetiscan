@@ -164,7 +164,11 @@ case "$SCAN_MODE" in
         # software_detections and ports_info banners), verify-cves after update-cves.
         stage smtp-check   "$BIN" smtp-check --db "$DB"
         stage detect         "$BIN" detect --db "$DB"
-        stage update-cves   "$BIN" update-cves --db "$DB"
+        stage update-cves   "$BIN" update-cves --db "$DB" --skip-matching
+        # fetch-feeds ends with the one CVE matching pass (it clears + rebuilds cve_matches), so it
+        # must run before anything that reads cve_matches (verify-cves/classify/sovereignty/
+        # benchmark). update-cves --skip-matching avoids running that ~10h pass twice.
+        stage fetch-feeds   "$BIN" fetch-feeds --all --db "$DB"
         stage verify-cves   "$BIN" verify-cves --db "$DB"
         stage classify       "$BIN" classify --db "$DB"
         stage sovereignty   "$BIN" sovereignty --db "$DB"
@@ -184,7 +188,11 @@ case "$SCAN_MODE" in
         stage subdomains   "$BIN" subdomains --db "$DB"
         stage smtp-check   "$BIN" smtp-check --db "$DB"
         stage detect         "$BIN" detect --db "$DB"
-        stage update-cves   "$BIN" update-cves --db "$DB"
+        stage update-cves   "$BIN" update-cves --db "$DB" --skip-matching
+        # fetch-feeds ends with the one CVE matching pass (it clears + rebuilds cve_matches), so it
+        # must run before anything that reads cve_matches (verify-cves/classify/sovereignty/
+        # benchmark). update-cves --skip-matching avoids running that ~10h pass twice.
+        stage fetch-feeds   "$BIN" fetch-feeds --all --db "$DB"
         stage verify-cves   "$BIN" verify-cves --db "$DB"
         stage classify       "$BIN" classify --db "$DB"
         stage sovereignty   "$BIN" sovereignty --db "$DB"
@@ -192,6 +200,7 @@ case "$SCAN_MODE" in
         ;;
     full)
         stage full "$BIN" full --db "$DB" --parallel-divisor "$PARALLEL_DIVISOR"
+        stage fetch-feeds "$BIN" fetch-feeds --all --db "$DB"
         ;;
     *)
         echo "unknown SCAN_MODE=$SCAN_MODE (expected concurrent|sequential|full)" >&2
@@ -199,7 +208,6 @@ case "$SCAN_MODE" in
         ;;
 esac
 
-stage fetch-feeds "$BIN" fetch-feeds --all --db "$DB"
 stage snapshot     "$BIN" snapshot --db "$DB" --month "$STAMP" --output-dir "$OUTPUT_DIR"
 
 # Mirror the benchmark log into the snapshot's own directory now that it exists.

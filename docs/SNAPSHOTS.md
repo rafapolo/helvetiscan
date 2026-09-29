@@ -162,18 +162,18 @@ flowchart TD
         direction TB
         Smtp["smtp-check"]
         Detect["detect\nJS libs / frameworks / WP plugins"]
-        UpdateCves["update-cves\nCISA KEV + seed matching\n(reads detect + ports banners)"]
-        VerifyCves["verify-cves\n(reads update-cves matches)"]
+        UpdateCves["update-cves --skip-matching\nCISA KEV + seed catalog\n(reads detect + ports banners)"]
+        FetchFeeds["fetch-feeds --all\nNVD / OSV.dev / GHSA\n+ the one CVE matching pass"]
+        VerifyCves["verify-cves\n(reads cve_matches)"]
         Classify["classify"]
         Sovereignty["sovereignty"]
-        Smtp --> Detect --> UpdateCves --> VerifyCves --> Classify --> Sovereignty
+        Smtp --> Detect --> UpdateCves --> FetchFeeds --> VerifyCves --> Classify --> Sovereignty
     end
 
     Scan & Dns & Tls & Ports & Sub --> Smtp
 
     Sovereignty --> Benchmark["benchmark"]
-    Benchmark --> FetchFeeds["fetch-feeds --all\nNVD / OSV.dev / GHSA"]
-    FetchFeeds --> Snap["snapshot\n→ data/snapshots/month=YYYY-MM/"]
+    Benchmark --> Snap["snapshot\n→ data/snapshots/month=YYYY-MM/"]
 ```
 
 Phase 1's five modules have no dependency on each other — `scan`, `dns`, `tls`, `ports`, and
@@ -182,7 +182,8 @@ resolvers, TLS handshake, arbitrary TCP ports, crt.sh/AXFR), so they're safe to 
 concurrently. Phase 2 is a real chain and cannot be parallelized: `detect` needs `scan`'s
 `status_code` and must run after `ports` too (CVE matching folds in `ports_info` banners
 alongside `detect`'s `software_detections`), `update-cves` needs `detect`'s output,
-`verify-cves` needs `update-cves`'s matches, and so on down to `sovereignty`.
+`fetch-feeds` (which runs the single CVE matching pass) needs the catalog `update-cves` builds,
+`verify-cves` needs the resulting matches, and so on down to `sovereignty`.
 
 ### How `scripts/monthly.sh` runs this — `SCAN_MODE`
 

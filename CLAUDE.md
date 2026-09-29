@@ -81,8 +81,10 @@ re-run repeatedly and pick up only unfinished work.
 ### CVE correlation (`cve.rs`)
 Pulls the CISA KEV feed plus built-in seed entries into `cve_catalog`, then matches detected software/versions
 (from HTTP `Server`/`X-Powered-By` headers and port banners) against `affected_from`/`affected_to` ranges into
-`cve_matches`. See `TODO.md` for known gaps (no NVD/OSV/GHSA feeds yet, banner version extraction incomplete for
-most services, no plugin/JS-library CVE matching).
+`cve_matches`. `feeds.rs` (`fetch-feeds --all`) adds NVD/OSV/GHSA version ranges on top of KEV, then runs the
+matching pass; `update-cves --skip-matching` refreshes the catalog without matching so `monthly.sh` runs that
+multi-hour pass once (in `fetch-feeds`), not twice. Known gaps: banner version extraction is incomplete for most
+services, and there is no plugin/JS-library CVE matching.
 
 ### Export/import (`src/processing/`)
 `export_as_parquet.rs`/`import_from_parquet.rs` round-trip every table (or a subset via `--exclude`) between

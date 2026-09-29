@@ -279,6 +279,11 @@ pub(crate) struct ClassifyArgs {
 pub(crate) struct UpdateCvesArgs {
     #[arg(long, default_value = "data/domains.db")]
     pub(crate) db: PathBuf,
+
+    /// Refresh the catalog and `domain_technologies` but skip the (multi-hour) CVE matching pass.
+    /// Use when `fetch-feeds` runs next: it rebuilds `cve_matches` from scratch anyway.
+    #[arg(long)]
+    pub(crate) skip_matching: bool,
 }
 
 #[derive(Parser, Debug)]
@@ -722,7 +727,7 @@ async fn async_main() -> Result<()> {
                 Command::Ports(mut a) => { if a.retry_errors.is_none() { a.retry_errors = retry_errors; } ports_scan::cmd_ports(a, None, None).await }
                 Command::SmtpCheck(a) => smtp_check::cmd_smtp_check(a, None, None).await,
                 Command::Subdomains(a) => subdomains::cmd_subdomains(a, None, None).await,
-                Command::UpdateCves(a) => cve::cmd_update_cves(a.db).await,
+                Command::UpdateCves(a) => cve::cmd_update_cves(a.db, a.skip_matching).await,
                 Command::PopulateTechnologies => cve::cmd_populate_technologies(db).await,
                 Command::RefilterCves(a) => if a.preview { cve::cmd_refilter_cves_preview(db) } else { cve::cmd_refilter_cves(db) },
                 Command::FetchFeeds(a) => {
@@ -1132,7 +1137,7 @@ async fn cmd_full_pipeline(args: FullArgs) -> Result<()> {
         db: db.clone(), ..SmtpCheckArgs::default()
     }, None, None).await);
     step2!("detect",      fingerprint::cmd_detect(db.clone(), 100, None).await);
-    step2!("update-cves", cve::cmd_update_cves(db.clone()).await);
+    step2!("update-cves", cve::cmd_update_cves(db.clone(), false).await);
     step2!("verify-cves", cve_verify::cmd_verify_cves(db.clone(), 100, None, false, false, false, 30, 0.0).await);
     step2!("classify",    classify::cmd_classify(db.clone()).await);
     step2!("sovereignty", sovereignty::cmd_sovereignty(SovereigntyArgs {

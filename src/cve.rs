@@ -616,7 +616,7 @@ fn map_apache_product(product: &str) -> Option<&'static str> {
 
 // ---- CISA KEV fetcher ----
 
-pub(crate) async fn cmd_update_cves(db: PathBuf) -> Result<()> {
+pub(crate) async fn cmd_update_cves(db: PathBuf, skip_matching: bool) -> Result<()> {
     let conn = crate::shared::open_db(&db)
         .with_context(|| format!("open db {:?}", db))?;
 
@@ -648,7 +648,9 @@ pub(crate) async fn cmd_update_cves(db: PathBuf) -> Result<()> {
         Err(e) => {
             eprintln!("cve: WARNING — could not fetch CISA KEV feed ({e:#}); using hardcoded entries only");
             populate_domain_technologies(&conn)?;
-            run_cve_matching(&conn)?;
+            if !skip_matching {
+                run_cve_matching(&conn)?;
+            }
             return Ok(());
         }
     };
@@ -707,6 +709,10 @@ pub(crate) async fn cmd_update_cves(db: PathBuf) -> Result<()> {
     }
 
     populate_domain_technologies(&conn)?;
+    if skip_matching {
+        eprintln!("cve: --skip-matching set; cve_matches left for the next matching pass");
+        return Ok(());
+    }
     let matched = run_cve_matching(&conn)?;
     eprintln!("cve: {matched} domain-CVE matches recorded");
 
