@@ -857,3 +857,47 @@ fn classify_reqwest_error(e: &reqwest::Error) -> ErrorKind {
 
     ErrorKind::Other
 }
+
+#[cfg(test)]
+mod parser_tests {
+    use super::*;
+
+    #[test]
+    fn extract_title_collapses_whitespace_and_decodes_entities() {
+        let html = "<html><head><TITLE lang='de'>\n  Caf&eacute; &amp;   Bar\t&quot;Zürich&quot;\n</TITLE></head></html>";
+        assert_eq!(extract_title(html.as_bytes()).as_deref(), Some("Caf&eacute; & Bar \"Zürich\""));
+    }
+
+    #[test]
+    fn extract_title_none_when_missing_empty_or_unclosed() {
+        assert_eq!(extract_title(b"<html><body>no title</body></html>"), None);
+        assert_eq!(extract_title(b"<title>   </title>"), None);
+        assert_eq!(extract_title(b"<title>never closed"), None);
+    }
+
+    #[test]
+    fn extract_title_survives_invalid_utf8() {
+        let mut html = b"<title>Bern ".to_vec();
+        html.extend_from_slice(&[0xff, 0xfe]);
+        html.extend_from_slice(b"</title>");
+        assert!(extract_title(&html).unwrap().starts_with("Bern"));
+    }
+
+    #[test]
+    fn detect_cms_reads_generator_meta() {
+        let html = br#"<meta name="generator" content="Drupal 10 (https://www.drupal.org)">"#;
+        assert_eq!(detect_cms(None, html, None, None), Some("Drupal".into()));
+    }
+
+    #[test]
+    fn detect_cms_generator_scan_handles_multibyte_at_window_edge() {
+        let mut html = String::from(r#"<meta name="generator" content="x">"#);
+        html.push_str(&"ü".repeat(600));
+        assert_eq!(detect_cms(None, html.as_bytes(), None, None), None);
+    }
+
+    #[test]
+    fn detect_cms_exchange_from_url() {
+        assert_eq!(detect_cms(None, b"", None, Some("https://mail.example.ch/owa/auth")), Some("exchange".into()));
+    }
+}
