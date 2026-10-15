@@ -19,8 +19,10 @@
 #     concurrent single-writer-per-connection load without contention. Local scale test
 #     (60k fail-fast domains, task_30): 120.5s vs 474.9s sequential — 3.94x faster, every module
 #     wrote all 60k rows, `PRAGMA integrity_check` = ok, WAL fully checkpointed, zero
-#     busy/locked/error. This is the recommended mode: it gets `full`'s overlap benefit while
-#     side-stepping the in-process `full` hang (see task_29 / SCAN_MODE=full below).
+#     busy/locked/error. Validated at full scale on the 2026-10 run (2.81M domains, every stage
+#     exit 0, Phase 1 in 4h40m). This is the recommended mode: it gets `full`'s overlap benefit
+#     while side-stepping the in-process `full` hang (see task_29 / SCAN_MODE=full below).
+#     smtp-check and detect also run concurrently after Phase 1 in this mode.
 #
 #   sequential — each module one after another. Slowest (sum of all stages) but the most
 #     conservative; use it if a concurrent run ever misbehaves on the production host.
@@ -44,7 +46,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-BIN=./target/release/helvetiscan
+BIN="${BIN:-./target/release/helvetiscan}"
 DB=data/domains.db
 DOMAINS_LIST="${DOMAINS_LIST:-data/sorted_domains.txt}"
 OUTPUT_DIR=data/snapshots
@@ -104,10 +106,11 @@ stage() {
     return "$rc"
 }
 
-# Run one Phase-1 module as a background process, timing it into its own log file (concurrent
-# stages must not interleave into the shared benchmark log). Progress bars are suppressed with
-# --quiet so the captured logs stay readable. Prints a one-line PASS/FAIL and returns the
-# module's exit code so the barrier below can fail the whole run if any module failed.
+# Run one stage as a background process, timing it into its own log file (concurrent stages
+# must not interleave into the shared benchmark log). Callers pass --quiet themselves where the
+# subcommand supports it (detect has no such flag — clap would reject it and fail the run).
+# Prints a one-line PASS/FAIL and returns the stage's exit code so the barrier in run_parallel
+# can fail the whole run if any stage failed.
 bg_stage() {
     local name="$1"
     shift
@@ -120,7 +123,7 @@ bg_stage() {
     t0=$(date +%s)
     echo "=== [$name] started $(date -Iseconds) ===" > "$log"
     rc=0
-    "$@" --quiet >> "$log" 2>&1 || rc=$?
+    "$@" >> "$log" 2>&1 || rc=$?
     t1=$(date +%s)
     echo "=== [$name] finished $(date -Iseconds) — $((t1 - t0))s (exit $rc) ===" >> "$log"
     echo "  [$name] $([ $rc -eq 0 ] && echo PASS || echo FAIL) — $((t1 - t0))s (exit $rc)"
@@ -128,42 +131,61 @@ bg_stage() {
     return "$rc"
 }
 
-# Launch the five Phase-1 modules concurrently, wait for all of them, then fold their per-module
-# logs into the shared benchmark log. Fails (non-zero) if any module failed.
-run_phase1_concurrent() {
-    local mods=(scan dns tls ports subdomains)
-    local pids=() rc=0 t0 t1
-    CURRENT_STAGE=phase1-concurrent
+# Launch a group of independent stages concurrently, wait for all of them, then fold their
+# per-stage logs into the shared benchmark log. Fails (non-zero) if any stage failed.
+# Usage: run_parallel <group-name> <stage-name> <stage-name>...; each stage's command line is
+# read from the stage_cmd function below.
+stage_cmd() {
+    case "$1" in
+        scan|dns|tls|ports|subdomains|smtp-check) echo "$BIN $1 --db $DB --quiet" ;;
+        detect) echo "$BIN detect --db $DB" ;;
+        *) echo "unknown parallel stage $1" >&2; return 1 ;;
+    esac
+}
+
+run_parallel() {
+    local group="$1"
+    shift
+    local mods=("$@")
+    local pids=() rc=0 t0 t1 cmd
+    CURRENT_STAGE="$group"
     t0=$(date +%s)
-    echo "=== [phase1-concurrent] started $(date -Iseconds) ===" | tee -a "$BENCH_LOG"
+    echo "=== [$group] started $(date -Iseconds) ===" | tee -a "$BENCH_LOG"
     for m in "${mods[@]}"; do
-        bg_stage "$m" "$BIN" "$m" --db "$DB" &
+        cmd=$(stage_cmd "$m")
+        # shellcheck disable=SC2086 # word-splitting the command line is intended
+        bg_stage "$m" $cmd &
         pids+=("$!")
     done
     for i in "${!pids[@]}"; do
         if ! wait "${pids[$i]}"; then
             rc=1
-            echo "  phase1 module ${mods[$i]} FAILED" | tee -a "$BENCH_LOG"
+            echo "  $group stage ${mods[$i]} FAILED" | tee -a "$BENCH_LOG"
         fi
     done
     t1=$(date +%s)
     for m in "${mods[@]}"; do
         cat "$LOG_DIR/benchmark-$STAMP-$m.log" >> "$BENCH_LOG" 2>/dev/null || true
     done
-    echo "=== [phase1-concurrent] finished $(date -Iseconds) — $((t1 - t0))s (rc $rc) ===" | tee -a "$BENCH_LOG"
-    return "$rc"
+    echo "=== [$group] finished $(date -Iseconds) — $((t1 - t0))s (rc $rc) ===" | tee -a "$BENCH_LOG"
+    if [ "$rc" -ne 0 ]; then
+        CURRENT_STAGE="$group"
+        return 1
+    fi
 }
 
 stage init        "$BIN" init --input "$DOMAINS_LIST" --db "$DB"
 
 case "$SCAN_MODE" in
     concurrent)
-        run_phase1_concurrent
-        # Phase 2/3 — sequential; each depends on Phase-1 data being present. Mirrors
-        # cmd_full_pipeline's order: detect must precede update-cves (which folds in
-        # software_detections and ports_info banners), verify-cves after update-cves.
-        stage smtp-check   "$BIN" smtp-check --db "$DB"
-        stage detect         "$BIN" detect --db "$DB"
+        run_parallel phase1-concurrent scan dns tls ports subdomains
+        # smtp-check (reads ports_info 25/587, writes smtp_tls_check) and detect (reads
+        # domains.status_code, writes software_detections) share no tables, so they overlap.
+        # Each still needs Phase 1 done; scan always finishes last there, so nothing is gained
+        # by starting them earlier on a per-dependency basis. Saved ~4h on the 2026-10 timings.
+        run_parallel phase2-network smtp-check detect
+        # The rest is a real chain: update-cves folds in software_detections and ports_info
+        # banners, verify-cves reads the cve_matches fetch-feeds rebuilds, and so on.
         stage update-cves   "$BIN" update-cves --db "$DB" --skip-matching
         # fetch-feeds ends with the one CVE matching pass (it clears + rebuilds cve_matches), so it
         # must run before anything that reads cve_matches (verify-cves/classify/sovereignty/

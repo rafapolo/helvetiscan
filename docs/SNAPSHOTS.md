@@ -158,19 +158,24 @@ flowchart TD
 
     Init --> Scan & Dns & Tls & Ports & Sub
 
-    subgraph Phase2["Phase 2 — post-processing · must be sequential\neach stage reads the previous stage's output"]
+    subgraph Phase2a["Phase 2a — network post-processing · parallel-safe\nno shared tables between them"]
+        direction LR
+        Smtp["smtp-check\n(reads ports_info 25/587)"]
+        Detect["detect\nJS libs / frameworks / WP plugins\n(reads domains.status_code)"]
+    end
+
+    subgraph Phase2["Phase 2b — post-processing · must be sequential\neach stage reads the previous stage's output"]
         direction TB
-        Smtp["smtp-check"]
-        Detect["detect\nJS libs / frameworks / WP plugins"]
         UpdateCves["update-cves --skip-matching\nCISA KEV + seed catalog\n(reads detect + ports banners)"]
         FetchFeeds["fetch-feeds --all\nNVD / OSV.dev / GHSA\n+ the one CVE matching pass"]
         VerifyCves["verify-cves\n(reads cve_matches)"]
         Classify["classify"]
         Sovereignty["sovereignty"]
-        Smtp --> Detect --> UpdateCves --> FetchFeeds --> VerifyCves --> Classify --> Sovereignty
+        UpdateCves --> FetchFeeds --> VerifyCves --> Classify --> Sovereignty
     end
 
-    Scan & Dns & Tls & Ports & Sub --> Smtp
+    Scan & Dns & Tls & Ports & Sub --> Smtp & Detect
+    Smtp & Detect --> UpdateCves
 
     Sovereignty --> Benchmark["benchmark"]
     Benchmark --> Snap["snapshot\n→ data/snapshots/month=YYYY-MM/"]
@@ -179,11 +184,14 @@ flowchart TD
 Phase 1's five modules have no dependency on each other — `scan`, `dns`, `tls`, `ports`, and
 `subdomains` each write to their own table and hit a different remote service (HTTP, DNS
 resolvers, TLS handshake, arbitrary TCP ports, crt.sh/AXFR), so they're safe to run
-concurrently. Phase 2 is a real chain and cannot be parallelized: `detect` needs `scan`'s
-`status_code` and must run after `ports` too (CVE matching folds in `ports_info` banners
-alongside `detect`'s `software_detections`), `update-cves` needs `detect`'s output,
-`fetch-feeds` (which runs the single CVE matching pass) needs the catalog `update-cves` builds,
-`verify-cves` needs the resulting matches, and so on down to `sovereignty`.
+concurrently. The first two post-processing stages are independent too: `smtp-check` reads only
+`ports_info` (ports 25/587) and writes `smtp_tls_check`, while `detect` reads `scan`'s
+`status_code` and writes `software_detections` — no table in common, so they run side by side
+(Phase 2a). Starting each one as soon as its own input is ready would gain nothing, since `scan`
+is the last Phase 1 module to finish anyway. From there on it is a real chain (Phase 2b):
+`update-cves` needs `detect`'s output and `ports_info` banners, `fetch-feeds` (which runs the
+single CVE matching pass) needs the catalog `update-cves` builds, `verify-cves` needs the
+resulting matches, and so on down to `sovereignty`.
 
 ### How `scripts/monthly.sh` runs this — `SCAN_MODE`
 
@@ -196,12 +204,13 @@ attempt — see task notes). `scripts/monthly.sh` selects how Phase 1 actually r
 
 | `SCAN_MODE` | What it does |
 |---|---|
-| `concurrent` (default) | Each Phase 1 module as its own standalone OS process, all five launched at once against the one WAL database, with a barrier that fails the run if any module fails. Local test (60k synthetic domains): 120.5s vs 474.9s sequential — 3.9x faster, zero write contention/corruption. **Not yet validated at real full-namespace scale (millions of domains).** |
+| `concurrent` (default) | Each Phase 1 module as its own standalone OS process, all five launched at once against the one WAL database, with a barrier that fails the run if any module fails. Local test (60k synthetic domains): 120.5s vs 474.9s sequential — 3.9x faster, zero write contention/corruption. Validated at full scale on the 2026-10 run (2.81M domains, Phase 1 in 4h40m, every stage exit 0). Also runs `smtp-check` and `detect` concurrently after Phase 1. |
 | `sequential` | Each Phase 1 module one after another — the most conservative option, same total-time shape as summing every stage's duration. Use if a concurrent run misbehaves in production. |
 | `full` | `helvetiscan full`'s in-process 5-module orchestration — left in for debugging only; do not use for a production run until the hang above is root-caused. |
 
-Phase 2 always runs sequentially regardless of `SCAN_MODE` — there's no dependency structure to
-exploit there. The legacy `SEQUENTIAL_SCAN=1`/`SEQUENTIAL_SCAN=0` toggle still works as a
+Phase 2b always runs sequentially regardless of `SCAN_MODE` — there's no dependency structure to
+exploit there. Phase 2a (`smtp-check` ‖ `detect`) is parallel only in `concurrent` mode;
+`sequential` keeps them one after the other. The legacy `SEQUENTIAL_SCAN=1`/`SEQUENTIAL_SCAN=0` toggle still works as a
 back-compat shim when `SCAN_MODE` is unset. `DOMAINS_LIST` and `PARALLEL_DIVISOR` (the latter
 only applies to `SCAN_MODE=full`) are also overridable via environment variables — see the
 script's own comments for details.
@@ -292,6 +301,79 @@ Snapshots are compact enough to pull back from a scan host to a local machine af
 ```bash
 rsync -av <host>:path/to/helvetiscan/data/snapshots/ ./data/snapshots/
 ```
+
+### Example run — 2026-10, concurrent mode
+
+Run on `finland` (`SCAN_MODE=concurrent`), 2026-10-14 18:55:19 → 2026-10-15 16:14:45 UTC —
+**total wall time 21h 19m** (76,766s), about 3x faster than the 2026-09 run. Two earlier
+attempts that day (12:29 and 14:09 UTC) stopped during Phase 1 and are not counted. This run
+still had `smtp-check` and `detect` back to back; with Phase 2a parallel, the same timings come
+to roughly **17h** (`smtp-check`'s 4h13m disappears behind `detect`'s 6h40m).
+
+| Stage | 2026-09 (sequential) | 2026-10 (concurrent) |
+|---|---|---|
+| Phase 1 wall time | 23h 12m (sum of stages) | **4h 40m 27s** |
+| scan | 1h 21m 36s | 4h 40m 27s |
+| dns | 2h 07m 37s | 2h 50m 32s |
+| tls | 4h 02m 43s | 4h 05m 40s |
+| ports | 1h 26m 55s | 3h 20m 44s |
+| subdomains | 14h 13m 32s | 2h 43m 01s |
+| smtp-check | 2h 49m 57s | 4h 13m 04s |
+| detect | 10h 12m 01s | 6h 40m 26s |
+| update-cves | 9h 47m 25s | 4m 18s |
+| fetch-feeds | 9h 45m 56s | 15m 10s |
+| verify-cves | 55s | 4h 55m 20s |
+| classify | 17s | 41s |
+| sovereignty | 38m 09s | 7m 41s |
+| benchmark | 7m 35s | 5m 33s |
+| snapshot | 25m 56s | 16m 40s |
+
+What changed between the two runs:
+- **Phase 1 overlap.** Five modules at once took 4h40m instead of 23h. Each module is slower on
+  its own when they share the 4-vCPU host (`scan` 1h22m → 4h40m, `ports` 1h27m → 3h21m), so
+  `scan` is now what bounds Phase 1.
+- **`subdomains` 14h → 2h43m**, from no longer stalling on crt.sh HTTP 429 responses.
+- **`update-cves --skip-matching` + `fetch-feeds`** went from ~19.5h to ~20m: the multi-hour CVE
+  matching pass now runs once instead of twice.
+- **`verify-cves` 55s → 4h55m is not a regression.** It only re-probes verifications older than
+  `--max-age-days` (default 30). In 2026-09 nearly everything had been verified recently, so it
+  ran 401 probes for 1,708 tasks; in 2026-10 they had all expired, so it ran 1,574,726 probes for
+  7,344,324 tasks (fixed concurrency 100, ~89 probes/s). Expect it to take hours whenever the
+  previous full verification is more than 30 days old.
+- **`smtp-check` 2h50m → 4h13m**, over 849,971 (domain, port) targets, about 90% of which ended in
+  an error (451,759 `invalid peer certificate` on shared mail hosts, 224,981 connection failures).
+
+```mermaid
+gantt
+    title 2026-10 snapshot run — stage durations (UTC)
+    dateFormat  YYYY-MM-DDTHH:mm:ss
+    axisFormat  %b-%d %H:%M
+
+    section Phase 1 — network scans (concurrent)
+    scan         :2026-10-14T18:55:25, 16827s
+    dns          :2026-10-14T18:55:25, 10232s
+    tls          :2026-10-14T18:55:25, 14740s
+    ports        :2026-10-14T18:55:25, 12044s
+    subdomains   :2026-10-14T18:55:25, 9781s
+
+    section Phase 2 — post-processing
+    smtp-check   :2026-10-14T23:35:52, 15184s
+    detect       :2026-10-15T03:48:56, 24026s
+    update-cves  :2026-10-15T10:29:22, 258s
+    fetch-feeds  :2026-10-15T10:33:40, 910s
+    verify-cves  :2026-10-15T10:48:50, 17720s
+    classify     :2026-10-15T15:44:10, 41s
+    sovereignty  :2026-10-15T15:44:51, 461s
+
+    section Phase 3 — benchmark + export
+    benchmark    :2026-10-15T15:52:32, 333s
+    snapshot     :2026-10-15T15:58:05, 1000s
+```
+
+Snapshot size: 1.6 GB (`dns_info` 362 MB, `domains` 292 MB, `tls_info` 218 MB, `ports_info`
+217 MB, `smtp_tls_check` 212 MB, `cve_matches` 173 MB, `risk_score` 61 MB, `email_security`
+60 MB, `domain_classification` 2.2 MB, `cve_catalog` 378 KB). Coverage warnings: classification
+3.6%, smtp 17.6% (only domains with port 25/587 open are checked).
 
 ## Cross-month trend analysis
 
