@@ -56,14 +56,73 @@ const JS_LIBS: &[(&str, &str)] = &[
     ("swiper", "swiper"),
 ];
 
-/// Detect JS libraries and versions referenced in a page's HTML.
+/// The `src=` / `href=` attribute values in a page, one per line. Library names are only looked
+/// for here: matching the whole HTML tagged most pages with `d3` (`#d3d3d3` colours), `ember`
+/// ("December", "member") or `moment` (plain prose), which then fed CVE matching.
+fn asset_urls(html: &str) -> String {
+    let lower = html.to_ascii_lowercase();
+    let bytes = lower.as_bytes();
+    let mut urls: Vec<&str> = Vec::new();
+    for attr in ["src=", "href="] {
+        let mut from = 0;
+        while let Some(p) = lower[from..].find(attr) {
+            let mut i = from + p + attr.len();
+            from = i;
+            while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+                i += 1;
+            }
+            let (start, end) = match bytes.get(i) {
+                Some(&q @ (b'"' | b'\'')) => {
+                    let start = i + 1;
+                    let len = lower[start..].find(q as char).unwrap_or(lower.len() - start);
+                    (start, start + len)
+                }
+                Some(_) => {
+                    let len = lower[i..]
+                        .find(|c: char| c.is_ascii_whitespace() || c == '>')
+                        .unwrap_or(lower.len() - i);
+                    (i, i + len)
+                }
+                None => break,
+            };
+            // ASCII lowercasing keeps byte offsets, so the same range is valid in `html`.
+            if html.is_char_boundary(start) && html.is_char_boundary(end) {
+                urls.push(&html[start..end]);
+            }
+            from = end.max(from);
+        }
+    }
+    urls.join("\n")
+}
+
+/// True if `needle` occurs as a whole name: not glued to a letter or digit on either side, so
+/// `d3.v7.min.js` and `/d3@7/` count but a hashed `app.d3f9a1.js` does not.
+fn mentions_lib(lower: &str, needle: &str) -> bool {
+    let bytes = lower.as_bytes();
+    let mut from = 0;
+    while let Some(p) = lower[from..].find(needle) {
+        let at = from + p;
+        let end = at + needle.len();
+        let before_ok = at == 0 || !bytes[at - 1].is_ascii_alphanumeric();
+        let after_ok = end >= bytes.len() || !bytes[end].is_ascii_alphanumeric();
+        if before_ok && after_ok {
+            return true;
+        }
+        from = at + 1;
+    }
+    false
+}
+
+/// Detect JS libraries and versions referenced in a page's script/stylesheet URLs.
 pub(crate) fn detect_js_libraries(html: &str) -> Vec<Detection> {
+    let assets = asset_urls(html);
+    let html = assets.as_str();
     let lower = html.to_ascii_lowercase();
     let mut out: Vec<Detection> = Vec::new();
     let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
 
     for (needle, canonical) in JS_LIBS {
-        if !lower.contains(needle) {
+        if !mentions_lib(&lower, needle) {
             continue;
         }
         // Skip a substring that is really part of a longer, already-handled lib name
@@ -175,16 +234,19 @@ pub(crate) fn detect_wp_plugins(html: &str) -> Vec<Detection> {
 }
 
 /// Run all fingerprint parsers over one response.
-/// Builds the header blob `detect_web_frameworks` reads from a response's headers.
+/// Builds the header blob `detect_web_frameworks` reads from a response's headers. Only headers
+/// the response actually sent are listed: the detector keys on header *names* such as
+/// `x-aspnet-version` and `x-runtime`, so an empty `name: ` line would match on every site
+/// (until 2026-10 every fingerprinted domain was tagged asp.net + next.js + rails that way).
 pub(crate) fn headers_blob(headers: &reqwest::header::HeaderMap) -> String {
-    let header = |name: &str| -> &str {
-        headers.get(name).and_then(|v| v.to_str().ok()).unwrap_or("")
-    };
-    format!(
-        "server: {}\nx-powered-by: {}\nx-aspnet-version: {}\nx-runtime: {}\nx-nextjs-cache: {}",
-        header("server"), header("x-powered-by"), header("x-aspnet-version"),
-        header("x-runtime"), header("x-nextjs-cache"),
-    )
+    ["server", "x-powered-by", "x-aspnet-version", "x-runtime", "x-nextjs-cache"]
+        .iter()
+        .filter_map(|name| {
+            let v = headers.get(*name)?.to_str().ok()?;
+            Some(format!("{name}: {v}"))
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// All `set-cookie` values joined with "; ", as `detect_web_frameworks` expects.
@@ -373,6 +435,13 @@ mod tests {
     }
 
     #[test]
+    fn absent_headers_detect_no_framework() {
+        let h = reqwest::header::HeaderMap::new();
+        assert_eq!(headers_blob(&h), "");
+        assert!(fingerprint_response("<html></html>", &headers_blob(&h), &cookies_blob(&h)).is_empty());
+    }
+
+    #[test]
     fn header_and_cookie_blobs_feed_framework_detection() {
         use reqwest::header::{HeaderMap, HeaderValue};
         let mut h = HeaderMap::new();
@@ -416,6 +485,27 @@ mod tests {
     fn js_no_false_positive_on_plain_page() {
         let d = detect_js_libraries("<html><body>hello</body></html>");
         assert!(d.is_empty());
+    }
+
+    #[test]
+    fn js_ignores_names_outside_asset_urls_and_inside_words() {
+        let html = r##"<style>.x{color:#d3d3d3}</style>
+            <p>Members meet in December for a moment of reaction.</p>
+            <script src="/static/app.d3f9a1.js"></script>
+            <a href="/rectangular-emberx">x</a>"##;
+        assert!(detect_js_libraries(html).is_empty(), "{:?}", detect_js_libraries(html));
+    }
+
+    #[test]
+    fn js_detects_whole_names_in_asset_urls() {
+        let html = r#"<script src='https://cdn.jsdelivr.net/npm/d3@7.8.5/dist/d3.min.js'></script>
+            <script src=/js/moment-with-locales.min.js></script>
+            <script src="/js/react-dom.production.min.js"></script>"#;
+        let d = detect_js_libraries(html);
+        let n = names(&d);
+        assert!(n.contains(&("d3", Some("7.8.5"))), "{n:?}");
+        assert!(n.iter().any(|(name, _)| *name == "moment"), "{n:?}");
+        assert!(n.iter().any(|(name, _)| *name == "react"), "{n:?}");
     }
 
     #[test]
