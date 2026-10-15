@@ -22,7 +22,6 @@
 #     busy/locked/error. Validated at full scale on the 2026-10 run (2.81M domains, every stage
 #     exit 0, Phase 1 in 4h40m). This is the recommended mode: it gets `full`'s overlap benefit
 #     while side-stepping the in-process `full` hang (see task_29 / SCAN_MODE=full below).
-#     smtp-check and detect also run concurrently after Phase 1 in this mode.
 #
 #   sequential — each module one after another. Slowest (sum of all stages) but the most
 #     conservative; use it if a concurrent run ever misbehaves on the production host.
@@ -107,9 +106,8 @@ stage() {
 }
 
 # Run one stage as a background process, timing it into its own log file (concurrent stages
-# must not interleave into the shared benchmark log). Callers pass --quiet themselves where the
-# subcommand supports it (detect has no such flag — clap would reject it and fail the run).
-# Prints a one-line PASS/FAIL and returns the stage's exit code so the barrier in run_parallel
+# must not interleave into the shared benchmark log). stage_cmd adds --quiet only where the
+# subcommand supports it (clap rejects unknown flags, which would fail the run). Prints a one-line PASS/FAIL and returns the stage's exit code so the barrier in run_parallel
 # can fail the whole run if any stage failed.
 bg_stage() {
     local name="$1"
@@ -137,8 +135,7 @@ bg_stage() {
 # read from the stage_cmd function below.
 stage_cmd() {
     case "$1" in
-        scan|dns|tls|ports|subdomains|smtp-check) echo "$BIN $1 --db $DB --quiet" ;;
-        detect) echo "$BIN detect --db $DB" ;;
+        scan|dns|tls|ports|subdomains) echo "$BIN $1 --db $DB --quiet" ;;
         *) echo "unknown parallel stage $1" >&2; return 1 ;;
     esac
 }
@@ -179,13 +176,11 @@ stage init        "$BIN" init --input "$DOMAINS_LIST" --db "$DB"
 case "$SCAN_MODE" in
     concurrent)
         run_parallel phase1-concurrent scan dns tls ports subdomains
-        # smtp-check (reads ports_info 25/587, writes smtp_tls_check) and detect (reads
-        # domains.status_code, writes software_detections) share no tables, so they overlap.
-        # Each still needs Phase 1 done; scan always finishes last there, so nothing is gained
-        # by starting them earlier on a per-dependency basis. Saved ~4h on the 2026-10 timings.
-        run_parallel phase2-network smtp-check detect
+        # No detect stage: scan fingerprints every homepage it fetches and writes
+        # software_detections itself (it used to re-download 1.6M homepages, 6h40m on 2026-10).
         # The rest is a real chain: update-cves folds in software_detections and ports_info
         # banners, verify-cves reads the cve_matches fetch-feeds rebuilds, and so on.
+        stage smtp-check   "$BIN" smtp-check --db "$DB"
         stage update-cves   "$BIN" update-cves --db "$DB" --skip-matching
         # fetch-feeds ends with the one CVE matching pass (it clears + rebuilds cve_matches), so it
         # must run before anything that reads cve_matches (verify-cves/classify/sovereignty/
@@ -198,18 +193,15 @@ case "$SCAN_MODE" in
         ;;
     sequential)
         # Mirrors `full`'s own phase order (cmd_full_pipeline in src/main.rs) exactly — Phase 1
-        # (scan/dns/tls/ports/subdomains) then Phase 2 (smtp-check/detect/update-cves/verify-cves/
-        # classify/sovereignty) then benchmark. Previously missing `detect` and `verify-cves` here
-        # meant update-cves's CVE matching ran against a stale/empty software_detections table
-        # (JS libs, frameworks, WP plugins) — detect must run before update-cves, which also folds
-        # in ports_info banners, so it needs to come after `ports` too.
+        # (scan/dns/tls/ports/subdomains) then Phase 2 (smtp-check/update-cves/verify-cves/
+        # classify/sovereignty) then benchmark. scan writes software_detections (JS libs,
+        # frameworks, WP plugins) that update-cves matches on, alongside ports_info banners.
         stage scan         "$BIN" scan --db "$DB"
         stage dns           "$BIN" dns --db "$DB"
         stage tls           "$BIN" tls --db "$DB"
         stage ports         "$BIN" ports --db "$DB"
         stage subdomains   "$BIN" subdomains --db "$DB"
         stage smtp-check   "$BIN" smtp-check --db "$DB"
-        stage detect         "$BIN" detect --db "$DB"
         stage update-cves   "$BIN" update-cves --db "$DB" --skip-matching
         # fetch-feeds ends with the one CVE matching pass (it clears + rebuilds cve_matches), so it
         # must run before anything that reads cve_matches (verify-cves/classify/sovereignty/

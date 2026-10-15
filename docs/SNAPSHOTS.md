@@ -149,7 +149,7 @@ flowchart TD
 
     subgraph Phase1["Phase 1 — network scans · parallel-safe\neach hits a different remote service, no data dependency between them"]
         direction LR
-        Scan["scan\nHTTP"]
+        Scan["scan\nHTTP + software fingerprints\n(JS libs / frameworks / WP plugins)"]
         Dns["dns"]
         Tls["tls"]
         Ports["ports"]
@@ -158,24 +158,18 @@ flowchart TD
 
     Init --> Scan & Dns & Tls & Ports & Sub
 
-    subgraph Phase2a["Phase 2a — network post-processing · parallel-safe\nno shared tables between them"]
-        direction LR
-        Smtp["smtp-check\n(reads ports_info 25/587)"]
-        Detect["detect\nJS libs / frameworks / WP plugins\n(reads domains.status_code)"]
-    end
-
-    subgraph Phase2["Phase 2b — post-processing · must be sequential\neach stage reads the previous stage's output"]
+    subgraph Phase2["Phase 2 — post-processing · must be sequential\neach stage reads the previous stage's output"]
         direction TB
-        UpdateCves["update-cves --skip-matching\nCISA KEV + seed catalog\n(reads detect + ports banners)"]
+        Smtp["smtp-check\n(reads ports_info 25/587)"]
+        UpdateCves["update-cves --skip-matching\nCISA KEV + seed catalog\n(reads software_detections + ports banners)"]
         FetchFeeds["fetch-feeds --all\nNVD / OSV.dev / GHSA\n+ the one CVE matching pass"]
         VerifyCves["verify-cves\n(reads cve_matches)"]
         Classify["classify"]
         Sovereignty["sovereignty"]
-        UpdateCves --> FetchFeeds --> VerifyCves --> Classify --> Sovereignty
+        Smtp --> UpdateCves --> FetchFeeds --> VerifyCves --> Classify --> Sovereignty
     end
 
-    Scan & Dns & Tls & Ports & Sub --> Smtp & Detect
-    Smtp & Detect --> UpdateCves
+    Scan & Dns & Tls & Ports & Sub --> Smtp
 
     Sovereignty --> Benchmark["benchmark"]
     Benchmark --> Snap["snapshot\n→ data/snapshots/month=YYYY-MM/"]
@@ -184,12 +178,10 @@ flowchart TD
 Phase 1's five modules have no dependency on each other — `scan`, `dns`, `tls`, `ports`, and
 `subdomains` each write to their own table and hit a different remote service (HTTP, DNS
 resolvers, TLS handshake, arbitrary TCP ports, crt.sh/AXFR), so they're safe to run
-concurrently. The first two post-processing stages are independent too: `smtp-check` reads only
-`ports_info` (ports 25/587) and writes `smtp_tls_check`, while `detect` reads `scan`'s
-`status_code` and writes `software_detections` — no table in common, so they run side by side
-(Phase 2a). Starting each one as soon as its own input is ready would gain nothing, since `scan`
-is the last Phase 1 module to finish anyway. From there on it is a real chain (Phase 2b):
-`update-cves` needs `detect`'s output and `ports_info` banners, `fetch-feeds` (which runs the
+concurrently. `scan` also fingerprints the homepage it fetched (JS libraries, web frameworks,
+WordPress plugins) and writes `software_detections` itself; until 2026-10 a separate `detect`
+stage re-downloaded those 1.6M homepages (6h40m). Phase 2 is a real chain: `smtp-check` reads
+`ports_info` (ports 25/587), `update-cves` needs `software_detections` and `ports_info` banners, `fetch-feeds` (which runs the
 single CVE matching pass) needs the catalog `update-cves` builds, `verify-cves` needs the
 resulting matches, and so on down to `sovereignty`.
 
@@ -204,13 +196,12 @@ attempt — see task notes). `scripts/monthly.sh` selects how Phase 1 actually r
 
 | `SCAN_MODE` | What it does |
 |---|---|
-| `concurrent` (default) | Each Phase 1 module as its own standalone OS process, all five launched at once against the one WAL database, with a barrier that fails the run if any module fails. Local test (60k synthetic domains): 120.5s vs 474.9s sequential — 3.9x faster, zero write contention/corruption. Validated at full scale on the 2026-10 run (2.81M domains, Phase 1 in 4h40m, every stage exit 0). Also runs `smtp-check` and `detect` concurrently after Phase 1. |
+| `concurrent` (default) | Each Phase 1 module as its own standalone OS process, all five launched at once against the one WAL database, with a barrier that fails the run if any module fails. Local test (60k synthetic domains): 120.5s vs 474.9s sequential — 3.9x faster, zero write contention/corruption. Validated at full scale on the 2026-10 run (2.81M domains, Phase 1 in 4h40m, every stage exit 0). |
 | `sequential` | Each Phase 1 module one after another — the most conservative option, same total-time shape as summing every stage's duration. Use if a concurrent run misbehaves in production. |
 | `full` | `helvetiscan full`'s in-process 5-module orchestration — left in for debugging only; do not use for a production run until the hang above is root-caused. |
 
-Phase 2b always runs sequentially regardless of `SCAN_MODE` — there's no dependency structure to
-exploit there. Phase 2a (`smtp-check` ‖ `detect`) is parallel only in `concurrent` mode;
-`sequential` keeps them one after the other. The legacy `SEQUENTIAL_SCAN=1`/`SEQUENTIAL_SCAN=0` toggle still works as a
+Phase 2 always runs sequentially regardless of `SCAN_MODE` — there's no dependency structure to
+exploit there. The legacy `SEQUENTIAL_SCAN=1`/`SEQUENTIAL_SCAN=0` toggle still works as a
 back-compat shim when `SCAN_MODE` is unset. `DOMAINS_LIST` and `PARALLEL_DIVISOR` (the latter
 only applies to `SCAN_MODE=full`) are also overridable via environment variables — see the
 script's own comments for details.
@@ -307,8 +298,9 @@ rsync -av <host>:path/to/helvetiscan/data/snapshots/ ./data/snapshots/
 Run on `finland` (`SCAN_MODE=concurrent`), 2026-10-14 18:55:19 → 2026-10-15 16:14:45 UTC —
 **total wall time 21h 19m** (76,766s), about 3x faster than the 2026-09 run. Two earlier
 attempts that day (12:29 and 14:09 UTC) stopped during Phase 1 and are not counted. This run
-still had `smtp-check` and `detect` back to back; with Phase 2a parallel, the same timings come
-to roughly **17h** (`smtp-check`'s 4h13m disappears behind `detect`'s 6h40m).
+still had a separate `detect` stage; with fingerprinting folded into `scan`, the same timings
+come to roughly **14h40m** (minus `detect`'s 6h40m, plus whatever reading up to 256 KB per
+homepage instead of 128 KB adds to `scan`).
 
 | Stage | 2026-09 (sequential) | 2026-10 (concurrent) |
 |---|---|---|

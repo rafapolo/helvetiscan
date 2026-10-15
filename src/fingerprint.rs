@@ -1,7 +1,8 @@
 //! Passive software fingerprinting: JavaScript libraries, web frameworks, and WordPress
 //! plugins detected from a page's HTML and response headers. The parsers here are pure and
-//! unit-tested; `cmd_detect` fetches each domain's homepage and stores what they find into
-//! `software_detections`, which `cve.rs` then matches against the CVE catalog.
+//! unit-tested. `scan` runs them on the homepage it already fetched and stores the result in
+//! `software_detections`, which `cve.rs` then matches against the CVE catalog. `cmd_detect` is
+//! the standalone backfill: it re-fetches domains that have no detections yet.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -10,7 +11,9 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 
 const HTTP_TIMEOUT: Duration = Duration::from_secs(8);
-const MAX_BODY: usize = 256 * 1024;
+/// How much of a homepage the fingerprinters look at (scan reads this far even when its own
+/// `--max-kbytes` is smaller).
+pub(crate) const MAX_BODY: usize = 256 * 1024;
 
 /// A single detection: (kind, name, version).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -172,6 +175,28 @@ pub(crate) fn detect_wp_plugins(html: &str) -> Vec<Detection> {
 }
 
 /// Run all fingerprint parsers over one response.
+/// Builds the header blob `detect_web_frameworks` reads from a response's headers.
+pub(crate) fn headers_blob(headers: &reqwest::header::HeaderMap) -> String {
+    let header = |name: &str| -> &str {
+        headers.get(name).and_then(|v| v.to_str().ok()).unwrap_or("")
+    };
+    format!(
+        "server: {}\nx-powered-by: {}\nx-aspnet-version: {}\nx-runtime: {}\nx-nextjs-cache: {}",
+        header("server"), header("x-powered-by"), header("x-aspnet-version"),
+        header("x-runtime"), header("x-nextjs-cache"),
+    )
+}
+
+/// All `set-cookie` values joined with "; ", as `detect_web_frameworks` expects.
+pub(crate) fn cookies_blob(headers: &reqwest::header::HeaderMap) -> String {
+    headers
+        .get_all("set-cookie")
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
 pub(crate) fn fingerprint_response(html: &str, headers_blob: &str, cookies: &str) -> Vec<Detection> {
     let mut out = detect_js_libraries(html);
     out.extend(detect_web_frameworks(headers_blob, cookies));
@@ -179,8 +204,33 @@ pub(crate) fn fingerprint_response(html: &str, headers_blob: &str, cookies: &str
     out
 }
 
+/// Replaces each scanned domain's detections with the ones found this time, in one transaction.
+/// Every domain in the batch loses its old rows, including domains whose fetch failed, so a site
+/// that went offline stops feeding CVE matching with last month's software.
+pub(crate) fn flush_detections_batch(
+    conn: &rusqlite::Connection,
+    batch: &mut Vec<(String, Vec<Detection>)>,
+) -> Result<()> {
+    if batch.is_empty() {
+        return Ok(());
+    }
+    let tx = conn.unchecked_transaction()?;
+    {
+        let mut del = tx.prepare_cached("DELETE FROM software_detections WHERE domain = ?1")?;
+        for (domain, _) in batch.iter() {
+            del.execute([domain])?;
+        }
+    }
+    for (domain, dets) in batch.iter() {
+        store_detections(&tx, domain, dets)?;
+    }
+    tx.commit()?;
+    batch.clear();
+    Ok(())
+}
+
 fn store_detections(conn: &rusqlite::Connection, domain: &str, dets: &[Detection]) -> Result<()> {
-    let mut stmt = conn.prepare(
+    let mut stmt = conn.prepare_cached(
         "INSERT INTO software_detections (domain, kind, name, version, detected_at)
          VALUES (?1, ?2, ?3, ?4, datetime('now'))
          ON CONFLICT(domain, kind, name) DO UPDATE SET
@@ -196,21 +246,8 @@ async fn fetch_fingerprints(client: &reqwest::Client, domain: &str) -> Option<Ve
     for scheme in ["https", "http"] {
         let url = format!("{scheme}://{domain}/");
         let Ok(resp) = client.get(&url).send().await else { continue };
-        let header = |name: &str| -> String {
-            resp.headers().get(name).and_then(|v| v.to_str().ok()).unwrap_or("").to_string()
-        };
-        let headers_blob = format!(
-            "server: {}\nx-powered-by: {}\nx-aspnet-version: {}\nx-runtime: {}\nx-nextjs-cache: {}",
-            header("server"), header("x-powered-by"), header("x-aspnet-version"),
-            header("x-runtime"), header("x-nextjs-cache"),
-        );
-        let cookies = resp
-            .headers()
-            .get_all("set-cookie")
-            .iter()
-            .filter_map(|v| v.to_str().ok())
-            .collect::<Vec<_>>()
-            .join("; ");
+        let headers_blob = headers_blob(resp.headers());
+        let cookies = cookies_blob(resp.headers());
         let body = resp.text().await.unwrap_or_default();
         let body = crate::cve_verify::truncate_on_char_boundary(&body, MAX_BODY);
         return Some(fingerprint_response(body, &headers_blob, &cookies));
@@ -293,6 +330,62 @@ pub(crate) async fn cmd_detect(db: PathBuf, concurrency: usize, limit: Option<us
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn det(kind: &'static str, name: &str, version: Option<&str>) -> Detection {
+        Detection { kind, name: name.into(), version: version.map(Into::into) }
+    }
+
+    #[test]
+    fn flush_detections_batch_replaces_each_domains_set() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::schema::ensure_schema(&conn).unwrap();
+        conn.execute_batch(
+            "INSERT INTO software_detections (domain, kind, name, version) VALUES
+               ('a.ch', 'js_lib', 'jquery', '1.12.4'),
+               ('a.ch', 'wp_plugin', 'old-plugin', NULL),
+               ('gone.ch', 'js_lib', 'moment', '2.29.1'),
+               ('untouched.ch', 'js_lib', 'lodash', '4.17.21');",
+        )
+        .unwrap();
+
+        let mut batch = vec![
+            ("a.ch".to_string(), vec![det("js_lib", "jquery", Some("3.7.1"))]),
+            // fetch failed this month: its old detections must not survive
+            ("gone.ch".to_string(), vec![]),
+        ];
+        flush_detections_batch(&conn, &mut batch).unwrap();
+        assert!(batch.is_empty());
+
+        let rows: Vec<(String, String, Option<String>)> = conn
+            .prepare("SELECT domain, name, version FROM software_detections ORDER BY domain, name")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+        assert_eq!(
+            rows,
+            vec![
+                ("a.ch".into(), "jquery".into(), Some("3.7.1".into())),
+                ("untouched.ch".into(), "lodash".into(), Some("4.17.21".into())),
+            ]
+        );
+    }
+
+    #[test]
+    fn header_and_cookie_blobs_feed_framework_detection() {
+        use reqwest::header::{HeaderMap, HeaderValue};
+        let mut h = HeaderMap::new();
+        h.insert("x-powered-by", HeaderValue::from_static("Express"));
+        h.append("set-cookie", HeaderValue::from_static("a=1"));
+        h.append("set-cookie", HeaderValue::from_static("laravel_session=x"));
+        assert!(headers_blob(&h).contains("x-powered-by: Express"));
+        assert_eq!(cookies_blob(&h), "a=1; laravel_session=x");
+        let found = fingerprint_response("", &headers_blob(&h), &cookies_blob(&h));
+        let names: Vec<&str> = found.iter().map(|d| d.name.as_str()).collect();
+        assert!(names.contains(&"express"), "{names:?}");
+        assert!(names.contains(&"laravel"), "{names:?}");
+    }
 
     fn names(dets: &[Detection]) -> Vec<(&str, Option<&str>)> {
         dets.iter().map(|d| (d.name.as_str(), d.version.as_deref())).collect()

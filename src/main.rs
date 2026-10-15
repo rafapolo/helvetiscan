@@ -1136,7 +1136,7 @@ async fn cmd_full_pipeline(args: FullArgs) -> Result<()> {
     step2!("smtp-check",  smtp_check::cmd_smtp_check(SmtpCheckArgs {
         db: db.clone(), ..SmtpCheckArgs::default()
     }, None, None).await);
-    step2!("detect",      fingerprint::cmd_detect(db.clone(), 100, None).await);
+    // No separate detect step: `scan` (Phase 1) already fingerprinted every homepage it fetched.
     step2!("update-cves", cve::cmd_update_cves(db.clone(), false).await);
     step2!("verify-cves", cve_verify::cmd_verify_cves(db.clone(), 100, None, false, false, false, 30, 0.0).await);
     step2!("classify",    classify::cmd_classify(db.clone()).await);

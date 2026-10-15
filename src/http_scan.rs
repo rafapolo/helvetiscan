@@ -171,7 +171,8 @@ pub(crate) async fn cmd_scan(
 
 fn build_client(args: &ScanArgs, resolver: hickory_resolver::TokioResolver) -> Result<Client> {
     let mut default_headers = HeaderMap::new();
-    let max_bytes = args.max_bytes();
+    // Read far enough for the fingerprinters too; title/body_hash/cms still only see max_bytes.
+    let max_bytes = args.max_bytes().max(crate::fingerprint::MAX_BODY);
     if max_bytes >= 1 {
         let hi = max_bytes - 1;
         let range = format!("bytes=0-{hi}");
@@ -303,8 +304,10 @@ fn writer_loop_db(
 
     let mut batch: Vec<Row> = Vec::with_capacity(BATCH_SIZE);
     let mut headers_batch: Vec<HttpHeadersRow> = Vec::with_capacity(BATCH_SIZE);
+    let mut detections_batch: Vec<(String, Vec<crate::fingerprint::Detection>)> =
+        Vec::with_capacity(BATCH_SIZE);
 
-    while let Some((row, headers)) = result_rx.blocking_recv() {
+    while let Some((mut row, headers)) = result_rx.blocking_recv() {
         if row.status_code == Some(200) {
             progress.ok.fetch_add(1, Ordering::Relaxed);
         }
@@ -314,6 +317,7 @@ fn writer_loop_db(
         if let Some(h) = headers {
             headers_batch.push(h);
         }
+        detections_batch.push((row.domain.clone(), std::mem::take(&mut row.detections)));
         batch.push(row);
         progress.completed.fetch_add(1, Ordering::Relaxed);
         if batch.len() >= BATCH_SIZE {
@@ -323,6 +327,10 @@ fn writer_loop_db(
             }
             if let Err(e) = flush_http_headers_batch(&conn, &mut headers_batch) {
                 crate::shared::append_error_log(&db_path, &format!("http flush_http_headers_batch: {e:#}"));
+                return Err(e);
+            }
+            if let Err(e) = crate::fingerprint::flush_detections_batch(&conn, &mut detections_batch) {
+                crate::shared::append_error_log(&db_path, &format!("http flush_detections_batch: {e:#}"));
                 return Err(e);
             }
         }
@@ -339,6 +347,10 @@ fn writer_loop_db(
             crate::shared::append_error_log(&db_path, &format!("http flush_http_headers_batch (final): {e:#}"));
             return Err(e);
         }
+    }
+    if let Err(e) = crate::fingerprint::flush_detections_batch(&conn, &mut detections_batch) {
+        crate::shared::append_error_log(&db_path, &format!("http flush_detections_batch (final): {e:#}"));
+        return Err(e);
     }
 
     let _ = done_tx.send(());
@@ -500,6 +512,7 @@ pub(crate) async fn fetch_domain(
         redirect_chain: vec![],
         cms: None,
         country_code: None,
+        detections: vec![],
     }, None)
 }
 
@@ -631,8 +644,10 @@ async fn fetch_url_inner(
     let cors_origin            = hdr("access-control-allow-origin");
     let referrer_policy        = hdr("referrer-policy");
     let permissions_policy     = hdr("permissions-policy");
+    let fp_headers = crate::fingerprint::headers_blob(resp.headers());
+    let fp_cookies = crate::fingerprint::cookies_blob(resp.headers());
 
-    let max_bytes = args.max_bytes();
+    let max_bytes = args.max_bytes().max(crate::fingerprint::MAX_BODY);
     let mut body: Vec<u8> = Vec::with_capacity(max_bytes.min(65_536));
     let mut body_err_kind: Option<ErrorKind> = None;
     let mut stream = resp.bytes_stream();
@@ -653,6 +668,16 @@ async fn fetch_url_inner(
         let take = remaining.min(chunk.len());
         body.extend_from_slice(&chunk[..take]);
     }
+
+    // The fingerprinters get the whole read (up to fingerprint::MAX_BODY); everything else keeps
+    // seeing the first --max-kbytes, so body_hash/title don't shift between months.
+    let detections = if status_u16 < 500 {
+        let html = String::from_utf8_lossy(&body);
+        crate::fingerprint::fingerprint_response(&html, &fp_headers, &fp_cookies)
+    } else {
+        Vec::new()
+    };
+    body.truncate(args.max_bytes());
 
     if let Some(ref base) = args.save_md {
         if status.is_success() && !body.is_empty() {
@@ -692,6 +717,7 @@ async fn fetch_url_inner(
         redirect_chain: vec![],
         cms,
         country_code: None,
+        detections,
     };
 
     let headers = HttpHeadersRow {

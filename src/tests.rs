@@ -104,6 +104,7 @@ fn flush_batch_roundtrip() {
         redirect_chain: vec![],
         cms: None,
         country_code: None,
+        detections: vec![],
     }];
 
     flush_batch(&conn, &mut batch, None).unwrap();
@@ -156,6 +157,7 @@ fn flush_batch_persists_preset_country_code() {
         redirect_chain: vec![],
         cms: None,
         country_code: Some("CH".into()),
+        detections: vec![],
     }];
 
     flush_batch(&conn, &mut batch, None).unwrap();
@@ -205,6 +207,7 @@ fn flush_batch_enriches_country_from_mmdb() {
         redirect_chain: vec![],
         cms: None,
         country_code: None,
+        detections: vec![],
     }];
 
     flush_batch(&conn, &mut batch, Some(&reader)).unwrap();
@@ -253,6 +256,7 @@ fn flush_batch_invalid_ip_leaves_country_none() {
         redirect_chain: vec![],
         cms: None,
         country_code: None,
+        detections: vec![],
     }];
 
     flush_batch(&conn, &mut batch, Some(&reader)).unwrap();

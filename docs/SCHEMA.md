@@ -323,7 +323,10 @@ NVD API, OSV.dev, and the GitHub Advisory Database.
 
 ### `software_detections`
 
-Populated by `helvetiscan detect` (also run inside the `full` pipeline before `update-cves`).
+Populated by `helvetiscan scan`, from the homepage body (first 256 KB) and headers it already
+fetched: each scanned domain's rows are replaced, so a domain whose fetch failed loses last
+month's detections. `helvetiscan detect` is the standalone backfill — it re-fetches domains that
+have no rows here.
 Passive fingerprints of client- and server-side software found in a page's HTML and headers,
 matched against `cve_catalog` by `name = technology`. Composite primary key `(domain, kind, name)`.
 

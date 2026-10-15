@@ -132,6 +132,9 @@ pub(crate) struct Row {
     pub(crate) redirect_chain: Vec<String>,
     pub(crate) cms: Option<String>,
     pub(crate) country_code: Option<String>,
+    /// JS libraries / frameworks / WP plugins found in this response, written to
+    /// `software_detections` (replacing the domain's previous set) by the scan writer.
+    pub(crate) detections: Vec<crate::fingerprint::Detection>,
 }
 
 #[derive(Debug, Clone)]
